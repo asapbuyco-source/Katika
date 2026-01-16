@@ -36,8 +36,6 @@ interface LudoGameState {
 const START_INDEX = { Red: 0, Yellow: 26 };
 
 // Visual coordinates for the board (Simplified Grid Mapping)
-// We map the 0-51 track steps to CSS Grid coordinates or relative positions.
-// This is a simplified path map for visual rendering.
 const TRACK_COORDS = [
     // Red Leg (0-5)
     {x:1, y:6}, {x:2, y:6}, {x:3, y:6}, {x:4, y:6}, {x:5, y:6}, {x:6, y:5},
@@ -81,11 +79,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
 
+  // Check if opponent is a bot
+  const isBotGame = (table as any).guest?.id === 'bot' || (table as any).host?.id === 'bot';
+
   // Initialize & Subscribe
   useEffect(() => {
       // Determine Role
-      // Note: In findOrCreateMatch, we save host object. user.id comparison handles identity.
-      const isHostUser = table.host?.id === user.id || (table as any).host?.uid === user.id; // handle partial firebase user obj
+      const isHostUser = table.host?.id === user.id || (table as any).host?.uid === user.id; 
       setIsHost(isHostUser);
       setMyColor(isHostUser ? 'Red' : 'Yellow');
 
@@ -125,6 +125,127 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
 
   const addLog = (msg: string, status: 'secure' | 'alert' = 'secure') => {
       setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
+  };
+
+  // --- BOT LOGIC ---
+  useEffect(() => {
+      if (!isBotGame || !isHost || !gameState) return;
+
+      const botColor = myColor === 'Red' ? 'Yellow' : 'Red';
+      
+      // If it's Bot's turn
+      if (gameState.currentTurn === botColor && !gameState.winner) {
+          if (!gameState.diceRolled) {
+              // 1. Roll Dice
+              setTimeout(() => {
+                  const roll = Math.floor(Math.random() * 6) + 1;
+                  const newState = { ...gameState, diceValue: roll, diceRolled: true };
+                  setGameState(newState);
+                  updateGameState(table.id, newState);
+                  playSFX('dice');
+              }, 1000);
+          } else {
+              // 2. Move Piece (or Pass)
+              setTimeout(() => {
+                  executeBotMove(gameState, botColor);
+              }, 1500);
+          }
+      }
+  }, [gameState, isBotGame, isHost, myColor]);
+
+  const executeBotMove = async (state: LudoGameState, botColor: PlayerColor) => {
+      if (!state.diceValue) return;
+      const roll = state.diceValue;
+      
+      // Find valid moves
+      const myPieces = state.pieces.filter(p => p.color === botColor);
+      const movablePieces = myPieces.filter(p => canPieceMove(p, roll));
+
+      if (movablePieces.length === 0) {
+          // No moves, pass turn
+          await passTurn(state);
+          return;
+      }
+
+      // Simple AI Strategy:
+      // 1. Capture if possible
+      // 2. Move out of base (Roll 6)
+      // 3. Move piece closest to home (simplified)
+      // 4. Random valid move
+      
+      let selectedPiece = movablePieces[0];
+      
+      // Heuristic: Prefer getting out of base
+      const basePiece = movablePieces.find(p => p.status === 'BASE');
+      if (basePiece && roll === 6) selectedPiece = basePiece;
+      
+      // Execute Move logic (reusing simplified handlePieceClick logic but adapted)
+      playSFX('move');
+      
+      // Calculate new position
+      let newStatus = selectedPiece.status;
+      let newSteps = selectedPiece.stepsMoved;
+
+      if (selectedPiece.status === 'BASE') {
+          newStatus = 'ACTIVE';
+          newSteps = 0;
+      } else {
+          newSteps += roll;
+          if (newSteps >= 57) { 
+             newStatus = 'FINISHED';
+             newSteps = 57;
+             playSFX('win');
+          }
+      }
+
+      // Handle Captures (Collision)
+      let updatedPieces = state.pieces.map(p => {
+          if (p.id === selectedPiece.id) {
+              return { ...p, status: newStatus, stepsMoved: newSteps } as Piece;
+          }
+          return p;
+      });
+
+      if (newStatus === 'ACTIVE' && newSteps < 51) {
+          const myAbsPos = getAbsolutePosition(botColor, newSteps);
+          const isSafe = SAFE_SPOTS.includes(myAbsPos);
+
+          if (!isSafe) {
+              updatedPieces = updatedPieces.map(p => {
+                  if (p.color !== botColor && p.status === 'ACTIVE') {
+                      const oppAbsPos = getAbsolutePosition(p.color, p.stepsMoved);
+                      if (oppAbsPos === myAbsPos) {
+                          playSFX('capture');
+                          addLog("Bot Captured!", "alert");
+                          return { ...p, status: 'BASE', stepsMoved: 0 };
+                      }
+                  }
+                  return p;
+              });
+          }
+      }
+
+      // Check Win
+      const myFinished = updatedPieces.filter(p => p.color === botColor && p.status === 'FINISHED').length;
+      if (myFinished === 4) {
+          const finalState = { ...state, pieces: updatedPieces, winner: botColor };
+          await updateGameState(table.id, finalState);
+          await setGameResult(table.id, 'bot'); // Bot wins
+          return;
+      }
+
+      // Next Turn
+      const bonusTurn = roll === 6;
+      const nextTurnState: LudoGameState = {
+          ...state,
+          pieces: updatedPieces,
+          diceRolled: false,
+          diceValue: roll,
+          currentTurn: bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red')
+      };
+
+      setGameState(nextTurnState);
+      await updateGameState(table.id, nextTurnState);
   };
 
   // --- GAME ACTIONS ---
@@ -482,7 +603,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                         )
                     ) : (
                         <div className="text-slate-500 text-sm font-bold flex items-center gap-2">
-                             Opponent's Turn...
+                             {isBotGame && gameState.currentTurn !== myColor ? "Bot Thinking..." : "Opponent's Turn..."}
                              {gameState.diceRolled && gameState.diceValue && (
                                  <span className="w-8 h-8 bg-slate-700 rounded flex items-center justify-center text-white font-bold">
                                      {gameState.diceValue}
@@ -496,10 +617,12 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
            {/* OPPONENT INDICATOR */}
            <div className={`flex items-center gap-3 flex-row-reverse ${gameState.currentTurn !== myColor ? 'opacity-100' : 'opacity-50'}`}>
                 <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center ${myColor !== 'Red' ? 'bg-red-500 border-red-400' : 'bg-yellow-500 border-yellow-400'}`}>
-                    <img src={table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full opacity-80" />
+                    <img src={isBotGame ? (table as any).guest?.avatar || (table as any).host?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full opacity-80" />
                 </div>
                 <div className="text-right">
-                    <div className="text-white font-bold text-sm">{table.host?.name || "Opponent"}</div>
+                    <div className="text-white font-bold text-sm">
+                        {isBotGame ? "Vantage AI" : (table.host?.name || "Opponent")}
+                    </div>
                     <div className="text-[10px] text-slate-400 uppercase tracking-widest">{myColor === 'Red' ? 'Yellow' : 'Red'}</div>
                 </div>
            </div>

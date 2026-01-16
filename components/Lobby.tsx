@@ -1,11 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2 } from 'lucide-react';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
-import { searchUsers } from '../services/firebase';
+import { searchUsers, createBotMatch } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LobbyProps {
@@ -107,6 +107,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       } else {
           onQuickMatch(tier.stake, selectedGame);
       }
+  };
+
+  const handleBotPlay = async () => {
+      playSFX('click');
+      if (!selectedGame) return;
+      onQuickMatch(-1, selectedGame);
   };
 
   const handleDeposit = async () => {
@@ -461,20 +467,30 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                   className="space-y-6"
               >
                   {/* Back Button & Selected Game Indicator */}
-                  <div className="flex items-center gap-4 mb-8">
+                  <div className="flex items-center justify-between mb-8">
+                      <div className="flex items-center gap-4">
+                          <button 
+                              onClick={handleBackToGames}
+                              className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                          >
+                              <ArrowLeft size={20} />
+                          </button>
+                          <motion.div 
+                              layoutId={`game-card-${activeGameData.id}`} 
+                              className={`flex items-center gap-3 px-4 py-2 rounded-xl border bg-royal-900/50 ${activeGameData.border}`}
+                          >
+                              <activeGameData.icon size={20} className={activeGameData.color} />
+                              <span className="font-bold text-white">{activeGameData.name}</span>
+                          </motion.div>
+                      </div>
+                      
+                      {/* BOT PRACTICE BUTTON */}
                       <button 
-                          onClick={handleBackToGames}
-                          className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                          onClick={handleBotPlay}
+                          className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
                       >
-                          <ArrowLeft size={20} />
+                          <Bot size={16} /> Practice vs AI
                       </button>
-                      <motion.div 
-                          layoutId={`game-card-${activeGameData.id}`} 
-                          className={`flex items-center gap-3 px-4 py-2 rounded-xl border bg-royal-900/50 ${activeGameData.border}`}
-                      >
-                          <activeGameData.icon size={20} className={activeGameData.color} />
-                          <span className="font-bold text-white">{activeGameData.name}</span>
-                      </motion.div>
                   </div>
 
                   {/* Tiers Grid */}

@@ -6,7 +6,6 @@ import {
   signInWithPopup, 
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
-  onAuthStateChanged,
   signOut as firebaseSignOut,
   User as FirebaseUser
 } from "firebase/auth";
@@ -59,21 +58,13 @@ export const signInWithGoogle = async () => {
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
-    try {
-        const result = await createUserWithEmailAndPassword(auth, email, pass);
-        return result.user;
-    } catch (error: any) {
-        throw error;
-    }
+    const result = await createUserWithEmailAndPassword(auth, email, pass);
+    return result.user;
 };
 
 export const loginWithEmail = async (email: string, pass: string) => {
-    try {
-        const result = await signInWithEmailAndPassword(auth, email, pass);
-        return result.user;
-    } catch (error: any) {
-        throw error;
-    }
+    const result = await signInWithEmailAndPassword(auth, email, pass);
+    return result.user;
 };
 
 export const logout = async () => {
@@ -126,8 +117,7 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
     
-    // Simple client-side filtering for demo since Firestore full-text search requires third-party (Algolia/Typesense)
-    // We fetch a batch of recent users and filter. In production, use Algolia.
+    // Client-side filtering for demo (production would use Algolia/Typesense)
     const q = query(collection(db, "users"), limit(50)); 
     const snapshot = await getDocs(q);
     
@@ -144,6 +134,17 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
         }
     });
     return results;
+};
+
+export const getAllUsers = async (): Promise<User[]> => {
+    try {
+        const q = query(collection(db, "users"), limit(100));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => doc.data() as User);
+    } catch (e) {
+        console.error("Failed to fetch users", e);
+        return [];
+    }
 };
 
 // --- TRANSACTION MANAGEMENT ---
@@ -185,7 +186,6 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
 
 // --- REAL-TIME GAME MATCHMAKING & STATE ---
 
-// Find an open table or create one
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
     // 1. Look for waiting games
     const gamesRef = collection(db, "games");
@@ -236,14 +236,46 @@ export const findOrCreateMatch = async (user: User, gameType: string, stake: num
         players: [user.id],
         createdAt: serverTimestamp(),
         turn: user.id, // Host starts first usually
-        gameState: {} // Initial empty state, will be populated by game component
+        gameState: {} // Initial empty state
     };
 
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
 };
 
-// Subscribe to game changes
+export const createBotMatch = async (user: User, gameType: string): Promise<string> => {
+    const botProfile: PlayerProfile = {
+        name: "Vantage AI",
+        avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000",
+        elo: 1200,
+        rankTier: 'Silver'
+    };
+
+    const newGame = {
+        gameType,
+        stake: 0, // Practice games usually 0 or simulated
+        status: "active",
+        host: {
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            elo: user.elo,
+            rankTier: user.rankTier
+        },
+        guest: {
+            id: 'bot',
+            ...botProfile
+        },
+        players: [user.id, 'bot'],
+        createdAt: serverTimestamp(),
+        turn: user.id,
+        gameState: {}
+    };
+
+    const docRef = await addDoc(collection(db, "games"), newGame);
+    return docRef.id;
+};
+
 export const subscribeToGame = (gameId: string, callback: (data: any) => void) => {
     return onSnapshot(doc(db, "games", gameId), (doc) => {
         if (doc.exists()) {
@@ -252,7 +284,6 @@ export const subscribeToGame = (gameId: string, callback: (data: any) => void) =
     });
 };
 
-// Update game state (generic)
 export const updateGameState = async (gameId: string, newState: any) => {
     const gameRef = doc(db, "games", gameId);
     await updateDoc(gameRef, {
@@ -261,7 +292,6 @@ export const updateGameState = async (gameId: string, newState: any) => {
     });
 };
 
-// Update turn
 export const updateTurn = async (gameId: string, nextPlayerId: string) => {
     const gameRef = doc(db, "games", gameId);
     await updateDoc(gameRef, {
@@ -269,7 +299,6 @@ export const updateTurn = async (gameId: string, nextPlayerId: string) => {
     });
 };
 
-// End Game
 export const setGameResult = async (gameId: string, winnerId: string | null) => {
     const gameRef = doc(db, "games", gameId);
     await updateDoc(gameRef, {
@@ -279,8 +308,6 @@ export const setGameResult = async (gameId: string, winnerId: string | null) => 
 };
 
 export const loginAsGuest = async (): Promise<User> => {
-    // For "High-Trust", we discourage guests, but keeping for dev fallback
-    // We create an anonymous auth user in Firebase actually
     const { signInAnonymously } = await import("firebase/auth");
     const cred = await signInAnonymously(auth);
     return syncUserProfile(cred.user);

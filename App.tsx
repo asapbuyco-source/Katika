@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -18,9 +19,8 @@ import { HowItWorks } from './components/HowItWorks';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GameResultOverlay } from './components/GameResultOverlay';
 import { ChallengeRequestModal } from './components/ChallengeRequestModal';
-import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction } from './services/firebase';
+import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, createBotMatch } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { MOCK_PLAYERS } from './services/mockData';
 import { AnimatePresence } from 'framer-motion';
 
 export default function App() {
@@ -91,36 +91,41 @@ export default function App() {
       }
   }, [user, currentView, authLoading]);
 
-  // 3. Challenge Simulation Effect
-  useEffect(() => {
-      if (!user) return;
-      
-      // Simulate an incoming challenge 15 seconds after app load to demonstrate UI
-      const timer = setTimeout(() => {
-          // Only trigger if we aren't already in a game
-          if (currentView !== 'game' && currentView !== 'matchmaking' && !incomingChallenge) {
-              const challenger = MOCK_PLAYERS[Math.floor(Math.random() * MOCK_PLAYERS.length)];
-              setIncomingChallenge({
-                  id: `ch-${Date.now()}`,
-                  sender: challenger,
-                  gameType: 'Ludo',
-                  stake: 2000,
-                  timestamp: Date.now()
-              });
-          }
-      }, 15000);
-
-      return () => clearTimeout(timer);
-  }, [user, currentView, incomingChallenge]);
-
   // Finance Top Up Handler (Now handled inside Finance component mostly, but this serves as a fallback or event trigger)
   const handleFinanceTopUp = () => {
       // Balance update is handled via Finance component and Firestore listener
   };
 
-  const startMatchmaking = (stake: number, gameType: string) => {
-      setMatchmakingConfig({ stake, gameType });
-      setView('matchmaking');
+  const startMatchmaking = async (stake: number, gameType: string) => {
+      if (!user) return;
+
+      if (stake === -1) {
+          // BOT MATCH
+          try {
+              const gameId = await createBotMatch(user, gameType);
+              // Fetch game data to construct table
+              // In a real app we might just subscribe, but here we construct a table object
+              // Since createBotMatch creates it, we can fetch it once or trust defaults
+              // We'll trust defaults for speed:
+              const table: Table = {
+                  id: gameId,
+                  gameType: gameType as any,
+                  stake: 0,
+                  players: 2,
+                  maxPlayers: 2,
+                  status: 'active',
+                  host: { id: 'bot', name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000", elo: 1200, rankTier: 'Silver' }
+              };
+              setActiveTable(table);
+              setView('game');
+          } catch (e) {
+              console.error("Failed to create bot match", e);
+              alert("Could not start practice match.");
+          }
+      } else {
+          setMatchmakingConfig({ stake, gameType });
+          setView('matchmaking');
+      }
   };
 
   const cancelMatchmaking = () => {

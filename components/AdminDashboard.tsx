@@ -1,18 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, PlayerProfile } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, AlertTriangle, Ban, CheckCircle, Server, RefreshCw, Lock, Power, Trash2, Check, XCircle } from 'lucide-react';
+import { User } from '../types';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MOCK_PLAYERS } from '../services/mockData';
-
-// Extended type for Admin view management
-interface AdminUser extends PlayerProfile {
-    id: string;
-    balance: number;
-    status: 'Active' | 'Banned';
-    joinDate: string;
-    email: string;
-}
+import { getAllUsers } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
@@ -23,42 +14,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [searchQuery, setSearchQuery] = useState('');
   
   // -- STATE MANAGEMENT --
-  
-  // 1. Users State (Initialized from Mock Data)
-  const [usersList, setUsersList] = useState<AdminUser[]>(() => 
-      MOCK_PLAYERS.map((p, i) => ({
-          ...p,
-          id: `usr-${1000 + i}`,
-          balance: 12500 * (i + 1),
-          status: 'Active' as const, // Explicitly cast to literal type
-          joinDate: new Date(Date.now() - Math.random() * 10000000000).toLocaleDateString(),
-          email: `${p.name.toLowerCase().replace(' ', '.')}@vantage.cm`
-      }))
-  );
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
 
-  // 2. System State
+  // System State
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [activeMatchesCount, setActiveMatchesCount] = useState(142);
-  const [networkTraffic, setNetworkTraffic] = useState(Array.from({ length: 24 }, () => Math.random() * 60 + 20));
+  const [activeMatchesCount, setActiveMatchesCount] = useState(12); // Real app would fetch this count
+  const [networkTraffic] = useState(Array.from({ length: 24 }, () => Math.random() * 60 + 20));
 
-  // 3. Logs State
+  // Logs State
   const [logs, setLogs] = useState([
-      { id: 1, action: "User Ban", target: "Bot_User_99", time: "2 mins ago", type: "critical" },
-      { id: 2, action: "Large Withdrawal", target: "Franck (250,000 FCFA)", time: "15 mins ago", type: "warning" },
-      { id: 3, action: "System Update", target: "v1.4.2 Deployed", time: "1 hour ago", type: "info" },
-      { id: 4, action: "New Admin", target: user.id || "Admin", time: "2 hours ago", type: "success" },
+      { id: 1, action: "System Init", target: "Admin Panel Loaded", time: "Just now", type: "info" }
   ]);
 
-  // Load Maintenance State
+  // Load Initial Data
   useEffect(() => {
       const isMaint = localStorage.getItem('vantage_maintenance') === 'true';
       setMaintenanceMode(isMaint);
-      if (isMaint) setActiveMatchesCount(0);
+      
+      const fetchUsers = async () => {
+          setLoadingUsers(true);
+          try {
+              const users = await getAllUsers();
+              setUsersList(users);
+          } catch (e) {
+              console.error(e);
+          }
+          setLoadingUsers(false);
+      };
+      fetchUsers();
   }, []);
 
   // -- ACTIONS --
 
-  const addLog = (action: string, target: string, type: 'critical' | 'warning' | 'info' | 'success') => {
+  const addLog = (action: string, target: string, type: string) => {
       const newLog = {
           id: Date.now(),
           action,
@@ -69,17 +58,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       setLogs(prev => [newLog, ...prev]);
   };
 
-  const toggleUserStatus = (userId: string) => {
-      setUsersList(prev => prev.map(u => {
-          if (u.id === userId) {
-              const newStatus = u.status === 'Active' ? 'Banned' : 'Active';
-              addLog(newStatus === 'Banned' ? "User Banned" : "User Unbanned", u.name, newStatus === 'Banned' ? 'critical' : 'success');
-              return { ...u, status: newStatus };
-          }
-          return u;
-      }));
-  };
-
   const handleMaintenanceToggle = () => {
       const newState = !maintenanceMode;
       setMaintenanceMode(newState);
@@ -87,57 +65,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
   };
 
-  const handleFlushCache = () => {
-      addLog("System Cache", "Flushed Successfully", "info");
-      // Visual feedback simulation
-      const btn = document.getElementById('flush-btn');
-      if(btn) {
-          btn.classList.add('animate-spin');
-          setTimeout(() => btn.classList.remove('animate-spin'), 1000);
-      }
-      alert("System Cache Flushed Successfully.");
-  };
-
-  const handleEmergencyShutdown = () => {
-      if(window.confirm("CRITICAL WARNING: Are you sure you want to disconnect all players and halt servers? This will refund all active stakes.")) {
-           
-           let refundedCount = 0;
-           let totalRefunded = 0;
-
-           // Simulate refunds for a subset of users who might be in a game
-           setUsersList(prev => prev.map(u => {
-               // 30% chance a user is in a match for simulation
-               if (Math.random() < 0.3) {
-                   const stake = [1000, 5000, 10000][Math.floor(Math.random() * 3)];
-                   refundedCount++;
-                   totalRefunded += stake;
-                   return { ...u, balance: u.balance + stake };
-               }
-               return u;
-           }));
-
-           setActiveMatchesCount(0);
-           setMaintenanceMode(true);
-           localStorage.setItem('vantage_maintenance', 'true');
-           
-           addLog("Emergency Shutdown", `Refunded ${totalRefunded.toLocaleString()} FCFA to ${refundedCount} active players.`, "critical");
-           alert(`Emergency Shutdown Initiated.\n\nSessions Terminated: ${refundedCount}\nTotal Refunded: ${totalRefunded.toLocaleString()} FCFA\n\nMaintenance Mode is now ACTIVE.`);
-      }
-  };
-
   // Filter Users
   const filteredUsers = usersList.filter(u => 
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-      u.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase())
+      u.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Stats Derived from State
+  // Stats
   const stats = [
       { label: 'Total Revenue', value: '15.4M', unit: 'FCFA', icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10' },
       { label: 'Registered Users', value: usersList.length.toString(), unit: 'Total', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
       { label: 'Active Matches', value: maintenanceMode ? '0' : activeMatchesCount.toString(), unit: 'Live', icon: Activity, color: 'text-gold-400', bg: 'bg-gold-500/10' },
-      { label: 'Banned Users', value: usersList.filter(u => u.status === 'Banned').length.toString(), unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
+      { label: 'Banned Users', value: '0', unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
   ];
 
   return (
@@ -240,7 +179,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                         <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
                                             log.type === 'critical' ? 'bg-red-500 shadow-[0_0_8px_red]' :
                                             log.type === 'warning' ? 'bg-yellow-500' :
-                                            log.type === 'success' ? 'bg-green-500' : 'bg-blue-500'
+                                            'bg-blue-500'
                                         }`} />
                                         <div>
                                             <div className="text-sm font-bold text-white">{log.action}</div>
@@ -275,26 +214,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                      </div>
                  </div>
                  <div className="overflow-x-auto">
+                     {loadingUsers ? (
+                         <div className="p-8 text-center text-slate-500">Loading database...</div>
+                     ) : (
                      <table className="w-full text-left">
                          <thead className="bg-royal-950 text-xs uppercase text-slate-500">
                              <tr>
                                  <th className="p-4">User</th>
                                  <th className="p-4">Rank</th>
                                  <th className="p-4">Balance</th>
-                                 <th className="p-4">Status</th>
                                  <th className="p-4 text-right">Actions</th>
                              </tr>
                          </thead>
                          <tbody className="divide-y divide-white/5">
                              {filteredUsers.length > 0 ? (
                                  filteredUsers.map((player) => (
-                                     <tr key={player.id} className={`hover:bg-white/5 transition-colors ${player.status === 'Banned' ? 'bg-red-500/5' : ''}`}>
+                                     <tr key={player.id} className="hover:bg-white/5 transition-colors">
                                          <td className="p-4">
                                              <div className="flex items-center gap-3">
-                                                 <img src={player.avatar} className={`w-8 h-8 rounded-full ${player.status === 'Banned' ? 'grayscale opacity-50' : ''}`} alt="" />
+                                                 <img src={player.avatar} className="w-8 h-8 rounded-full" alt="" />
                                                  <div>
                                                      <div className="font-bold text-sm text-white">{player.name}</div>
-                                                     <div className="text-xs text-slate-500">{player.email}</div>
+                                                     <div className="text-xs text-slate-500">{player.id.substring(0, 8)}...</div>
                                                  </div>
                                              </div>
                                          </td>
@@ -308,35 +249,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                              </span>
                                          </td>
                                          <td className="p-4 font-mono text-sm text-white">
-                                             <AnimatePresence mode='popLayout'>
-                                                 <motion.span 
-                                                    key={player.balance}
-                                                    initial={{ opacity: 0.5, scale: 1.1 }}
-                                                    animate={{ opacity: 1, scale: 1 }}
-                                                    className={player.balance > 12500 ? "text-green-400 font-bold" : ""}
-                                                 >
-                                                     {player.balance.toLocaleString()} FCFA
-                                                 </motion.span>
-                                             </AnimatePresence>
-                                         </td>
-                                         <td className="p-4">
-                                             <span className={`flex items-center gap-1.5 text-xs font-bold ${player.status === 'Active' ? 'text-green-400' : 'text-red-400'}`}>
-                                                 <span className={`w-1.5 h-1.5 rounded-full ${player.status === 'Active' ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
-                                                 {player.status}
-                                             </span>
+                                             {player.balance.toLocaleString()} FCFA
                                          </td>
                                          <td className="p-4 text-right">
                                              <div className="flex items-center justify-end gap-2">
-                                                 <button 
-                                                    onClick={() => toggleUserStatus(player.id)}
-                                                    className={`p-2 rounded-lg transition-colors border ${
-                                                        player.status === 'Banned' 
-                                                        ? 'bg-green-500/10 text-green-400 border-green-500/20 hover:bg-green-500/20' 
-                                                        : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'
-                                                    }`} 
-                                                    title={player.status === 'Banned' ? 'Unban User' : 'Ban User'}
-                                                 >
-                                                     {player.status === 'Banned' ? <CheckCircle size={16} /> : <Ban size={16} />}
+                                                 <button className="p-2 rounded-lg transition-colors border bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20" title="Ban User">
+                                                     <Ban size={16} />
                                                  </button>
                                                  <button className="p-2 bg-royal-800 hover:bg-white/10 text-blue-400 rounded-lg transition-colors border border-white/5" title="View Details">
                                                      <Search size={16} />
@@ -347,13 +265,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                  ))
                              ) : (
                                  <tr>
-                                     <td colSpan={5} className="p-8 text-center text-slate-500 text-sm">
+                                     <td colSpan={4} className="p-8 text-center text-slate-500 text-sm">
                                          No users found matching "{searchQuery}"
                                      </td>
                                  </tr>
                              )}
                          </tbody>
                      </table>
+                     )}
                  </div>
              </div>
         )}
@@ -386,24 +305,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                 <div className="text-xs text-slate-500">Reset global game states</div>
                             </div>
                             <button 
-                                onClick={handleFlushCache}
-                                id="flush-btn"
+                                onClick={() => addLog("Cache", "Flushed", "info")}
                                 className="p-2 bg-royal-800 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
                             >
                                 <RefreshCw size={16} />
-                            </button>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20">
-                            <div>
-                                <div className="font-bold text-red-400">Emergency Shutdown</div>
-                                <div className="text-xs text-red-300/70">Disconnect and Refund Players</div>
-                            </div>
-                            <button 
-                                onClick={handleEmergencyShutdown}
-                                className="p-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors shadow-lg shadow-red-500/30"
-                            >
-                                <Power size={16} />
                             </button>
                         </div>
                     </div>
@@ -419,39 +324,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             <CheckCircle size={12} /> Encrypted (SSL)
                         </div>
                         <div className="text-xs text-slate-500 font-mono">
-                            IP: 192.168.1.1 (Cameroon)
-                            <br/>
-                            Auth: Firebase Token (Exp: 55m)
-                        </div>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        <button onClick={() => alert("Downloading logs...")} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white border border-white/5 flex items-center justify-center gap-2">
-                            <Server size={14} /> Audit Logs
-                        </button>
-                        <button onClick={() => alert("API Keys managed via Firebase Console")} className="p-3 bg-white/5 hover:bg-white/10 rounded-xl text-xs font-bold text-white border border-white/5 flex items-center justify-center gap-2">
-                            <Lock size={14} /> API Keys
-                        </button>
-                    </div>
-                    
-                    <div className="mt-6 pt-4 border-t border-white/5">
-                        <div className="text-xs text-slate-500 mb-2 font-bold uppercase">System Health</div>
-                        <div className="space-y-2">
-                            <div className="flex justify-between text-xs">
-                                <span className="text-slate-400">CPU Usage</span>
-                                <span className="text-green-400">12%</span>
-                            </div>
-                            <div className="w-full bg-royal-950 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-green-500 h-full w-[12%]"></div>
-                            </div>
-                            
-                            <div className="flex justify-between text-xs">
-                                <span className="text-slate-400">Memory</span>
-                                <span className="text-yellow-400">45%</span>
-                            </div>
-                            <div className="w-full bg-royal-950 h-1.5 rounded-full overflow-hidden">
-                                <div className="bg-yellow-500 h-full w-[45%]"></div>
-                            </div>
+                            Auth: Firebase Token
                         </div>
                     </div>
                 </div>

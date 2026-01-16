@@ -1,4 +1,5 @@
 
+
 export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin';
 
 export interface User {
@@ -12,6 +13,7 @@ export interface User {
 }
 
 export interface PlayerProfile {
+  id?: string;
   name: string;
   elo: number;
   avatar: string;
