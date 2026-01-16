@@ -250,7 +250,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                       // Don't draw star on colored home runs
                       const isColored = (r===7&&c>0&&c<6) || (c===7&&r>0&&r<6) || (r===7&&c>8&&c<14) || (c===7&&r>8&&r<14);
                       if (!isColored) {
-                          content = <Star size={10} className="text-slate-300" fill="currentColor" />;
+                          content = <Star size={10} className="text-slate-300 w-2 h-2 md:w-3 md:h-3" fill="currentColor" />;
                       }
                   }
               }
@@ -266,18 +266,18 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   };
 
   return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-start md:justify-center p-4 pb-24 md:pb-4 pt-8 md:pt-4">
       
       {/* HEADER */}
-      <div className="w-full max-w-4xl flex justify-between items-center mb-6">
-         <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2">
+      <div className="w-full max-w-4xl flex justify-between items-center mb-4 md:mb-6">
+         <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2 flex-shrink-0">
             <ArrowLeft size={20} /> <span className="hidden md:inline">Leave Table</span>
          </button>
          <div className="flex flex-col items-center">
-             <div className="text-gold-400 font-display font-bold text-xl flex items-center gap-2">
-                 <Lock size={16} /> POT: {(table.stake * 2).toLocaleString()}
+             <div className="text-gold-400 font-display font-bold text-lg md:text-xl flex items-center gap-2">
+                 <Lock size={16} /> <span className="hidden md:inline">POT:</span> {(table.stake * 2).toLocaleString()}
              </div>
-             <div className="text-[10px] text-slate-500 font-mono tracking-widest uppercase">
+             <div className="text-[8px] md:text-[10px] text-slate-500 font-mono tracking-widest uppercase">
                  PROVABLY FAIR
              </div>
          </div>
@@ -288,14 +288,14 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                      {turn.toUpperCase()}
                  </div>
              </div>
-             <div className={`w-3 h-3 rounded-full animate-pulse ${turn === 'Red' ? 'bg-cam-red' : turn === 'Green' ? 'bg-cam-green' : turn === 'Yellow' ? 'bg-cam-yellow' : 'bg-blue-500'}`} />
+             <div className={`w-3 h-3 md:w-4 md:h-4 rounded-full animate-pulse ${turn === 'Red' ? 'bg-cam-red' : turn === 'Green' ? 'bg-cam-green' : turn === 'Yellow' ? 'bg-cam-yellow' : 'bg-blue-500'}`} />
          </div>
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-8 items-center">
+      <div className="flex flex-col lg:flex-row gap-6 md:gap-8 items-center w-full justify-center flex-1">
           
           {/* --- THE BOARD --- */}
-          <div className="relative w-[360px] h-[360px] md:w-[600px] md:h-[600px] bg-royal-900 rounded-xl shadow-2xl p-1 md:p-2 border-4 border-royal-800">
+          <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-xl shadow-2xl p-1 md:p-2 border-4 border-royal-800">
               
               {/* THE GRID CONTAINER */}
               <div className="w-full h-full bg-slate-300 grid grid-cols-15 grid-rows-15 gap-px border border-slate-300">
@@ -304,34 +304,34 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
 
               {/* OVERLAYS: BASES */}
               {/* TL: Red */}
-              <div className="absolute top-[4px] left-[4px] w-[39.5%] h-[39.5%] bg-white p-4">
-                  <div className="w-full h-full bg-cam-red rounded-xl border-[6px] border-cam-red flex items-center justify-center relative shadow-inner">
-                      <div className="w-full h-full bg-white rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
-                          {[0,1,2,3].map(i => <div key={i} className="w-4 h-4 md:w-8 md:h-8 rounded-full bg-cam-red/20 shadow-inner" />)}
+              <div className="absolute top-[2%] left-[2%] w-[38%] h-[38%] bg-white p-[2%]">
+                  <div className="w-full h-full bg-cam-red rounded-lg md:rounded-xl border-4 md:border-[6px] border-cam-red flex items-center justify-center relative shadow-inner">
+                      <div className="w-full h-full bg-white rounded-md md:rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
+                          {[0,1,2,3].map(i => <div key={i} className="w-3 h-3 md:w-8 md:h-8 rounded-full bg-cam-red/20 shadow-inner" />)}
                       </div>
                   </div>
               </div>
                {/* TR: Green */}
-               <div className="absolute top-[4px] right-[4px] w-[39.5%] h-[39.5%] bg-white p-4">
-                  <div className="w-full h-full bg-cam-green rounded-xl border-[6px] border-cam-green flex items-center justify-center relative shadow-inner">
-                      <div className="w-full h-full bg-white rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
-                          {[0,1,2,3].map(i => <div key={i} className="w-4 h-4 md:w-8 md:h-8 rounded-full bg-cam-green/20 shadow-inner" />)}
+               <div className="absolute top-[2%] right-[2%] w-[38%] h-[38%] bg-white p-[2%]">
+                  <div className="w-full h-full bg-cam-green rounded-lg md:rounded-xl border-4 md:border-[6px] border-cam-green flex items-center justify-center relative shadow-inner">
+                      <div className="w-full h-full bg-white rounded-md md:rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
+                          {[0,1,2,3].map(i => <div key={i} className="w-3 h-3 md:w-8 md:h-8 rounded-full bg-cam-green/20 shadow-inner" />)}
                       </div>
                   </div>
               </div>
                {/* BL: Blue */}
-               <div className="absolute bottom-[4px] left-[4px] w-[39.5%] h-[39.5%] bg-white p-4">
-                  <div className="w-full h-full bg-[#2563eb] rounded-xl border-[6px] border-[#2563eb] flex items-center justify-center relative shadow-inner">
-                      <div className="w-full h-full bg-white rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
-                          {[0,1,2,3].map(i => <div key={i} className="w-4 h-4 md:w-8 md:h-8 rounded-full bg-[#2563eb]/20 shadow-inner" />)}
+               <div className="absolute bottom-[2%] left-[2%] w-[38%] h-[38%] bg-white p-[2%]">
+                  <div className="w-full h-full bg-[#2563eb] rounded-lg md:rounded-xl border-4 md:border-[6px] border-[#2563eb] flex items-center justify-center relative shadow-inner">
+                      <div className="w-full h-full bg-white rounded-md md:rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
+                          {[0,1,2,3].map(i => <div key={i} className="w-3 h-3 md:w-8 md:h-8 rounded-full bg-[#2563eb]/20 shadow-inner" />)}
                       </div>
                   </div>
               </div>
                {/* BR: Yellow */}
-               <div className="absolute bottom-[4px] right-[4px] w-[39.5%] h-[39.5%] bg-white p-4">
-                  <div className="w-full h-full bg-cam-yellow rounded-xl border-[6px] border-cam-yellow flex items-center justify-center relative shadow-inner">
-                      <div className="w-full h-full bg-white rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
-                          {[0,1,2,3].map(i => <div key={i} className="w-4 h-4 md:w-8 md:h-8 rounded-full bg-cam-yellow/20 shadow-inner" />)}
+               <div className="absolute bottom-[2%] right-[2%] w-[38%] h-[38%] bg-white p-[2%]">
+                  <div className="w-full h-full bg-cam-yellow rounded-lg md:rounded-xl border-4 md:border-[6px] border-cam-yellow flex items-center justify-center relative shadow-inner">
+                      <div className="w-full h-full bg-white rounded-md md:rounded-lg grid grid-cols-2 grid-rows-2 place-items-center">
+                          {[0,1,2,3].map(i => <div key={i} className="w-3 h-3 md:w-8 md:h-8 rounded-full bg-cam-yellow/20 shadow-inner" />)}
                       </div>
                   </div>
               </div>
@@ -352,13 +352,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                       // Calculate position based on 15x15 grid
                       let {r, c} = getCoordinates(p);
                       
-                      // Bases need specific adjustments if we want them perfectly centered in the placeholders
-                      if (p.status === 'BASE') {
-                          // Already calculated in getCoordinates relative to grid
-                          // But we need to account for the grid gap and padding?
-                          // Since we use % based positioning derived from grid logic, it should align closely.
-                      }
-
                       // Convert grid coord to %
                       // Board is 15x15.
                       const step = 100 / 15;
@@ -378,9 +371,9 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                               onClick={() => movePiece(p)}
                           >
                               <div className={`
-                                  w-[70%] h-[70%] rounded-full shadow-md border-2 border-white relative
+                                  w-[80%] h-[80%] rounded-full shadow-md border-2 border-white relative
                                   ${p.color === 'Red' ? 'bg-cam-red' : p.color === 'Green' ? 'bg-cam-green' : p.color === 'Yellow' ? 'bg-cam-yellow' : 'bg-[#2563eb]'}
-                                  ${isMovable ? 'cursor-pointer ring-4 ring-gold-400 animate-pulse' : ''}
+                                  ${isMovable ? 'cursor-pointer ring-2 md:ring-4 ring-gold-400 animate-pulse' : ''}
                                   ${p.status === 'FINISHED' ? 'opacity-0' : 'opacity-100'}
                               `}>
                                   {/* Gloss */}
@@ -394,40 +387,42 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
           </div>
 
           {/* --- CONTROLS --- */}
-          <div className="w-full max-w-xs space-y-4">
-              <AIReferee externalLog={refereeLog} />
+          <div className="w-full max-w-[360px] md:max-w-xs space-y-4">
+              <div className="hidden md:block">
+                   <AIReferee externalLog={refereeLog} />
+              </div>
               
-              <div className="glass-panel p-6 rounded-2xl flex flex-col items-center">
+              <div className="glass-panel p-4 md:p-6 rounded-2xl flex flex-row md:flex-col items-center justify-between md:justify-center gap-4">
+                  <div className="flex flex-col items-start md:items-center">
+                        <span className="text-xs text-slate-400">Status</span>
+                        <div className="text-gold-400 font-bold uppercase text-sm md:text-base">
+                            {dice ? "Move Piece" : rolling ? "Rolling..." : `${turn}'s Turn`}
+                        </div>
+                  </div>
+
                   <motion.button
                       whileTap={{ scale: 0.9 }}
                       onClick={handleRoll}
                       disabled={rolling || (dice !== null)}
-                      className={`w-24 h-24 rounded-2xl flex items-center justify-center mb-4 transition-all shadow-xl
+                      className={`w-16 h-16 md:w-24 md:h-24 rounded-2xl flex items-center justify-center transition-all shadow-xl
                           ${turn === 'Red' ? 'bg-gradient-to-br from-cam-red to-red-800 text-white' : 'bg-royal-800 text-slate-500 opacity-50'}
                       `}
                   >
                       {rolling ? (
-                          <RotateCcw className="animate-spin" size={32} />
+                          <RotateCcw className="animate-spin" size={24} />
                       ) : dice ? (
-                          <span className="text-5xl font-display font-bold">{dice}</span>
+                          <span className="text-3xl md:text-5xl font-display font-bold">{dice}</span>
                       ) : (
                           <div className="flex flex-col items-center gap-1">
-                              <Dice5 size={32} />
-                              <span className="text-[10px] font-bold uppercase">Roll</span>
+                              <Dice5 size={24} className="md:w-8 md:h-8" />
+                              <span className="text-[8px] md:text-[10px] font-bold uppercase">Roll</span>
                           </div>
                       )}
                   </motion.button>
-                  
-                  <div className="text-center">
-                      <p className="text-xs text-slate-400 mb-1">
-                          {dice ? "Select a piece to move" : rolling ? "Rolling..." : `${turn}'s Turn`}
-                      </p>
-                      {dice === 6 && <span className="text-[10px] text-gold-400 font-bold uppercase animate-pulse">Extra Turn!</span>}
-                  </div>
               </div>
 
               {/* Player List */}
-              <div className="space-y-2">
+              <div className="grid grid-cols-2 md:grid-cols-1 gap-2">
                   {COLORS.map(c => {
                       // Determine who plays this color
                       let playerInfo = null;
@@ -436,24 +431,24 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                       
                       return (
                       <div key={c} className={`flex items-center justify-between p-2 rounded-xl border transition-all ${turn === c ? 'bg-white/10 border-white/20 shadow-lg' : 'border-transparent opacity-60'}`}>
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 md:gap-3">
                               <div className="relative">
-                                  <div className="w-8 h-8 rounded-full bg-royal-800 border border-white/10 overflow-hidden flex items-center justify-center">
+                                  <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-royal-800 border border-white/10 overflow-hidden flex items-center justify-center">
                                       {playerInfo ? (
                                           <img src={playerInfo.avatar} alt={playerInfo.name} className="w-full h-full object-cover" />
                                       ) : (
-                                          <UserIcon size={16} className="text-slate-600" />
+                                          <UserIcon size={12} className="text-slate-600 md:w-4 md:h-4" />
                                       )}
                                   </div>
-                                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-royal-950 ${c === 'Red' ? 'bg-cam-red' : c === 'Green' ? 'bg-cam-green' : c === 'Yellow' ? 'bg-cam-yellow' : 'bg-[#2563eb]'}`} />
+                                  <div className={`absolute -bottom-1 -right-1 w-2 h-2 md:w-3 md:h-3 rounded-full border-2 border-royal-950 ${c === 'Red' ? 'bg-cam-red' : c === 'Green' ? 'bg-cam-green' : c === 'Yellow' ? 'bg-cam-yellow' : 'bg-[#2563eb]'}`} />
                               </div>
-                              <div>
-                                  <div className="text-xs font-bold text-white leading-tight flex items-center gap-1">
+                              <div className="overflow-hidden">
+                                  <div className="text-[10px] md:text-xs font-bold text-white leading-tight flex items-center gap-1 truncate">
                                     {c}
                                     {c === 'Red' && <span className="text-[8px] bg-gold-500/20 text-gold-400 px-1 rounded uppercase tracking-wider">You</span>}
                                   </div>
-                                  <div className="text-[10px] text-slate-400 font-medium">
-                                      {playerInfo ? playerInfo.name : 'Bot / Empty'}
+                                  <div className="text-[8px] md:text-[10px] text-slate-400 font-medium truncate max-w-[80px] md:max-w-none">
+                                      {playerInfo ? playerInfo.name : 'Bot'}
                                   </div>
                               </div>
                           </div>

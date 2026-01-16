@@ -1,0 +1,329 @@
+
+import React, { useState } from 'react';
+import { User, Transaction } from '../types';
+import { MOCK_TRANSACTIONS } from '../services/mockData';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+
+interface FinanceProps {
+  user: User;
+  onTopUp: () => void; // Using the parent handler for simplicity or local logic
+}
+
+export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
+  const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
+  const [amount, setAmount] = useState('');
+  const [provider, setProvider] = useState<'mtn' | 'orange'>('mtn');
+  const [phone, setPhone] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = () => {
+      if(!amount || !phone) return;
+      setIsLoading(true);
+      setTimeout(() => {
+          setIsLoading(false);
+          alert(activeTab === 'deposit' ? 'Deposit request sent to your phone!' : 'Withdrawal processed successfully!');
+          setAmount('');
+          if(activeTab === 'deposit') onTopUp();
+      }, 2000);
+  };
+
+  return (
+    <div className="p-6 max-w-5xl mx-auto min-h-screen pb-24 md:pb-6">
+       
+       <header className="mb-8">
+           <h1 className="text-3xl font-display font-bold text-white mb-2">Finance</h1>
+           <p className="text-slate-400">Manage your funds securely with Mobile Money.</p>
+       </header>
+
+       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+           
+           {/* LEFT COLUMN: WALLET CARD & ACTIONS */}
+           <div className="lg:col-span-2 space-y-6">
+               
+               {/* Digital Card */}
+               <div className="relative h-56 rounded-3xl overflow-hidden shadow-2xl transition-transform hover:scale-[1.01]">
+                   <div className="absolute inset-0 bg-gradient-to-br from-royal-800 to-black z-0"></div>
+                   <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 z-0"></div>
+                   {/* Gold sheen */}
+                   <div className="absolute -top-24 -right-24 w-64 h-64 bg-gold-500/20 rounded-full blur-3xl"></div>
+                   
+                   <div className="relative z-10 p-8 flex flex-col justify-between h-full">
+                       <div className="flex justify-between items-start">
+                           <div>
+                               <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
+                                   <Wallet size={14} /> Vantage Wallet
+                               </div>
+                               <div className="text-slate-400 text-sm font-mono tracking-wider">**** **** **** 8842</div>
+                           </div>
+                           <div className="text-right">
+                               <div className="font-display font-black text-xl text-white italic">VISA</div>
+                               <div className="text-[10px] text-slate-500">Virtual Debit</div>
+                           </div>
+                       </div>
+
+                       <div>
+                           <div className="text-slate-400 text-xs mb-1">Total Balance</div>
+                           <div className="text-4xl font-display font-bold text-white tracking-tight">
+                               {user.balance.toLocaleString()} <span className="text-lg text-gold-500 font-sans">FCFA</span>
+                           </div>
+                       </div>
+                   </div>
+               </div>
+
+               {/* Action Tabs */}
+               <div className="bg-royal-900/50 border border-white/5 rounded-2xl p-1 flex">
+                   {['deposit', 'withdraw', 'history'].map(tab => (
+                       <button
+                           key={tab}
+                           onClick={() => setActiveTab(tab as any)}
+                           className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all capitalize ${
+                               activeTab === tab 
+                               ? 'bg-royal-800 text-white shadow-lg' 
+                               : 'text-slate-500 hover:text-slate-300'
+                           }`}
+                       >
+                           {tab}
+                       </button>
+                   ))}
+               </div>
+
+               {/* TAB CONTENT */}
+               <div className="glass-panel p-6 rounded-2xl min-h-[400px]">
+                   <AnimatePresence mode="wait">
+                       
+                       {/* DEPOSIT FORM */}
+                       {activeTab === 'deposit' && (
+                           <motion.div 
+                               key="deposit"
+                               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                               className="space-y-6"
+                           >
+                               <div className="flex items-center gap-4 mb-6">
+                                   <div className="w-12 h-12 rounded-full bg-green-500/20 text-green-500 flex items-center justify-center">
+                                       <ArrowDownLeft size={24} />
+                                   </div>
+                                   <div>
+                                       <h3 className="text-lg font-bold text-white">Deposit Funds</h3>
+                                       <p className="text-sm text-slate-400">Instant top-up via Mobile Money</p>
+                                   </div>
+                               </div>
+
+                               <div className="grid grid-cols-2 gap-4">
+                                   <button 
+                                       onClick={() => setProvider('mtn')}
+                                       className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                           provider === 'mtn' ? 'border-yellow-400 bg-yellow-400/10' : 'border-white/5 hover:bg-white/5'
+                                       }`}
+                                   >
+                                       <div className="w-8 h-8 rounded-full bg-[#ffcc00] flex items-center justify-center text-black font-black text-xs">MTN</div>
+                                       <span className={`text-sm font-bold ${provider === 'mtn' ? 'text-yellow-400' : 'text-slate-400'}`}>MTN MoMo</span>
+                                   </button>
+                                   <button 
+                                       onClick={() => setProvider('orange')}
+                                       className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                           provider === 'orange' ? 'border-orange-500 bg-orange-500/10' : 'border-white/5 hover:bg-white/5'
+                                       }`}
+                                   >
+                                       <div className="w-8 h-8 rounded-full bg-[#ff6600] flex items-center justify-center text-white font-black text-xs">OM</div>
+                                       <span className={`text-sm font-bold ${provider === 'orange' ? 'text-orange-500' : 'text-slate-400'}`}>Orange Money</span>
+                                   </button>
+                               </div>
+
+                               <div className="space-y-4">
+                                   <div>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
+                                       <div className="relative">
+                                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
+                                           <input 
+                                               type="number" 
+                                               value={amount}
+                                               onChange={e => setAmount(e.target.value)}
+                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
+                                               placeholder="5,000"
+                                           />
+                                       </div>
+                                       <div className="flex gap-2 mt-2">
+                                           {[1000, 5000, 10000, 25000].map(val => (
+                                               <button 
+                                                   key={val}
+                                                   onClick={() => setAmount(val.toString())}
+                                                   className="px-3 py-1 rounded-lg bg-white/5 text-xs text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+                                               >
+                                                   +{val.toLocaleString()}
+                                               </button>
+                                           ))}
+                                       </div>
+                                   </div>
+
+                                   <div>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phone Number</label>
+                                       <div className="relative">
+                                           <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                           <input 
+                                               type="tel" 
+                                               value={phone}
+                                               onChange={e => setPhone(e.target.value)}
+                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white font-mono focus:outline-none focus:border-gold-500 transition-colors"
+                                               placeholder="6XX XXX XXX"
+                                           />
+                                       </div>
+                                   </div>
+
+                                   <button 
+                                       onClick={handleSubmit}
+                                       disabled={isLoading || !amount || !phone}
+                                       className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                   >
+                                       {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
+                                       {isLoading ? 'Processing...' : 'Confirm Deposit'}
+                                   </button>
+                               </div>
+                           </motion.div>
+                       )}
+
+                       {/* WITHDRAW FORM */}
+                       {activeTab === 'withdraw' && (
+                           <motion.div 
+                               key="withdraw"
+                               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                               className="space-y-6"
+                           >
+                               <div className="flex items-center gap-4 mb-6">
+                                   <div className="w-12 h-12 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center">
+                                       <ArrowUpRight size={24} />
+                                   </div>
+                                   <div>
+                                       <h3 className="text-lg font-bold text-white">Withdraw Funds</h3>
+                                       <p className="text-sm text-slate-400">Cash out to your mobile wallet</p>
+                                   </div>
+                               </div>
+
+                               <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl mb-6 flex gap-3">
+                                   <Building className="text-yellow-500 flex-shrink-0" size={20} />
+                                   <p className="text-xs text-yellow-200/80 leading-relaxed">
+                                       Withdrawals are processed instantly. A standard carrier fee of 1.5% applies to all transactions.
+                                   </p>
+                               </div>
+
+                               <div className="space-y-4">
+                                   <div>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
+                                       <div className="relative">
+                                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
+                                           <input 
+                                               type="number" 
+                                               value={amount}
+                                               onChange={e => setAmount(e.target.value)}
+                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
+                                               placeholder="0"
+                                           />
+                                       </div>
+                                       <div className="flex justify-between mt-2 text-xs">
+                                           <span className="text-slate-500">Available: {user.balance.toLocaleString()} FCFA</span>
+                                           <button onClick={() => setAmount(user.balance.toString())} className="text-gold-400 font-bold uppercase">Max</button>
+                                       </div>
+                                   </div>
+
+                                   <div>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Send To (Phone)</label>
+                                       <div className="relative">
+                                           <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                           <input 
+                                               type="tel" 
+                                               value={phone}
+                                               onChange={e => setPhone(e.target.value)}
+                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white font-mono focus:outline-none focus:border-gold-500 transition-colors"
+                                               placeholder="6XX XXX XXX"
+                                           />
+                                       </div>
+                                   </div>
+
+                                   <button 
+                                       onClick={handleSubmit}
+                                       disabled={isLoading || !amount || !phone || Number(amount) > user.balance}
+                                       className="w-full py-4 bg-white text-royal-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                   >
+                                       {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowUpRight />}
+                                       {isLoading ? 'Processing...' : 'Withdraw Cash'}
+                                   </button>
+                               </div>
+                           </motion.div>
+                       )}
+
+                        {/* HISTORY TAB */}
+                        {activeTab === 'history' && (
+                           <motion.div 
+                               key="history"
+                               initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
+                           >
+                               <h3 className="text-lg font-bold text-white mb-4">Recent Transactions</h3>
+                               <div className="space-y-3">
+                                   {MOCK_TRANSACTIONS.map((tx) => (
+                                       <div key={tx.id} className="flex justify-between items-center p-4 bg-royal-950/50 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
+                                            <div className="flex items-center gap-3">
+                                                <div className={`p-2.5 rounded-full ${
+                                                    tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                                                }`}>
+                                                    {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
+                                                     tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> :
+                                                     tx.type === 'winnings' ? <Wallet size={16} /> : <CreditCard size={16} />}
+                                                </div>
+                                                <div>
+                                                    <div className="text-sm font-bold text-white capitalize">{tx.type}</div>
+                                                    <div className="text-xs text-slate-500">{tx.date}</div>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className={`font-mono font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-slate-300'}`}>
+                                                    {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                                                </div>
+                                                <div className={`text-[10px] uppercase font-bold ${
+                                                    tx.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
+                                                }`}>{tx.status}</div>
+                                            </div>
+                                       </div>
+                                   ))}
+                               </div>
+                           </motion.div>
+                       )}
+
+                   </AnimatePresence>
+               </div>
+           </div>
+
+           {/* RIGHT COLUMN: INFO */}
+           <div className="space-y-6">
+                <div className="p-6 rounded-2xl bg-gradient-to-b from-royal-800 to-royal-900 border border-white/5">
+                    <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                        <History size={18} className="text-gold-400" /> Quick Stats
+                    </h3>
+                    <div className="space-y-4">
+                        <div className="flex justify-between items-center pb-4 border-b border-white/5">
+                            <span className="text-sm text-slate-400">Total Deposited</span>
+                            <span className="font-mono text-white">150,000 FCFA</span>
+                        </div>
+                        <div className="flex justify-between items-center pb-4 border-b border-white/5">
+                            <span className="text-sm text-slate-400">Total Withdrawn</span>
+                            <span className="font-mono text-white">85,000 FCFA</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-sm text-slate-400">Net Profit</span>
+                            <span className="font-mono text-green-400">+42,000 FCFA</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="p-6 rounded-2xl bg-royal-950/50 border border-dashed border-slate-700">
+                    <h4 className="font-bold text-slate-300 text-sm mb-2">Need Help?</h4>
+                    <p className="text-xs text-slate-500 mb-4">Issues with a deposit or withdrawal? Our support team is available 24/7.</p>
+                    <button className="w-full py-2 bg-royal-800 hover:bg-royal-700 text-white text-xs font-bold rounded-lg transition-colors">
+                        Contact Support
+                    </button>
+                </div>
+           </div>
+
+       </div>
+    </div>
+  );
+};

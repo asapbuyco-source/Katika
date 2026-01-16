@@ -6,6 +6,7 @@ import { Lobby } from './components/Lobby';
 import { GameRoom } from './components/GameRoom';
 import { CheckersGame } from './components/CheckersGame';
 import { DiceGame } from './components/DiceGame';
+import { Finance } from './components/Finance';
 import { Navigation } from './components/Navigation';
 import { LandingPage } from './components/LandingPage';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
@@ -23,7 +24,16 @@ export default function App() {
     // Simulate a Mobile Money deposit
     const amount = 5000;
     setUser(prev => ({ ...prev, balance: prev.balance + amount }));
-    alert(`Successfully deposited ${amount.toLocaleString()} FCFA via MTN Mobile Money!`);
+    // If we are in finance view, we don't need the alert if the finance component handles success feedback
+    // But for the dashboard "Deposit" button, this is still useful.
+    // Ideally, the Finance component should handle the user state update itself or pass amount up.
+  };
+  
+  // Custom handler for Finance component to be more flexible
+  const handleFinanceTopUp = () => {
+      // Amount would ideally be passed here, but for mock purposes we just add 5000 or handle it in the component
+      const amount = 5000;
+      setUser(prev => ({ ...prev, balance: prev.balance + amount }));
   };
 
   const handleJoinTable = (table: Table) => {
@@ -80,7 +90,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
       {/* Sidebar / Bottom Nav - Only show on main app screens */}
-      {['dashboard', 'lobby', 'profile'].includes(currentView) && (
+      {['dashboard', 'lobby', 'profile', 'finance'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} />
       )}
 
@@ -105,7 +115,7 @@ export default function App() {
             <Dashboard 
                 user={user} 
                 setView={setView} 
-                onTopUp={handleTopUp} 
+                onTopUp={() => setView('finance')} 
                 onQuickMatch={() => setView('lobby')}
             />
         )}
@@ -115,6 +125,13 @@ export default function App() {
                 user={user}
                 setView={setView} 
                 onQuickMatch={startMatchmaking}
+            />
+        )}
+        
+        {currentView === 'finance' && (
+            <Finance 
+                user={user} 
+                onTopUp={handleFinanceTopUp}
             />
         )}
         

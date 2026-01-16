@@ -230,54 +230,59 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   };
 
   return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-start md:justify-center p-4 pb-24 md:pb-4 pt-8 md:pt-4">
        
        {/* Header */}
-       <div className="w-full max-w-5xl flex justify-between items-center mb-8">
-           <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2 group">
+       <div className="w-full max-w-5xl flex justify-between items-center mb-6 md:mb-8 gap-2">
+           <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
                 <div className="p-2 bg-royal-800 rounded-lg group-hover:bg-royal-700 transition-colors">
                     <ArrowLeft size={20} />
                 </div>
-                <div className="flex flex-col items-start">
+                <div className="hidden md:flex flex-col items-start">
                     <span className="text-xs text-slate-500 uppercase">Back to Lobby</span>
                     <span className="font-bold">Forfeit Game</span>
                 </div>
            </button>
 
-           <div className="glass-panel px-8 py-3 rounded-2xl flex items-center gap-6">
+           <div className="glass-panel px-4 py-2 md:px-8 md:py-3 rounded-2xl flex items-center gap-3 md:gap-6 flex-1 justify-center max-w-[320px]">
                 <div className="flex flex-col items-end">
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">Opponent</span>
+                    <span className="hidden md:block text-xs text-slate-400 font-bold uppercase tracking-wider">Opponent</span>
                     <div className="flex items-center gap-2">
-                        <span className="font-bold text-white">{table.host?.name || "Opponent"}</span>
+                        <span className="font-bold text-white text-sm md:text-base">{table.host?.name || "Opponent"}</span>
                         <div className="w-2 h-2 rounded-full bg-cam-red shadow-[0_0_8px_rgba(206,17,38,0.8)]" />
                     </div>
                 </div>
                 
-                <div className="h-8 w-px bg-white/10 mx-2" />
+                <div className="h-6 w-px bg-white/10 mx-1 md:h-8 md:mx-2" />
                 
                 <div className="text-center">
-                    <div className="text-2xl font-display font-bold text-white tracking-widest">VS</div>
-                    <div className="text-[10px] text-gold-500 font-mono">POT: {(table.stake * 2).toLocaleString()}</div>
+                    <div className="text-xl md:text-2xl font-display font-bold text-white tracking-widest">VS</div>
+                    <div className="text-[8px] md:text-[10px] text-gold-500 font-mono">POT: {(table.stake * 2).toLocaleString()}</div>
                 </div>
 
-                <div className="h-8 w-px bg-white/10 mx-2" />
+                <div className="h-6 w-px bg-white/10 mx-1 md:h-8 md:mx-2" />
 
                 <div className="flex flex-col items-start">
-                    <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">You</span>
+                    <span className="hidden md:block text-xs text-slate-400 font-bold uppercase tracking-wider">You</span>
                     <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-gold-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                        <span className="font-bold text-white">{user.name}</span>
+                        <span className="font-bold text-white text-sm md:text-base">{user.name}</span>
                     </div>
                 </div>
            </div>
 
-           <div className="w-[140px]">
-               <AIReferee externalLog={refereeLog} />
+           <div className="w-[40px] md:w-[140px] flex-shrink-0">
+               <div className="md:hidden w-10 h-10 bg-royal-800 rounded-lg flex items-center justify-center text-purple-400">
+                   <Shield size={20} />
+               </div>
+               <div className="hidden md:block">
+                   <AIReferee externalLog={refereeLog} />
+               </div>
            </div>
        </div>
 
        {/* Game Area */}
-       <div className="flex gap-8 items-center">
+       <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-center justify-center w-full flex-1">
            
            {/* Left Sidebar - Captured Pieces (My Losses) */}
            <div className="hidden md:flex flex-col gap-2">
@@ -294,9 +299,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
            </div>
 
            {/* The Board */}
-           <div className="relative">
+           <div className="relative w-full max-w-[360px] aspect-square md:w-auto md:max-w-none md:h-[600px] md:aspect-square">
                {/* Board Frame */}
-               <div className="relative z-10 w-[360px] h-[360px] md:w-[600px] md:h-[600px] bg-royal-900 rounded-lg shadow-2xl border-[12px] border-royal-800">
+               <div className="relative z-10 w-full h-full bg-royal-900 rounded-lg shadow-2xl border-8 md:border-[12px] border-royal-800">
                    {/* Board Surface */}
                    <div className="w-full h-full bg-gradient-to-br from-royal-800 to-black grid grid-cols-8 grid-rows-8 border border-white/5">
                         {renderBoard()}
@@ -337,7 +342,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                                            {/* King Icon */}
                                            {p.isKing && (
                                                <div className="absolute inset-0 flex items-center justify-center text-white/90 drop-shadow-md">
-                                                   <Crown size={20} fill="currentColor" />
+                                                   <Crown size={20} className="w-[60%] h-[60%]" fill="currentColor" />
                                                </div>
                                            )}
                                        </div>
@@ -369,12 +374,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
        </div>
 
        {/* Turn Indicator */}
-       <div className="mt-8 flex items-center gap-4">
-            <div className={`px-6 py-2 rounded-full border ${turn === 'me' ? 'bg-gold-500/10 border-gold-500 text-gold-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
+       <div className="mt-8 flex items-center gap-4 text-xs md:text-sm">
+            <div className={`px-4 py-2 md:px-6 rounded-full border ${turn === 'me' ? 'bg-gold-500/10 border-gold-500 text-gold-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
                 Your Turn
             </div>
             <Activity size={20} className="text-slate-600 animate-pulse" />
-            <div className={`px-6 py-2 rounded-full border ${turn === 'opponent' ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
+            <div className={`px-4 py-2 md:px-6 rounded-full border ${turn === 'opponent' ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
                 Opponent's Turn
             </div>
        </div>
