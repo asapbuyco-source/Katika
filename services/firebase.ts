@@ -10,8 +10,22 @@ import {
   signOut as firebaseSignOut,
   User as FirebaseUser
 } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
-import { User } from "../types";
+import { 
+  getFirestore, 
+  doc, 
+  getDoc, 
+  setDoc, 
+  collection, 
+  query, 
+  orderBy, 
+  limit, 
+  getDocs, 
+  addDoc, 
+  updateDoc, 
+  onSnapshot, 
+  serverTimestamp 
+} from "firebase/firestore";
+import { User, Transaction } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
@@ -96,8 +110,61 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
     }
 };
 
+// Real-time listener for user profile updates (Balance, ELO, etc.)
+export const subscribeToUser = (uid: string, callback: (user: User) => void) => {
+    return onSnapshot(doc(db, "users", uid), (doc) => {
+        if (doc.exists()) {
+            callback(doc.data() as User);
+        }
+    });
+};
+
+export const getUserTransactions = async (userId: string): Promise<Transaction[]> => {
+    try {
+        const q = query(
+            collection(db, "users", userId, "transactions"),
+            orderBy("timestamp", "desc"),
+            limit(20)
+        );
+        const querySnapshot = await getDocs(q);
+        return querySnapshot.docs.map(doc => {
+            const data = doc.data();
+            return { 
+                id: doc.id, 
+                type: data.type,
+                amount: data.amount,
+                status: data.status,
+                date: data.date || new Date().toLocaleString()
+            } as Transaction;
+        });
+    } catch (e) {
+        console.error("Error fetching transactions", e);
+        return [];
+    }
+};
+
+export const addUserTransaction = async (userId: string, transaction: Omit<Transaction, 'id'>) => {
+    // 1. Add Transaction Record
+    await addDoc(collection(db, "users", userId, "transactions"), {
+        ...transaction,
+        timestamp: serverTimestamp(),
+        date: new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+    });
+
+    // 2. Update User Balance
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+        const currentBalance = userSnap.data().balance || 0;
+        await updateDoc(userRef, {
+            balance: currentBalance + transaction.amount
+        });
+    }
+};
+
 export const loginAsGuest = async (): Promise<User> => {
     // Return a mock user for development when Firebase is blocked
+    // In a real scenario, we might want to create an anonymous auth user
     return {
         id: 'guest-' + Date.now(),
         name: 'Guest Player',

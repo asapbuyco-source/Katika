@@ -17,8 +17,7 @@ import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GameResultOverlay } from './components/GameResultOverlay';
-import { CURRENT_USER } from './services/mockData';
-import { auth, syncUserProfile, logout } from './services/firebase';
+import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export default function App() {
@@ -34,19 +33,29 @@ export default function App() {
   // State to handle game selection from Dashboard -> Lobby
   const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
 
-  // 1. Firebase Auth Listener: Sync User State ONLY
+  // 1. Firebase Auth & Real-time Database Listener
   useEffect(() => {
-      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      let unsubscribeSnapshot: (() => void) | undefined;
+
+      const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
               try {
+                  // Initial Sync
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
+
+                  // Setup Real-time Listener for Balance Updates
+                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
+                      setUser(updatedUser);
+                  });
+
               } catch (error) {
                   console.error("Profile sync failed:", error);
               }
           } else {
+              if (unsubscribeSnapshot) unsubscribeSnapshot();
               if (!user || user.id.startsWith('guest-')) {
-                  // Keep guest or null handling
+                  // Keep guest or null
               } else {
                  setUser(null);
               }
@@ -54,8 +63,11 @@ export default function App() {
           setAuthLoading(false);
       });
 
-      return () => unsubscribe();
-  }, []);
+      return () => {
+          unsubscribeAuth();
+          if (unsubscribeSnapshot) unsubscribeSnapshot();
+      };
+  }, []); // Run once on mount
 
   // 2. Navigation Guard
   useEffect(() => {
@@ -73,16 +85,9 @@ export default function App() {
       }
   }, [user, currentView, authLoading]);
 
-  const handleTopUp = () => {
-    if(!user) return;
-    const amount = 5000;
-    setUser(prev => prev ? ({ ...prev, balance: prev.balance + amount }) : null);
-  };
-  
+  // Finance Top Up Handler (Now handled inside Finance component mostly, but this serves as a fallback or event trigger)
   const handleFinanceTopUp = () => {
-      if(!user) return;
-      const amount = 5000;
-      setUser(prev => prev ? ({ ...prev, balance: prev.balance + amount }) : null);
+      // Balance update is handled via Finance component and Firestore listener
   };
 
   const startMatchmaking = (stake: number, gameType: string) => {
@@ -95,7 +100,7 @@ export default function App() {
       setView('lobby');
   };
 
-  const handleMatchFound = (table: Table) => {
+  const handleMatchFound = async (table: Table) => {
       if (!user) return;
       if (table.stake > 0) {
           if (user.balance < table.stake) {
@@ -103,29 +108,49 @@ export default function App() {
               setView('lobby');
               return;
           }
-          setUser(prev => prev ? ({ ...prev, balance: prev.balance - table.stake }) : null);
+          
+          // Deduct Stake Immediately using DB transaction
+          // For guests, we just update local state
+          if (user.id.startsWith('guest-')) {
+              setUser(prev => prev ? ({ ...prev, balance: prev.balance - table.stake }) : null);
+          } else {
+              await addUserTransaction(user.id, {
+                  type: 'stake',
+                  amount: -table.stake,
+                  status: 'completed',
+                  date: new Date().toISOString()
+              });
+          }
       }
       setActiveTable(table);
       setView('game');
   };
 
-  const handleGameEnd = (result: 'win' | 'loss' | 'quit') => {
+  const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
     let amountChanged = 0;
 
-    if (activeTable && activeTable.stake > 0) {
+    if (activeTable && activeTable.stake > 0 && user) {
         if (result === 'win') {
             const totalPot = activeTable.stake * 2;
             const fee = totalPot * 0.10;
             const payout = totalPot - fee;
-            amountChanged = payout; // Full payout shown (includes return of stake)
+            amountChanged = payout; 
             
-            // NOTE: Stake was already deducted at start. 
-            // We add the full payout to balance here.
-            setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
+            // Add Payout to DB
+            if (!user.id.startsWith('guest-')) {
+                await addUserTransaction(user.id, {
+                    type: 'winnings',
+                    amount: payout,
+                    status: 'completed',
+                    date: new Date().toISOString()
+                });
+            } else {
+                setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
+            }
+
         } else if (result === 'loss') {
-            // For loss, we just show what they lost (stake). 
-            // Balance doesn't change now because it was deducted at start.
             amountChanged = -activeTable.stake;
+            // Loss already handled by initial stake deduction
         }
     }
     
@@ -145,7 +170,6 @@ export default function App() {
       setView('landing');
   };
   
-  // Dashboard Action Handler
   const handleDashboardQuickMatch = (gameId?: string) => {
       if (gameId) {
           setPreSelectedGame(gameId);

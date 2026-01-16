@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Shield, Trophy, RefreshCw, AlertTriangle, Crown, Brain } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
+import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ChessGameProps {
@@ -281,6 +282,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
           setSelectedPos({ r, c });
           const moves = getMovesForPiece(board, clickedPiece, r, c, true);
           setValidMoves(moves);
+          playSFX('click');
       } else {
           // Clicked empty or enemy
           setSelectedPos(null);
@@ -293,8 +295,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
       const target = board[m.to.r][m.to.c];
       if (target) {
           setCaptured(prev => ({ ...prev, [turn === 'w' ? 'w' : 'b']: [...prev[turn === 'w' ? 'w' : 'b'], target.type] }));
+          playSFX('capture');
       } else if (m.special === 'enpassant') {
           setCaptured(prev => ({ ...prev, [turn === 'w' ? 'w' : 'b']: [...prev[turn === 'w' ? 'w' : 'b'], 'p'] }));
+          playSFX('capture');
+      } else {
+          playSFX('move');
       }
 
       const nextBoard = simulateMove(board, m);
@@ -317,6 +323,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
       } else if (inCheck) {
           setStatus('check');
           addLog("CHECK!", "alert");
+          playSFX('notification');
           setTurn(nextTurn);
       } else {
           setStatus('playing');
@@ -429,8 +436,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
                           <p className="text-sm text-slate-400">Your stake will be forfeited.</p>
                       </div>
                       <div className="flex gap-3">
-                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 rounded-xl text-slate-300 font-bold">Cancel</button>
-                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Resign</button>
+                          <button onClick={() => { setShowForfeitModal(false); playSFX('click'); }} className="flex-1 py-3 bg-white/5 rounded-xl text-slate-300 font-bold">Cancel</button>
+                          <button onClick={() => { onGameEnd('quit'); playSFX('click'); }} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Resign</button>
                       </div>
                   </motion.div>
               </div>
@@ -439,7 +446,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
        {/* Header */}
        <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
-            <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
+            <button onClick={() => { setShowForfeitModal(true); playSFX('click'); }} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
             </button>
             <div className="flex flex-col items-center">

@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Trophy, Shield, Zap, Hash, Dna, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
+import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface DiceGameProps {
@@ -97,6 +98,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
       if (gameState !== 'ready') return;
       
       setGameState('rolling');
+      playSFX('dice');
       addLog("Verifying Server Seed...", "scanning");
       
       // Match the duration of the animation (1.5s)
@@ -115,6 +117,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
           setServerHash(generateMockHash());
 
           if (winner === 'me') {
+              playSFX('win');
               setScores(s => {
                   const newScore = s.me + 1;
                   addLog(`You won Round ${round}`, 'secure');
@@ -122,6 +125,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
                   return { ...s, me: newScore };
               });
           } else if (winner === 'opp') {
+               playSFX('loss');
                setScores(s => {
                   const newScore = s.opp + 1;
                   addLog(`Opponent won Round ${round}`, 'alert');
@@ -141,8 +145,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
       if (myScore >= 3 || oppScore >= 3 || round >= 5) {
           setTimeout(() => {
              setGameState('game_over');
-             if (myScore > oppScore) onGameEnd('win');
-             else if (oppScore > myScore) onGameEnd('loss');
+             if (myScore > oppScore) { onGameEnd('win'); playSFX('win'); }
+             else if (oppScore > myScore) { onGameEnd('loss'); playSFX('loss'); }
              else onGameEnd('quit'); // Draw case handling
           }, 2000);
       } else {
@@ -185,13 +189,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
 
                       <div className="flex gap-3">
                           <button 
-                            onClick={() => setShowForfeitModal(false)}
+                            onClick={() => { setShowForfeitModal(false); playSFX('click'); }}
                             className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
                           >
                               Stay in Game
                           </button>
                           <button 
-                            onClick={() => onGameEnd('quit')}
+                            onClick={() => { onGameEnd('quit'); playSFX('click'); }}
                             className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
                           >
                               Yes, Forfeit
@@ -204,7 +208,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
 
        {/* Header */}
        <div className="w-full max-w-5xl flex justify-between items-center mb-6 md:mb-8 gap-2">
-           <button onClick={() => setShowForfeitModal(true)} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
+           <button onClick={() => { setShowForfeitModal(true); playSFX('click'); }} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
                 <div className="p-2 bg-royal-800 rounded-lg group-hover:bg-royal-700 transition-colors">
                     <ArrowLeft size={20} />
                 </div>

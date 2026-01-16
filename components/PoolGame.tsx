@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, Target, Shield, AlertTriangle, Disc, MousePointer2 } from 'lucide-react';
+import { ArrowLeft, Target, Shield, AlertTriangle, Disc, MousePointer2, Construction } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -60,8 +60,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd }) =>
 
   // --- INITIALIZATION ---
   useEffect(() => {
-    resetRack();
-  }, []);
+    if (user.isAdmin) {
+        resetRack();
+    }
+  }, [user.isAdmin]);
 
   const resetRack = () => {
     const newBalls: Ball[] = [];
@@ -405,6 +407,48 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd }) =>
       if (id < 8) return ['bg-yellow-500', 'bg-blue-600', 'bg-red-600', 'bg-purple-600', 'bg-orange-600', 'bg-green-600', 'bg-red-800'][id-1];
       return ['bg-yellow-300', 'bg-blue-400', 'bg-red-400', 'bg-purple-400', 'bg-orange-400', 'bg-green-400', 'bg-red-900'][id-9];
   };
+
+  // --- RESTRICTED ACCESS ---
+  if (!user.isAdmin) {
+      return (
+        <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
+          <div className="glass-panel p-8 rounded-3xl border border-white/10 max-w-md w-full relative overflow-hidden">
+             {/* Background Effects */}
+             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-blue-500"></div>
+             
+             <div className="mb-6 flex justify-center relative">
+                 <div className="absolute inset-0 bg-blue-500/20 blur-xl rounded-full animate-pulse"></div>
+                 <div className="w-24 h-24 bg-royal-900 rounded-full flex items-center justify-center border-2 border-blue-500/50 shadow-xl relative z-10">
+                     <Construction size={40} className="text-blue-400" />
+                 </div>
+             </div>
+             
+             <h2 className="text-3xl font-display font-bold text-white mb-3">Coming Soon</h2>
+             <p className="text-slate-400 mb-8 leading-relaxed">
+                 <span className="text-blue-400 font-bold">8-Ball Pool</span> is currently in beta. Our developers are fine-tuning the physics engine for the ultimate experience.
+             </p>
+             
+             <div className="p-4 bg-royal-800/50 rounded-xl border border-white/5 mb-8">
+                 <div className="flex items-center justify-between mb-2">
+                     <span className="text-xs text-slate-500 font-bold uppercase tracking-wider">Access Status</span>
+                     <span className="text-[10px] bg-red-500/20 text-red-400 px-2 py-0.5 rounded border border-red-500/30 font-bold uppercase">Restricted</span>
+                 </div>
+                 <div className="flex items-center gap-3">
+                     <Shield size={16} className="text-gold-400" />
+                     <p className="text-xs text-slate-300 text-left">Only <span className="text-white font-bold">Vantage Admins</span> have early access to this prototype.</p>
+                 </div>
+             </div>
+    
+             <button 
+                onClick={() => onGameEnd('quit')}
+                className="w-full py-4 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl transition-all border border-white/10 hover:border-white/20 flex items-center justify-center gap-2"
+             >
+                 <ArrowLeft size={18} /> Return to Lobby
+             </button>
+          </div>
+        </div>
+      );
+  }
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">

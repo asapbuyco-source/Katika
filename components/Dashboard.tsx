@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, CircleDot } from 'lucide-react';
-import { User, ViewState } from '../types';
+import { User, ViewState, Transaction } from '../types';
+import { getUserTransactions } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface DashboardProps {
@@ -13,21 +14,40 @@ interface DashboardProps {
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch }) => {
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
-  // Mock Live Winners for the Ticker
-  const winners = [
-      { name: "Blaise", amount: "15,000", game: "Ludo", avatar: "https://i.pravatar.cc/150?u=Blaise" },
-      { name: "Chantal", amount: "2,500", game: "Dice", avatar: "https://i.pravatar.cc/150?u=Chantal" },
-      { name: "Franck", amount: "50,000", game: "Checkers", avatar: "https://i.pravatar.cc/150?u=Franck" },
-      { name: "Sarah", amount: "8,000", game: "Pool", avatar: "https://i.pravatar.cc/150?u=Sarah" },
-  ];
+  // Simulated Live Winners (In a real app, this would come from a 'global_activity' collection)
+  // We keep this random to show activity, but removed hardcoded specific names
+  const [winners, setWinners] = useState([
+      { name: "Player_992", amount: "5,000", game: "Ludo", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` }
+  ]);
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setCurrentWinnerIndex((prev) => (prev + 1) % winners.length);
-    }, 4000);
-    return () => clearInterval(interval);
+      // Initialize dynamic winners
+      const generateWinner = () => ({
+          name: `Player_${Math.floor(Math.random() * 9000) + 1000}`,
+          amount: (Math.floor(Math.random() * 50) * 100).toLocaleString(),
+          game: ['Ludo', 'Dice', 'Pool', 'Checkers'][Math.floor(Math.random() * 4)],
+          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`
+      });
+      
+      const interval = setInterval(() => {
+          setWinners(prev => [generateWinner(), ...prev].slice(0, 5));
+          setCurrentWinnerIndex(0); // Reset to show newest
+      }, 5000);
+
+      return () => clearInterval(interval);
   }, []);
+
+  // Fetch Real User History
+  useEffect(() => {
+      const fetchHistory = async () => {
+          if (user.id.startsWith('guest-')) return;
+          const history = await getUserTransactions(user.id);
+          setRecentTransactions(history.slice(0, 3));
+      };
+      fetchHistory();
+  }, [user.id]);
 
   const games = [
     { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'hover:bg-cam-green/20 hover:border-cam-green/50', gradient: 'from-cam-green/20 to-transparent' },
@@ -82,19 +102,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           </div>
           <div className="flex-1 h-6 relative overflow-hidden">
               <AnimatePresence mode='wait'>
-                  <motion.div
-                      key={currentWinnerIndex}
-                      initial={{ y: 20, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      exit={{ y: -20, opacity: 0 }}
-                      className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
-                  >
-                      <img src={winners[currentWinnerIndex].avatar} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
-                      <span className="text-white font-bold truncate max-w-[80px]">{winners[currentWinnerIndex].name}</span>
-                      <span className="shrink-0">won</span>
-                      <span className="text-gold-400 font-mono font-bold shrink-0">{winners[currentWinnerIndex].amount} FCFA</span>
-                      <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">in {winners[currentWinnerIndex].game}</span>
-                  </motion.div>
+                  {winners.length > 0 && (
+                      <motion.div
+                          key={winners[0].name + Date.now()} 
+                          initial={{ y: 20, opacity: 0 }}
+                          animate={{ y: 0, opacity: 1 }}
+                          exit={{ y: -20, opacity: 0 }}
+                          className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
+                      >
+                          <img src={winners[0].avatar} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
+                          <span className="text-white font-bold truncate max-w-[80px]">{winners[0].name}</span>
+                          <span className="shrink-0">won</span>
+                          <span className="text-gold-400 font-mono font-bold shrink-0">{winners[0].amount} FCFA</span>
+                          <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">in {winners[0].game}</span>
+                      </motion.div>
+                  )}
               </AnimatePresence>
           </div>
       </motion.div>
@@ -102,7 +124,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       {/* Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
-        {/* Money-First Wallet Card - Expanded to full width since rank card is removed */}
+        {/* Money-First Wallet Card */}
         <motion.div variants={itemVariants} className="glass-panel p-6 rounded-3xl flex flex-col justify-between relative overflow-hidden group border-gold-500/20 bg-gradient-to-br from-royal-800 to-royal-950 shadow-xl md:col-span-3">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-500 transform group-hover:scale-110">
             <Wallet size={180} />
@@ -179,29 +201,33 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
               <History className="text-slate-400" size={20} />
               <h3 className="text-lg font-bold text-white">Recent Activity</h3>
             </div>
-            <button className="text-xs text-gold-400 hover:text-white font-bold uppercase tracking-wide">View All</button>
+            <button onClick={() => setView('finance')} className="text-xs text-gold-400 hover:text-white font-bold uppercase tracking-wide">View All</button>
           </div>
+          
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-            {[
-              { game: 'Ludo Classic', result: 'Won', amount: '+900', time: '2 mins ago', color: 'text-cam-green', icon: LayoutGrid },
-              { game: '8 Ball Pool', result: 'Lost', amount: '-500', time: '1 hour ago', color: 'text-cam-red', icon: CircleDot },
-              { game: 'Checkers', result: 'Won', amount: '+2,700', time: '3 hours ago', color: 'text-cam-green', icon: Target },
-            ].map((item, idx) => (
-              <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">
-                <div className="flex items-center gap-3">
-                    <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
-                        <item.icon size={16} />
+            {recentTransactions.length > 0 ? (
+                recentTransactions.map((item, idx) => (
+                  <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">
+                    <div className="flex items-center gap-3">
+                        <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
+                            {item.type === 'winnings' ? <Trophy size={16} /> : 
+                             item.type === 'stake' ? <Target size={16} /> : <Wallet size={16} />}
+                        </div>
+                        <div className="flex flex-col">
+                            <span className="font-medium text-white text-sm capitalize">{item.type}</span>
+                            <span className="text-[10px] text-slate-500">{item.date}</span>
+                        </div>
                     </div>
-                    <div className="flex flex-col">
-                        <span className="font-medium text-white text-sm">{item.game}</span>
-                        <span className="text-[10px] text-slate-500">{item.time}</span>
+                    <div className={`font-mono font-bold text-sm ${item.amount > 0 ? 'text-green-400' : 'text-slate-200'}`}>
+                      {item.amount > 0 ? '+' : ''}{item.amount} FCFA
                     </div>
+                  </div>
+                ))
+            ) : (
+                <div className="col-span-3 text-center text-slate-500 text-sm py-4">
+                    No recent activity found. Start playing to see stats!
                 </div>
-                <div className={`font-mono font-bold text-sm ${item.color}`}>
-                  {item.amount} FCFA
-                </div>
-              </div>
-            ))}
+            )}
           </div>
         </motion.div>
 

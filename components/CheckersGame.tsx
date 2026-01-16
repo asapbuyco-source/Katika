@@ -3,6 +3,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
+import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface CheckersGameProps {
@@ -267,6 +268,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       setLastMove({ from: `${move.fromR},${move.fromC}`, to: `${move.r},${move.c}` });
 
       if (move.isJump) {
+          playSFX('capture');
           setCapturedMe(c => c + 1);
           addLog("Opponent captured your piece!", "alert");
           const movedPiece = nextPieces.find(p => p.id === pId)!;
@@ -276,7 +278,11 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 800);
                return;
           }
+      } else {
+          playSFX('move');
       }
+
+      if (isPromotion) playSFX('king');
 
       const { moves: playerMoves } = getGlobalValidMoves('me', nextPieces);
       if (playerMoves.length === 0) {
@@ -311,6 +317,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     if (mustJumpFrom && mustJumpFrom !== p.id) {
         addLog("Finish your jump sequence!", "alert");
         triggerHints(moves); 
+        playSFX('error');
         return;
     }
     if (hasJump) {
@@ -318,6 +325,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (!canThisPieceJump) {
             addLog("Capture is mandatory!", "alert");
             triggerHints(moves);
+            playSFX('error');
             return;
         }
     }
@@ -333,6 +341,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             setSelectedPieceId(p.id);
             setValidMoves(pieceMoves);
             setHintMoves([]);
+            playSFX('click');
         }
     }
   }, [turn, pieces, mustJumpFrom, getGlobalValidMoves, selectedPieceId, addLog, triggerHints]);
@@ -359,6 +368,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       setLastMove({ from: `${move.fromR},${move.fromC}`, to: `${move.r},${move.c}` });
 
       if (move.isJump) {
+          playSFX('capture');
           addLog("Piece Captured!", "alert");
           if (turn === 'me') setCapturedOpp(c => c + 1);
           else setCapturedMe(c => c + 1);
@@ -378,7 +388,11 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
               }
               return; 
           }
+      } else {
+          playSFX('move');
       }
+
+      if (isPromotion) playSFX('king');
 
       setMustJumpFrom(null);
       setSelectedPieceId(null);
@@ -451,13 +465,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
                       <div className="flex gap-3">
                           <button 
-                            onClick={() => setShowForfeitModal(false)}
+                            onClick={() => { setShowForfeitModal(false); playSFX('click'); }}
                             className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
                           >
                               Stay in Game
                           </button>
                           <button 
-                            onClick={() => onGameEnd('quit')}
+                            onClick={() => { onGameEnd('quit'); playSFX('click'); }}
                             className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
                           >
                               Yes, Forfeit
@@ -470,7 +484,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
        {/* GAME HEADER */}
        <div className="w-full max-w-4xl flex items-center justify-between mb-8 mt-4">
-           <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+           <button onClick={() => { setShowForfeitModal(true); playSFX('click'); }} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
                <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
                <span className="font-bold text-sm">Forfeit</span>
            </button>

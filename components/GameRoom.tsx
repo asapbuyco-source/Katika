@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Dice5, Lock, RotateCcw, Crown, Star, User as UserIcon, Zap, Shield, AlertTriangle } from 'lucide-react';
 import { Table, AIRefereeLog, User } from '../types';
 import { AIReferee } from './AIReferee';
+import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface GameRoomProps {
@@ -146,6 +147,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   const handleRoll = () => {
       if (rolling || dice || winner) return;
       setRolling(true);
+      playSFX('dice');
       
       setTimeout(() => {
           const val = Math.floor(Math.random() * 6) + 1;
@@ -180,9 +182,15 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       if (p.status === 'BASE') {
           newStatus = 'ACTIVE';
           newSteps = 1;
+          playSFX('move');
       } else {
           newSteps += dice;
-          if (newSteps === 57) newStatus = 'FINISHED';
+          if (newSteps === 57) {
+              newStatus = 'FINISHED';
+              playSFX('win'); // Mini celebration for finishing a piece
+          } else {
+              playSFX('move');
+          }
       }
 
       setPieces(prev => {
@@ -204,6 +212,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                           e.status = 'BASE';
                           e.stepsMoved = 0;
                           addLog(`Captured ${e.color}!`, 'alert');
+                          playSFX('capture');
                       }
                   });
               }
@@ -223,6 +232,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       if (!extra) {
           const idx = COLORS.indexOf(turn);
           setTurn(COLORS[(idx + 1) % 4]);
+          playSFX('turn');
       }
   };
 
@@ -317,13 +327,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
 
                       <div className="flex gap-3">
                           <button 
-                            onClick={() => setShowForfeitModal(false)}
+                            onClick={() => { setShowForfeitModal(false); playSFX('click'); }}
                             className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
                           >
                               Stay in Game
                           </button>
                           <button 
-                            onClick={() => onGameEnd('quit')}
+                            onClick={() => { onGameEnd('quit'); playSFX('click'); }}
                             className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
                           >
                               Yes, Forfeit
@@ -336,7 +346,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
 
       {/* HEADER */}
       <div className="w-full max-w-4xl flex justify-between items-center mb-4 md:mb-6">
-         <button onClick={() => setShowForfeitModal(true)} className="text-slate-400 hover:text-white flex items-center gap-2 flex-shrink-0">
+         <button onClick={() => { setShowForfeitModal(true); playSFX('click'); }} className="text-slate-400 hover:text-white flex items-center gap-2 flex-shrink-0">
             <ArrowLeft size={20} /> <span className="hidden md:inline">Leave Table</span>
          </button>
          <div className="flex flex-col items-center">

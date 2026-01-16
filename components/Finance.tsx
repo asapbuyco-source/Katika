@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { User, Transaction } from '../types';
-import { MOCK_TRANSACTIONS } from '../services/mockData';
+import { getUserTransactions, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -18,6 +18,19 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  
+  // Real Data State
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+
+  // Fetch Transactions on Mount
+  useEffect(() => {
+      const fetchHistory = async () => {
+          if (user.id.startsWith('guest-')) return;
+          const history = await getUserTransactions(user.id);
+          setTransactions(history);
+      };
+      fetchHistory();
+  }, [user.id, activeTab]);
 
   const handleDeposit = async () => {
       if(!amount) return;
@@ -38,26 +51,53 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
           // Auto open in new tab
           window.open(response.link, '_blank');
           
-          // Simulate payment completion listener
-          // In a real app, this would be a websocket/webhook check
-          setTimeout(() => {
-              onTopUp(); // Credit the simulated balance
-              alert("Payment Detected! Balance updated.");
+          // --- SIMULATE PAYMENT CONFIRMATION WEBHOOK ---
+          // In a production app, the backend receives a webhook from Fapshi.
+          // Here we simulate the user completing payment after a delay.
+          setTimeout(async () => {
+              if (!user.id.startsWith('guest-')) {
+                  await addUserTransaction(user.id, {
+                      type: 'deposit',
+                      amount: depositAmount,
+                      status: 'completed',
+                      date: new Date().toISOString()
+                  });
+              }
+              onTopUp(); // Triggers simple refresh if needed
+              alert(`Payment of ${depositAmount} FCFA Detected! Balance updated.`);
               setPaymentLink(null);
               setAmount('');
+              // Refresh transactions
+              const history = await getUserTransactions(user.id);
+              setTransactions(history);
           }, 8000); 
       } else {
           alert("Failed to initiate payment. Please try again.");
       }
   };
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
       if(!amount || !phone) return;
+      if (Number(amount) > user.balance) return;
+
       setIsLoading(true);
-      setTimeout(() => {
+      
+      // Simulate API Call
+      setTimeout(async () => {
           setIsLoading(false);
+          if (!user.id.startsWith('guest-')) {
+              await addUserTransaction(user.id, {
+                  type: 'withdrawal',
+                  amount: -Number(amount),
+                  status: 'completed',
+                  date: new Date().toISOString()
+              });
+          }
           alert('Withdrawal processed successfully! Funds sent to ' + phone);
           setAmount('');
+          // Refresh transactions
+          const history = await getUserTransactions(user.id);
+          setTransactions(history);
       }, 2000);
   };
 
@@ -307,33 +347,39 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                            >
                                <h3 className="text-lg font-bold text-white mb-4">Recent Transactions</h3>
-                               <div className="space-y-3">
-                                   {MOCK_TRANSACTIONS.map((tx) => (
-                                       <div key={tx.id} className="flex justify-between items-center p-4 bg-royal-950/50 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
-                                            <div className="flex items-center gap-3">
-                                                <div className={`p-2.5 rounded-full ${
-                                                    tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
-                                                }`}>
-                                                    {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
-                                                     tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> :
-                                                     tx.type === 'winnings' ? <Wallet size={16} /> : <CreditCard size={16} />}
+                               {transactions.length > 0 ? (
+                                   <div className="space-y-3">
+                                       {transactions.map((tx) => (
+                                           <div key={tx.id} className="flex justify-between items-center p-4 bg-royal-950/50 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-2.5 rounded-full ${
+                                                        tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                                                    }`}>
+                                                        {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
+                                                         tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> :
+                                                         tx.type === 'winnings' ? <Wallet size={16} /> : <CreditCard size={16} />}
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-sm font-bold text-white capitalize">{tx.type}</div>
+                                                        <div className="text-xs text-slate-500">{tx.date}</div>
+                                                    </div>
                                                 </div>
-                                                <div>
-                                                    <div className="text-sm font-bold text-white capitalize">{tx.type}</div>
-                                                    <div className="text-xs text-slate-500">{tx.date}</div>
+                                                <div className="text-right">
+                                                    <div className={`font-mono font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-slate-300'}`}>
+                                                        {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                                                    </div>
+                                                    <div className={`text-[10px] uppercase font-bold ${
+                                                        tx.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
+                                                    }`}>{tx.status}</div>
                                                 </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <div className={`font-mono font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-slate-300'}`}>
-                                                    {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                                                </div>
-                                                <div className={`text-[10px] uppercase font-bold ${
-                                                    tx.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
-                                                }`}>{tx.status}</div>
-                                            </div>
-                                       </div>
-                                   ))}
-                               </div>
+                                           </div>
+                                       ))}
+                                   </div>
+                               ) : (
+                                   <div className="p-8 text-center text-slate-500 text-sm">
+                                       No transactions found.
+                                   </div>
+                               )}
                            </motion.div>
                        )}
 
@@ -350,15 +396,21 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                     <div className="space-y-4">
                         <div className="flex justify-between items-center pb-4 border-b border-white/5">
                             <span className="text-sm text-slate-400">Total Deposited</span>
-                            <span className="font-mono text-white">150,000 FCFA</span>
+                            <span className="font-mono text-white">
+                                {transactions.filter(t => t.type === 'deposit').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
+                            </span>
                         </div>
                         <div className="flex justify-between items-center pb-4 border-b border-white/5">
                             <span className="text-sm text-slate-400">Total Withdrawn</span>
-                            <span className="font-mono text-white">85,000 FCFA</span>
+                            <span className="font-mono text-white">
+                                {Math.abs(transactions.filter(t => t.type === 'withdrawal').reduce((acc, curr) => acc + curr.amount, 0)).toLocaleString()} FCFA
+                            </span>
                         </div>
                         <div className="flex justify-between items-center">
                             <span className="text-sm text-slate-400">Net Profit</span>
-                            <span className="font-mono text-green-400">+42,000 FCFA</span>
+                            <span className="font-mono text-green-400">
+                                {transactions.filter(t => t.type === 'winnings').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
+                            </span>
                         </div>
                     </div>
                 </div>

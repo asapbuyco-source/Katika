@@ -1,4 +1,5 @@
 
+
 import { Table, User, PlayerProfile, Transaction, GameTier } from '../types';
 
 export const CURRENT_USER: User = {
@@ -24,14 +25,6 @@ export const GAME_TIERS: GameTier[] = [
   { id: 'tier-4', name: 'High Roller', stake: 5000, potentialWin: 9000, playersOnline: 45, speed: 'Normal', minElo: 1500 },
 ];
 
-export const MOCK_TRANSACTIONS: Transaction[] = [
-  { id: 'tx-1', type: 'winnings', amount: 9000, date: '2024-03-10 14:30', status: 'completed' },
-  { id: 'tx-2', type: 'stake', amount: -5000, date: '2024-03-10 14:15', status: 'completed' },
-  { id: 'tx-3', type: 'deposit', amount: 10000, date: '2024-03-09 09:00', status: 'completed' },
-  { id: 'tx-4', type: 'stake', amount: -1000, date: '2024-03-08 18:45', status: 'completed' },
-  { id: 'tx-5', type: 'withdrawal', amount: -25000, date: '2024-03-05 11:20', status: 'completed' },
-];
-
 export const MOCK_TABLES: Table[] = [
   { 
     id: 't1', 
@@ -51,6 +44,15 @@ export const MOCK_PLAYERS: PlayerProfile[] = [
     { name: 'Emmanuel', elo: 1800, avatar: 'https://i.pravatar.cc/150?u=Emmanuel', rankTier: 'Diamond' },
     { name: 'Odile', elo: 1250, avatar: 'https://i.pravatar.cc/150?u=Odile', rankTier: 'Silver' },
     { name: 'Samuel', elo: 1100, avatar: 'https://i.pravatar.cc/150?u=Samuel', rankTier: 'Silver' },
+];
+
+export const MOCK_TRANSACTIONS: Transaction[] = [
+  { id: 'tx-101', type: 'deposit', amount: 5000, date: '2024-03-10 09:30', status: 'completed' },
+  { id: 'tx-102', type: 'stake', amount: -500, date: '2024-03-10 09:45', status: 'completed' },
+  { id: 'tx-103', type: 'winnings', amount: 900, date: '2024-03-10 10:05', status: 'completed' },
+  { id: 'tx-104', type: 'withdrawal', amount: -2000, date: '2024-03-11 14:20', status: 'completed' },
+  { id: 'tx-105', type: 'stake', amount: -1000, date: '2024-03-11 16:00', status: 'completed' },
+  { id: 'tx-106', type: 'winnings', amount: 1800, date: '2024-03-11 16:25', status: 'completed' },
 ];
 
 export const generateHash = (seed: string): string => {

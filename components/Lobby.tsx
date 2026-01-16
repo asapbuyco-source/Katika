@@ -4,6 +4,7 @@ import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X,
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS, MOCK_PLAYERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
+import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LobbyProps {
@@ -54,25 +55,30 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   const handleGameSelect = (gameId: string) => {
       setSelectedGame(gameId);
       setViewState('stakes');
+      playSFX('click');
   };
 
   const handleBackToGames = () => {
       setViewState('games');
       setSelectedGame(null);
+      playSFX('click');
       if (onClearInitialGame) onClearInitialGame();
   };
 
   const handleTierSelect = (tier: GameTier) => {
+      playSFX('click');
       if (!selectedGame) return;
       if (user.balance < tier.stake) {
           setNeededAmount(tier.stake - user.balance);
           setShowDepositModal(true);
+          playSFX('error');
       } else {
           onQuickMatch(tier.stake, selectedGame);
       }
   };
 
   const handleDeposit = async () => {
+      playSFX('click');
       const depositAmount = Math.max(neededAmount, 500); 
       setIsProcessingPayment(true);
       const response = await initiateFapshiPayment(depositAmount, user);
@@ -92,6 +98,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   );
 
   const handleSendChallenge = () => {
+      playSFX('click');
       if (user.balance < challengeStake) {
           setNeededAmount(challengeStake - user.balance);
           setShowChallengeModal(false);
@@ -206,7 +213,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                               <motion.button
                                                   key={idx}
                                                   whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                                                  onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); }}
+                                                  onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
                                                   className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
                                               >
                                                   <div className="flex items-center gap-3">
@@ -248,7 +255,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                               {AVAILABLE_GAMES.map(g => (
                                                   <button 
                                                       key={g.id}
-                                                      onClick={() => setChallengeGame(g.id)}
+                                                      onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
                                                       className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${
                                                           challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-500 hover:bg-white/5'
                                                       }`}
@@ -269,13 +276,13 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                           />
                                           <div className="flex gap-2 mt-2">
                                               {[500, 1000, 5000].map(amt => (
-                                                  <button key={amt} onClick={() => setChallengeStake(amt)} className="px-2 py-1 bg-white/5 rounded text-xs text-slate-400 hover:text-white">{amt}</button>
+                                                  <button key={amt} onClick={() => { setChallengeStake(amt); playSFX('click'); }} className="px-2 py-1 bg-white/5 rounded text-xs text-slate-400 hover:text-white">{amt}</button>
                                               ))}
                                           </div>
                                       </div>
 
                                       <div className="flex gap-3 pt-2">
-                                          <button onClick={() => setChallengeStep('search')} className="p-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400"><ArrowLeft size={20} /></button>
+                                          <button onClick={() => { setChallengeStep('search'); playSFX('click'); }} className="p-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400"><ArrowLeft size={20} /></button>
                                           <button onClick={handleSendChallenge} className="flex-1 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black py-4 rounded-xl shadow-lg flex items-center justify-center gap-2">
                                               <Swords size={20} /> SEND CHALLENGE
                                           </button>
@@ -300,7 +307,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
             </p>
         </div>
         <button 
-            onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); }}
+            onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); playSFX('click'); }}
             className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
         >
             <Swords size={18} /> Challenge Friend

@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, ViewState } from '../types';
 import { MOCK_TRANSACTIONS } from '../services/mockData';
+import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
 import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -36,7 +37,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [preferences, setPreferences] = useState({
       biometrics: true,
       notifications: true,
-      sound: true,
+      sound: getSoundEnabled(),
       marketing: false,
       language: 'English'
   });
@@ -49,10 +50,18 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   }, [user, isEditing]);
 
   const togglePref = (key: keyof typeof preferences) => {
-      setPreferences(prev => ({ ...prev, [key]: !prev[key as keyof typeof preferences] }));
+      const newVal = !preferences[key];
+      setPreferences(prev => ({ ...prev, [key]: newVal }));
+      
+      if (key === 'sound') {
+          setSoundEnabled(newVal as boolean);
+      } else {
+          playSFX('click');
+      }
   };
 
   const handleSaveProfile = () => {
+      playSFX('click');
       if (!tempName.trim()) {
           alert("Name cannot be empty");
           return;
@@ -62,6 +71,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   };
 
   const handleCancelEdit = () => {
+      playSFX('click');
       setTempName(user.name);
       setTempAvatar(user.avatar);
       setIsEditing(false);
@@ -152,7 +162,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                            </>
                        ) : (
                            <>
-                                <button onClick={() => setIsEditing(true)} className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm flex items-center justify-center gap-2">
+                                <button onClick={() => { setIsEditing(true); playSFX('click'); }} className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm flex items-center justify-center gap-2">
                                     <Edit2 size={16} /> Edit Profile
                                 </button>
                                 <button onClick={onLogout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all flex items-center justify-center">
@@ -179,7 +189,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                {PRESET_AVATARS.map((avatar, i) => (
                                    <button 
                                       key={i}
-                                      onClick={() => setTempAvatar(avatar)}
+                                      onClick={() => { setTempAvatar(avatar); playSFX('click'); }}
                                       className={`w-14 h-14 flex-shrink-0 rounded-full border-2 transition-all overflow-hidden relative ${
                                           tempAvatar === avatar ? 'border-gold-500 scale-110 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'
                                       }`}
@@ -204,7 +214,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
            {['overview', 'history', 'settings'].map((tab) => (
                <button 
                   key={tab}
-                  onClick={() => setActiveTab(tab as any)}
+                  onClick={() => { setActiveTab(tab as any); playSFX('click'); }}
                   className={`pb-4 text-sm font-bold capitalize transition-colors relative whitespace-nowrap px-2 ${
                       activeTab === tab ? 'text-white' : 'text-slate-500 hover:text-slate-300'
                   }`}
@@ -299,13 +309,13 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                   </h2>
                                   <div className="space-y-3">
                                       <button 
-                                        onClick={() => onNavigate('finance')}
+                                        onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-[0_0_20px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] active:scale-95 flex items-center justify-center gap-2"
                                       >
                                           <Wallet size={18} /> Deposit Funds
                                       </button>
                                       <button 
-                                        onClick={() => onNavigate('finance')}
+                                        onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10 flex items-center justify-center gap-2"
                                       >
                                           <CreditCard size={18} /> Withdraw
@@ -417,7 +427,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                                <div className="text-xs text-slate-500">Change your 4-digit security code</div>
                                            </div>
                                        </div>
-                                       <button className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors">
+                                       <button onClick={() => playSFX('click')} className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors">
                                            Update
                                        </button>
                                    </div>
@@ -454,7 +464,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </div>
                                        <select 
                                           value={preferences.language}
-                                          onChange={(e) => setPreferences({...preferences, language: e.target.value})}
+                                          onChange={(e) => { setPreferences({...preferences, language: e.target.value}); playSFX('click'); }}
                                           className="bg-royal-950 text-xs font-bold text-white border border-white/10 rounded-lg px-3 py-2 outline-none"
                                        >
                                            <option value="English">English</option>
@@ -517,19 +527,19 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                </h3>
                                <div className="space-y-2">
                                    <button 
-                                     onClick={() => alert("Help Center ticket created.")}
+                                     onClick={() => { alert("Help Center ticket created."); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Help Center <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => alert("Bug report submitted.")}
+                                     onClick={() => { alert("Bug report submitted."); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Report a Bug <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => alert("Terms of Service opened.")}
+                                     onClick={() => { alert("Terms of Service opened."); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Terms of Service <ChevronRight size={16} />
