@@ -30,7 +30,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           ...p,
           id: `usr-${1000 + i}`,
           balance: 12500 * (i + 1),
-          status: 'Active',
+          status: 'Active' as const, // Explicitly cast to literal type
           joinDate: new Date(Date.now() - Math.random() * 10000000000).toLocaleDateString(),
           email: `${p.name.toLowerCase().replace(' ', '.')}@vantage.cm`
       }))

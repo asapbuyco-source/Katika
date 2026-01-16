@@ -51,7 +51,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd }) =>
 
   // Refs for physics loop
   const ballsRef = useRef<Ball[]>([]);
-  const animationRef = useRef<number>();
+  const animationRef = useRef<number | null>(null);
   const tableRef = useRef<HTMLDivElement>(null);
 
   const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
@@ -207,7 +207,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd }) =>
             }
         });
     }
-    return () => cancelAnimationFrame(animationRef.current!);
+    return () => {
+        if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
   }, [isMoving, updatePhysics]);
 
   const handleTurnEnd = () => {
