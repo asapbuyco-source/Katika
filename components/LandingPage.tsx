@@ -1,12 +1,14 @@
+
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, LayoutGrid } from 'lucide-react';
 
 interface LandingPageProps {
   onLogin: () => void;
+  onHowItWorks: () => void;
 }
 
-export const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
+export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks }) => {
   const [activeTicker, setActiveTicker] = useState(0);
 
   // Simulated Live Winners Data
@@ -159,7 +161,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin }) => {
                 <span>Connect Wallet</span>
                 <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
             </button>
-            <button className="px-8 py-4 rounded-full border border-white/10 hover:bg-white/5 font-medium text-slate-300 transition-colors">
+            <button 
+                onClick={onHowItWorks}
+                className="px-8 py-4 rounded-full border border-white/10 hover:bg-white/5 font-medium text-slate-300 transition-colors"
+            >
                 How it Works
             </button>
          </motion.div>

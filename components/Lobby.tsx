@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star } from 'lucide-react';
-import { ViewState, User, GameTier } from '../types';
-import { GAME_TIERS } from '../services/mockData';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield } from 'lucide-react';
+import { ViewState, User, GameTier, PlayerProfile } from '../types';
+import { GAME_TIERS, MOCK_PLAYERS } from '../services/mockData';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LobbyProps {
@@ -15,6 +15,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch }) => 
   const [selectedGame, setSelectedGame] = useState('Ludo');
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [neededAmount, setNeededAmount] = useState(0);
+
+  // Challenge Mode State
+  const [showChallengeModal, setShowChallengeModal] = useState(false);
+  const [challengeStep, setChallengeStep] = useState<'search' | 'config'>('search');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFriend, setSelectedFriend] = useState<PlayerProfile | null>(null);
+  const [challengeStake, setChallengeStake] = useState<number>(1000);
+  const [challengeGame, setChallengeGame] = useState('Ludo');
 
   const games = [
       { id: 'Ludo', icon: LayoutGrid, color: 'text-cam-green' },
@@ -37,13 +45,35 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch }) => 
       setShowDepositModal(false);
   };
 
+  const filteredFriends = MOCK_PLAYERS.filter(p => 
+    p.name.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleSendChallenge = () => {
+      if (user.balance < challengeStake) {
+          setNeededAmount(challengeStake - user.balance);
+          setShowChallengeModal(false);
+          setShowDepositModal(true);
+          return;
+      }
+      
+      // Simulate API call
+      setShowChallengeModal(false);
+      alert(`Challenge sent to ${selectedFriend?.name} for ${challengeStake} FCFA in ${challengeGame}!`);
+      
+      // Reset state
+      setChallengeStep('search');
+      setSearchQuery('');
+      setSelectedFriend(null);
+  };
+
   return (
     <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative">
       
       {/* Deposit Modal */}
       <AnimatePresence>
           {showDepositModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                   <motion.div 
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                     onClick={() => setShowDepositModal(false)}
@@ -86,10 +116,190 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch }) => 
           )}
       </AnimatePresence>
 
+      {/* Challenge Friend Modal */}
+      <AnimatePresence>
+          {showChallengeModal && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowChallengeModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                    className="relative bg-royal-900 border border-white/10 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+                  >
+                      {/* Modal Header */}
+                      <div className="p-6 border-b border-white/5 bg-royal-950/50 flex justify-between items-center">
+                          <h2 className="text-xl font-display font-bold text-white flex items-center gap-2">
+                              <Swords className="text-gold-400" size={20} />
+                              {challengeStep === 'search' ? 'Challenge a Friend' : 'Configure Match'}
+                          </h2>
+                          <button onClick={() => setShowChallengeModal(false)} className="text-slate-400 hover:text-white transition-colors">
+                              <X size={20} />
+                          </button>
+                      </div>
+
+                      {/* Modal Content */}
+                      <div className="p-6 overflow-y-auto custom-scrollbar">
+                          {challengeStep === 'search' ? (
+                              <div className="space-y-4">
+                                  <div className="relative">
+                                      <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                      <input 
+                                          type="text" 
+                                          placeholder="Search by username or ID..."
+                                          value={searchQuery}
+                                          onChange={(e) => setSearchQuery(e.target.value)}
+                                          className="w-full bg-black/30 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white focus:outline-none focus:border-gold-500 transition-colors"
+                                          autoFocus
+                                      />
+                                  </div>
+                                  
+                                  <div className="space-y-2">
+                                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Suggested Friends</p>
+                                      {filteredFriends.length > 0 ? (
+                                          filteredFriends.map((friend, idx) => (
+                                              <motion.button
+                                                  key={idx}
+                                                  whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                                                  whileTap={{ scale: 0.98 }}
+                                                  onClick={() => {
+                                                      setSelectedFriend(friend);
+                                                      setChallengeStep('config');
+                                                  }}
+                                                  className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
+                                              >
+                                                  <div className="flex items-center gap-3">
+                                                      <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full border border-white/10" />
+                                                      <div className="text-left">
+                                                          <div className="font-bold text-white">{friend.name}</div>
+                                                          <div className="text-xs text-slate-400">{friend.rankTier} • {friend.elo} ELO</div>
+                                                      </div>
+                                                  </div>
+                                                  <div className="p-2 bg-royal-800 rounded-lg text-gold-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                      <Swords size={16} />
+                                                  </div>
+                                              </motion.button>
+                                          ))
+                                      ) : (
+                                          <div className="text-center py-8 text-slate-500">
+                                              <UserPlus size={32} className="mx-auto mb-2 opacity-50" />
+                                              <p>No friends found.</p>
+                                          </div>
+                                      )}
+                                  </div>
+                              </div>
+                          ) : (
+                              <div className="space-y-6">
+                                  {/* VS Header */}
+                                  <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/5">
+                                      <div className="flex flex-col items-center">
+                                          <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500 mb-1" />
+                                          <span className="text-xs font-bold text-white">You</span>
+                                      </div>
+                                      <div className="text-2xl font-black text-slate-600 italic">VS</div>
+                                      <div className="flex flex-col items-center">
+                                          <img src={selectedFriend?.avatar} className="w-12 h-12 rounded-full border-2 border-red-500 mb-1" />
+                                          <span className="text-xs font-bold text-white">{selectedFriend?.name}</span>
+                                      </div>
+                                  </div>
+
+                                  {/* Game Selector */}
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Select Game</label>
+                                      <div className="grid grid-cols-4 gap-2">
+                                          {games.map(g => (
+                                              <button 
+                                                  key={g.id}
+                                                  onClick={() => setChallengeGame(g.id)}
+                                                  className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${
+                                                      challengeGame === g.id 
+                                                      ? `bg-royal-800 border-gold-500 text-white shadow-[0_0_15px_rgba(251,191,36,0.2)]` 
+                                                      : 'border-white/10 text-slate-500 hover:bg-white/5'
+                                                  }`}
+                                              >
+                                                  <g.icon size={20} className={challengeGame === g.id ? 'text-gold-400' : ''} />
+                                                  <span className="text-[10px] font-bold">{g.id}</span>
+                                              </button>
+                                          ))}
+                                      </div>
+                                  </div>
+
+                                  {/* Stake Input */}
+                                  <div>
+                                      <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Stake Amount (FCFA)</label>
+                                      <div className="relative">
+                                          <input 
+                                              type="number" 
+                                              value={challengeStake}
+                                              onChange={(e) => setChallengeStake(Number(e.target.value))}
+                                              className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-4 pr-16 text-white font-mono font-bold text-lg focus:outline-none focus:border-gold-500 transition-colors"
+                                          />
+                                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-500">FCFA</span>
+                                      </div>
+                                      <div className="flex justify-between mt-2">
+                                          <div className="flex gap-2">
+                                              {[500, 1000, 5000].map(amt => (
+                                                  <button 
+                                                    key={amt} 
+                                                    onClick={() => setChallengeStake(amt)}
+                                                    className="px-2 py-1 bg-white/5 hover:bg-white/10 rounded text-[10px] text-slate-400 font-mono transition-colors"
+                                                  >
+                                                      {amt}
+                                                  </button>
+                                              ))}
+                                          </div>
+                                          <span className="text-[10px] text-slate-500">Balance: <span className="text-white">{user.balance.toLocaleString()}</span></span>
+                                      </div>
+                                  </div>
+
+                                  {/* Info Box */}
+                                  <div className="p-3 bg-gold-500/10 border border-gold-500/20 rounded-xl flex gap-3 items-start">
+                                      <Shield className="text-gold-500 flex-shrink-0 mt-0.5" size={16} />
+                                      <div className="text-xs text-gold-200/80">
+                                          Funds will be locked in Escrow. Winner takes <strong>{(challengeStake * 1.9).toLocaleString()} FCFA</strong> (after 10% platform fee).
+                                      </div>
+                                  </div>
+
+                                  <div className="flex gap-3 pt-2">
+                                      <button 
+                                          onClick={() => setChallengeStep('search')}
+                                          className="p-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 transition-colors"
+                                      >
+                                          <ArrowLeft size={20} />
+                                      </button>
+                                      <button 
+                                          onClick={handleSendChallenge}
+                                          className="flex-1 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black py-4 rounded-xl shadow-lg transition-all active:scale-95 flex items-center justify-center gap-2"
+                                      >
+                                          <Swords size={20} /> SEND CHALLENGE
+                                      </button>
+                                  </div>
+                              </div>
+                          )}
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+      </AnimatePresence>
+
       {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-display font-bold text-white mb-2">Game Selection</h1>
-        <p className="text-slate-400">Select a game and choose your stakes.</p>
+      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div>
+            <h1 className="text-3xl font-display font-bold text-white mb-2">Game Selection</h1>
+            <p className="text-slate-400">Select a game and choose your stakes.</p>
+        </div>
+        <button 
+            onClick={() => {
+                setChallengeStep('search');
+                setShowChallengeModal(true);
+            }}
+            className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
+        >
+            <Swords size={18} />
+            Challenge Friend
+        </button>
       </div>
 
       {/* Game Selector Chips */}

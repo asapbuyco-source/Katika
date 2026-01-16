@@ -12,6 +12,7 @@ import { LandingPage } from './components/LandingPage';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
 import { AuthScreen } from './components/AuthScreen';
 import { Profile } from './components/Profile';
+import { HowItWorks } from './components/HowItWorks';
 import { CURRENT_USER } from './services/mockData';
 
 export default function App() {
@@ -96,7 +97,7 @@ export default function App() {
 
       <main className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
         {/* Decorative background blobs - shared across app states (except landing which has its own) */}
-        {currentView !== 'landing' && currentView !== 'auth' && (
+        {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
@@ -104,7 +105,17 @@ export default function App() {
         )}
 
         {currentView === 'landing' && (
-            <LandingPage onLogin={() => setView('auth')} />
+            <LandingPage 
+                onLogin={() => setView('auth')} 
+                onHowItWorks={() => setView('how-it-works')}
+            />
+        )}
+
+        {currentView === 'how-it-works' && (
+            <HowItWorks 
+                onBack={() => setView('landing')} 
+                onLogin={() => setView('auth')}
+            />
         )}
 
         {currentView === 'auth' && (
