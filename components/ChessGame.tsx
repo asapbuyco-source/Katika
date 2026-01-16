@@ -258,7 +258,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
   // --- ACTIONS ---
 
   const handleSquareClick = (r: number, c: number) => {
-      if (turn === 'b' || status !== 'playing') return; // Bot turn
+      // Allow moving if playing OR if in check. Only block on mate/stalemate.
+      if (turn === 'b' || (status !== 'playing' && status !== 'check')) return; // Bot turn
       if (!board[r]) return;
 
       const clickedPiece = board[r][c];
@@ -482,7 +483,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
             
             {/* Status Overlay */}
             <AnimatePresence>
-                {(status === 'check' || status === 'checkmate' || status === 'stalemate') && (
+                {(status === 'checkmate' || status === 'stalemate') && (
                      <motion.div 
                         initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.5, opacity: 0 }}
                         className="absolute inset-0 z-50 flex items-center justify-center pointer-events-none"
@@ -491,8 +492,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
                              <div className="text-gold-400 font-black text-4xl mb-1 uppercase tracking-widest drop-shadow-lg">
                                  {status === 'checkmate' ? (turn === 'b' ? 'VICTORY' : 'DEFEAT') : status.toUpperCase()}
                              </div>
-                             {status === 'check' && <div className="text-white font-mono text-sm">Protect the King!</div>}
                          </div>
+                     </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* Small Check Alert */}
+            <AnimatePresence>
+                {status === 'check' && (
+                     <motion.div 
+                        initial={{ y: -20, opacity: 0 }} 
+                        animate={{ y: 0, opacity: 1 }} 
+                        exit={{ y: -20, opacity: 0 }}
+                        className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-red-500 text-white px-4 py-2 rounded-full font-bold shadow-lg flex items-center gap-2 pointer-events-none border border-red-400"
+                     >
+                         <AlertTriangle size={16} /> CHECK! Protect your King
                      </motion.div>
                 )}
             </AnimatePresence>
