@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield } from 'lucide-react';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS, MOCK_PLAYERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
@@ -17,6 +17,7 @@ interface LobbyProps {
 const AVAILABLE_GAMES = [
     { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'bg-cam-green/10', border: 'border-cam-green/20' },
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
+    { id: 'Pool', name: '8 Ball Pool', players: 960, icon: CircleDot, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20' },
     { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
 ];

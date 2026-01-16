@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp } from 'lucide-react';
+import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, CircleDot } from 'lucide-react';
 import { User, ViewState } from '../types';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -19,7 +19,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       { name: "Blaise", amount: "15,000", game: "Ludo", avatar: "https://i.pravatar.cc/150?u=Blaise" },
       { name: "Chantal", amount: "2,500", game: "Dice", avatar: "https://i.pravatar.cc/150?u=Chantal" },
       { name: "Franck", amount: "50,000", game: "Checkers", avatar: "https://i.pravatar.cc/150?u=Franck" },
-      { name: "Sarah", amount: "8,000", game: "Chess", avatar: "https://i.pravatar.cc/150?u=Sarah" },
+      { name: "Sarah", amount: "8,000", game: "Pool", avatar: "https://i.pravatar.cc/150?u=Sarah" },
   ];
 
   useEffect(() => {
@@ -32,6 +32,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   const games = [
     { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'hover:bg-cam-green/20 hover:border-cam-green/50', gradient: 'from-cam-green/20 to-transparent' },
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent' },
+    { id: 'Pool', name: '8 Ball Pool', players: 960, icon: CircleDot, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent' },
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent' },
     { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent' },
   ];
@@ -183,7 +184,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {[
               { game: 'Ludo Classic', result: 'Won', amount: '+900', time: '2 mins ago', color: 'text-cam-green', icon: LayoutGrid },
-              { game: 'Dice Roll', result: 'Lost', amount: '-500', time: '1 hour ago', color: 'text-cam-red', icon: Dice5 },
+              { game: '8 Ball Pool', result: 'Lost', amount: '-500', time: '1 hour ago', color: 'text-cam-red', icon: CircleDot },
               { game: 'Checkers', result: 'Won', amount: '+2,700', time: '3 hours ago', color: 'text-cam-green', icon: Target },
             ].map((item, idx) => (
               <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">

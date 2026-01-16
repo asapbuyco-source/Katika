@@ -6,6 +6,8 @@ import { Lobby } from './components/Lobby';
 import { GameRoom } from './components/GameRoom';
 import { CheckersGame } from './components/CheckersGame';
 import { DiceGame } from './components/DiceGame';
+import { PoolGame } from './components/PoolGame';
+import { ChessGame } from './components/ChessGame';
 import { Finance } from './components/Finance';
 import { Navigation } from './components/Navigation';
 import { LandingPage } from './components/LandingPage';
@@ -268,6 +270,18 @@ export default function App() {
                             />
                         ) : activeTable.gameType === 'Checkers' ? (
                             <CheckersGame 
+                                table={activeTable}
+                                user={user}
+                                onGameEnd={handleGameEnd}
+                            />
+                        ) : activeTable.gameType === 'Pool' ? (
+                            <PoolGame 
+                                table={activeTable}
+                                user={user}
+                                onGameEnd={handleGameEnd}
+                            />
+                        ) : activeTable.gameType === 'Chess' ? (
+                            <ChessGame 
                                 table={activeTable}
                                 user={user}
                                 onGameEnd={handleGameEnd}

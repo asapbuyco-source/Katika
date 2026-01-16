@@ -1,9 +1,15 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Dice5, Lock, RotateCcw, Crown, Star, User as UserIcon, Zap, Shield, AlertTriangle } from 'lucide-react';
 import { Table, AIRefereeLog, User } from '../types';
 import { AIReferee } from './AIReferee';
 import { motion, AnimatePresence } from 'framer-motion';
+
+interface GameRoomProps {
+  table: Table;
+  user: User;
+  onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+}
 
 // --- CONSTANTS ---
 
@@ -15,12 +21,6 @@ interface Piece {
   color: PlayerColor;
   status: 'BASE' | 'ACTIVE' | 'FINISHED';
   stepsMoved: number; // 0 = Base, 1 = Start Cell, 51 = End of Main Track, 57 = Home
-}
-
-interface GameRoomProps {
-  table: Table;
-  user: User;
-  onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
 }
 
 // Coordinate mapping for the 52-step main track
@@ -68,6 +68,25 @@ const HOME_RUNS: Record<PlayerColor, {r: number, c: number}[]> = {
 const SAFE_SPOTS = new Set([
   "6,1", "2,6", "1,8", "6,12", "8,13", "12,8", "13,6", "8,2"
 ]);
+
+const RollingDie = () => (
+    <motion.div
+        animate={{ 
+            rotateX: [0, 360, 720, 1080], 
+            rotateY: [0, 360, 720, 1080],
+            scale: [1, 0.8, 1.1, 1] 
+        }}
+        transition={{ duration: 1, ease: "easeInOut" }}
+        className="w-10 h-10 md:w-14 md:h-14 bg-white rounded-lg md:rounded-xl shadow-[0_0_15px_rgba(255,255,255,0.5)] border-2 border-slate-200 flex items-center justify-center overflow-hidden"
+    >
+        <div className="grid grid-cols-2 gap-1 md:gap-2 p-1">
+             <div className="w-2 h-2 md:w-3 md:h-3 bg-black rounded-full" />
+             <div className="w-2 h-2 md:w-3 md:h-3 bg-black rounded-full" />
+             <div className="w-2 h-2 md:w-3 md:h-3 bg-black rounded-full" />
+             <div className="w-2 h-2 md:w-3 md:h-3 bg-black rounded-full" />
+        </div>
+    </motion.div>
+);
 
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) => {
   const [pieces, setPieces] = useState<Piece[]>([]);
@@ -141,7 +160,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
           } else {
               addLog(`${turn} rolled ${val}`, 'secure');
           }
-      }, 600);
+      }, 1000); // 1 Second Rolling Animation
   };
 
   const canMove = (p: Piece, roll: number) => {
@@ -456,9 +475,15 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
                       `}
                   >
                       {rolling ? (
-                          <RotateCcw className="animate-spin" size={24} />
+                          <RollingDie />
                       ) : dice ? (
-                          <span className="text-3xl md:text-5xl font-display font-bold">{dice}</span>
+                          <motion.span 
+                            initial={{ scale: 0, opacity: 0 }} 
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="text-3xl md:text-5xl font-display font-bold"
+                          >
+                              {dice}
+                          </motion.span>
                       ) : (
                           <div className="flex flex-col items-center gap-1">
                               <Dice5 size={24} className="md:w-8 md:h-8" />
