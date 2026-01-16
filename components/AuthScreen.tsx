@@ -28,13 +28,22 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
           await signInWithGoogle();
           // onAuthenticated will be triggered by the App.tsx onAuthStateChanged listener for real logins
       } catch (err: any) {
-          console.error(err);
-          // Handle unauthorized domain (common in dev environments)
-          if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/internal-error' || err.message?.includes('unauthorized domain')) {
-              setError("Domain not authorized by Firebase.");
-              setShowGuest(true);
+          console.error("Auth Error:", err);
+          
+          // Auto-Switch to Guest Mode for Unauthorized Domains (Common in Preview Envs)
+          if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized domain')) {
+              setError("Preview domain not authorized. Switching to Guest Mode...");
+              setTimeout(async () => {
+                  await handleGuestLogin();
+              }, 1500);
+              return;
+          }
+
+          if (err.code === 'auth/internal-error') {
+             setError("Connection error. Try Guest Mode.");
+             setShowGuest(true);
           } else {
-              setError("Login failed. Please try again.");
+             setError("Login failed. Please try again.");
           }
           setIsLoading(false);
       }
@@ -79,8 +88,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
           } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
               setError("Invalid email or password.");
           } else if (err.code === 'auth/unauthorized-domain') {
-               setError("Domain not authorized. Use Guest Mode.");
-               setShowGuest(true);
+               setError("Domain not authorized. Switching to Guest...");
+               setTimeout(handleGuestLogin, 1000);
           } else {
               setError("Authentication failed. Try again.");
           }
@@ -122,7 +131,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
             
             {/* Error Message */}
             {error && (
-                <div className="absolute top-0 left-0 w-full p-3 bg-red-500/80 text-white text-xs text-center font-bold flex items-center justify-center gap-2">
+                <div className="absolute top-0 left-0 w-full p-3 bg-red-500/80 text-white text-xs text-center font-bold flex items-center justify-center gap-2 z-20">
                     <AlertTriangle size={14} /> {error}
                 </div>
             )}

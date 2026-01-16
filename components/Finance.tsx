@@ -2,12 +2,13 @@
 import React, { useState } from 'react';
 import { User, Transaction } from '../types';
 import { MOCK_TRANSACTIONS } from '../services/mockData';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw } from 'lucide-react';
+import { initiateFapshiPayment } from '../services/fapshi';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface FinanceProps {
   user: User;
-  onTopUp: () => void; // Using the parent handler for simplicity or local logic
+  onTopUp: () => void;
 }
 
 export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
@@ -16,15 +17,47 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   const [provider, setProvider] = useState<'mtn' | 'orange'>('mtn');
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
 
-  const handleSubmit = () => {
+  const handleDeposit = async () => {
+      if(!amount) return;
+      const depositAmount = parseInt(amount);
+      if(depositAmount < 100) {
+          alert("Minimum deposit is 100 FCFA");
+          return;
+      }
+
+      setIsLoading(true);
+      
+      const response = await initiateFapshiPayment(depositAmount, user);
+      
+      setIsLoading(false);
+      
+      if (response && response.link) {
+          setPaymentLink(response.link);
+          // Auto open in new tab
+          window.open(response.link, '_blank');
+          
+          // Simulate payment completion listener
+          // In a real app, this would be a websocket/webhook check
+          setTimeout(() => {
+              onTopUp(); // Credit the simulated balance
+              alert("Payment Detected! Balance updated.");
+              setPaymentLink(null);
+              setAmount('');
+          }, 8000); 
+      } else {
+          alert("Failed to initiate payment. Please try again.");
+      }
+  };
+
+  const handleWithdraw = () => {
       if(!amount || !phone) return;
       setIsLoading(true);
       setTimeout(() => {
           setIsLoading(false);
-          alert(activeTab === 'deposit' ? 'Deposit request sent to your phone!' : 'Withdrawal processed successfully!');
+          alert('Withdrawal processed successfully! Funds sent to ' + phone);
           setAmount('');
-          if(activeTab === 'deposit') onTopUp();
       }, 2000);
   };
 
@@ -76,7 +109,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                    {['deposit', 'withdraw', 'history'].map(tab => (
                        <button
                            key={tab}
-                           onClick={() => setActiveTab(tab as any)}
+                           onClick={() => { setActiveTab(tab as any); setPaymentLink(null); }}
                            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all capitalize ${
                                activeTab === tab 
                                ? 'bg-royal-800 text-white shadow-lg' 
@@ -105,80 +138,96 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                    </div>
                                    <div>
                                        <h3 className="text-lg font-bold text-white">Deposit Funds</h3>
-                                       <p className="text-sm text-slate-400">Instant top-up via Mobile Money</p>
+                                       <p className="text-sm text-slate-400">Secured by Fapshi Payment Gateway</p>
                                    </div>
                                </div>
 
-                               <div className="grid grid-cols-2 gap-4">
-                                   <button 
-                                       onClick={() => setProvider('mtn')}
-                                       className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
-                                           provider === 'mtn' ? 'border-yellow-400 bg-yellow-400/10' : 'border-white/5 hover:bg-white/5'
-                                       }`}
-                                   >
-                                       <div className="w-8 h-8 rounded-full bg-[#ffcc00] flex items-center justify-center text-black font-black text-xs">MTN</div>
-                                       <span className={`text-sm font-bold ${provider === 'mtn' ? 'text-yellow-400' : 'text-slate-400'}`}>MTN MoMo</span>
-                                   </button>
-                                   <button 
-                                       onClick={() => setProvider('orange')}
-                                       className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
-                                           provider === 'orange' ? 'border-orange-500 bg-orange-500/10' : 'border-white/5 hover:bg-white/5'
-                                       }`}
-                                   >
-                                       <div className="w-8 h-8 rounded-full bg-[#ff6600] flex items-center justify-center text-white font-black text-xs">OM</div>
-                                       <span className={`text-sm font-bold ${provider === 'orange' ? 'text-orange-500' : 'text-slate-400'}`}>Orange Money</span>
-                                   </button>
-                               </div>
-
-                               <div className="space-y-4">
-                                   <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
-                                       <div className="relative">
-                                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
-                                           <input 
-                                               type="number" 
-                                               value={amount}
-                                               onChange={e => setAmount(e.target.value)}
-                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
-                                               placeholder="5,000"
-                                           />
+                               {!paymentLink ? (
+                                   <>
+                                       <div className="grid grid-cols-2 gap-4">
+                                           <button 
+                                               onClick={() => setProvider('mtn')}
+                                               className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                                   provider === 'mtn' ? 'border-yellow-400 bg-yellow-400/10' : 'border-white/5 hover:bg-white/5'
+                                               }`}
+                                           >
+                                               <div className="w-8 h-8 rounded-full bg-[#ffcc00] flex items-center justify-center text-black font-black text-xs">MTN</div>
+                                               <span className={`text-sm font-bold ${provider === 'mtn' ? 'text-yellow-400' : 'text-slate-400'}`}>MTN MoMo</span>
+                                           </button>
+                                           <button 
+                                               onClick={() => setProvider('orange')}
+                                               className={`p-4 rounded-xl border-2 flex flex-col items-center gap-2 transition-all ${
+                                                   provider === 'orange' ? 'border-orange-500 bg-orange-500/10' : 'border-white/5 hover:bg-white/5'
+                                               }`}
+                                           >
+                                               <div className="w-8 h-8 rounded-full bg-[#ff6600] flex items-center justify-center text-white font-black text-xs">OM</div>
+                                               <span className={`text-sm font-bold ${provider === 'orange' ? 'text-orange-500' : 'text-slate-400'}`}>Orange Money</span>
+                                           </button>
                                        </div>
-                                       <div className="flex gap-2 mt-2">
-                                           {[1000, 5000, 10000, 25000].map(val => (
-                                               <button 
-                                                   key={val}
-                                                   onClick={() => setAmount(val.toString())}
-                                                   className="px-3 py-1 rounded-lg bg-white/5 text-xs text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-                                               >
-                                                   +{val.toLocaleString()}
-                                               </button>
-                                           ))}
+
+                                       <div className="space-y-4">
+                                           <div>
+                                               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
+                                               <div className="relative">
+                                                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
+                                                   <input 
+                                                       type="number" 
+                                                       value={amount}
+                                                       onChange={e => setAmount(e.target.value)}
+                                                       className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
+                                                       placeholder="5,000"
+                                                   />
+                                               </div>
+                                               <div className="flex gap-2 mt-2">
+                                                   {[1000, 5000, 10000, 25000].map(val => (
+                                                       <button 
+                                                           key={val}
+                                                           onClick={() => setAmount(val.toString())}
+                                                           className="px-3 py-1 rounded-lg bg-white/5 text-xs text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+                                                       >
+                                                           +{val.toLocaleString()}
+                                                       </button>
+                                                   ))}
+                                               </div>
+                                           </div>
+
+                                           <button 
+                                               onClick={handleDeposit}
+                                               disabled={isLoading || !amount}
+                                               className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                           >
+                                               {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
+                                               {isLoading ? 'Processing...' : 'Proceed to Payment'}
+                                           </button>
+                                       </div>
+                                   </>
+                               ) : (
+                                   <div className="text-center py-8">
+                                       <div className="w-16 h-16 bg-gold-500/20 text-gold-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+                                           <Smartphone size={32} />
+                                       </div>
+                                       <h3 className="text-xl font-bold text-white mb-2">Payment Initiated</h3>
+                                       <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
+                                           A payment page has been opened. Please complete the transaction.
+                                       </p>
+                                       <div className="flex flex-col gap-3">
+                                            <a 
+                                                href={paymentLink} 
+                                                target="_blank" 
+                                                rel="noreferrer"
+                                                className="w-full py-3 bg-gold-500 text-royal-900 font-bold rounded-xl hover:bg-gold-400 flex items-center justify-center gap-2"
+                                            >
+                                                <ExternalLink size={18} /> Open Payment Page Again
+                                            </a>
+                                            <button 
+                                                onClick={() => setPaymentLink(null)}
+                                                className="text-slate-400 text-sm hover:text-white"
+                                            >
+                                                Cancel
+                                            </button>
                                        </div>
                                    </div>
-
-                                   <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Phone Number</label>
-                                       <div className="relative">
-                                           <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                           <input 
-                                               type="tel" 
-                                               value={phone}
-                                               onChange={e => setPhone(e.target.value)}
-                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white font-mono focus:outline-none focus:border-gold-500 transition-colors"
-                                               placeholder="6XX XXX XXX"
-                                           />
-                                       </div>
-                                   </div>
-
-                                   <button 
-                                       onClick={handleSubmit}
-                                       disabled={isLoading || !amount || !phone}
-                                       className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                   >
-                                       {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
-                                       {isLoading ? 'Processing...' : 'Confirm Deposit'}
-                                   </button>
-                               </div>
+                               )}
                            </motion.div>
                        )}
 
@@ -240,7 +289,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                    </div>
 
                                    <button 
-                                       onClick={handleSubmit}
+                                       onClick={handleWithdraw}
                                        disabled={isLoading || !amount || !phone || Number(amount) > user.balance}
                                        className="w-full py-4 bg-white text-royal-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                    >

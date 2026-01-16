@@ -14,6 +14,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
 import { AdminDashboard } from './components/AdminDashboard';
+import { GameResultOverlay } from './components/GameResultOverlay';
 import { CURRENT_USER } from './services/mockData';
 import { auth, syncUserProfile, logout } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -24,30 +25,26 @@ export default function App() {
   const [activeTable, setActiveTable] = useState<Table | null>(null);
   const [matchmakingConfig, setMatchmakingConfig] = useState<{stake: number, gameType: string} | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  
+  // Game End State
+  const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number } | null>(null);
+  
+  // State to handle game selection from Dashboard -> Lobby
+  const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
 
   // 1. Firebase Auth Listener: Sync User State ONLY
-  // Removed dependency on currentView to prevent navigation loops
   useEffect(() => {
       const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
-              // User is signed in, sync data from Firestore
               try {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
               } catch (error) {
                   console.error("Profile sync failed:", error);
-                  // Fallback or error handling
               }
           } else {
-              // Only reset if we are NOT in a manual Guest session
-              // Since we don't track session type explicitly here, this might clear guest user on reload.
-              // For MVP, this is acceptable. If real auth fails, the user is null.
               if (!user || user.id.startsWith('guest-')) {
-                  // Keep guest or null? 
-                  // If firebase sends null, it means no firebase user. 
-                  // If we are guest, we are bypassing firebase.
-                  // But onAuthStateChanged fires initially. 
-                  // We will handle Guest Mode by manually setting user in AuthScreen callback.
+                  // Keep guest or null handling
               } else {
                  setUser(null);
               }
@@ -58,19 +55,15 @@ export default function App() {
       return () => unsubscribe();
   }, []);
 
-  // 2. Navigation Guard: Handle Automatic Redirections
+  // 2. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 
       if (user) {
-          // If user is logged in but on a public-only page (Landing/Auth), redirect to Dashboard
-          // We allow 'how-it-works' even if logged in? Usually yes, but standard flow goes to dashboard.
-          // Let's redirect Landing/Auth to Dashboard.
           if (currentView === 'landing' || currentView === 'auth') {
               setView('dashboard');
           }
       } else {
-          // If user is logged out but on a protected page, redirect to Landing
           const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin'];
           if (protectedViews.includes(currentView)) {
               setView('landing');
@@ -102,8 +95,6 @@ export default function App() {
 
   const handleMatchFound = (table: Table) => {
       if (!user) return;
-      
-      // Only deduct balance if there is a stake (Practice mode has 0 stake)
       if (table.stake > 0) {
           if (user.balance < table.stake) {
               alert("Match found but insufficient balance.");
@@ -112,19 +103,36 @@ export default function App() {
           }
           setUser(prev => prev ? ({ ...prev, balance: prev.balance - table.stake }) : null);
       }
-      
       setActiveTable(table);
       setView('game');
   };
 
   const handleGameEnd = (result: 'win' | 'loss' | 'quit') => {
-    // Only award winnings if it was a paid game (stake > 0)
-    if (activeTable && result === 'win' && user && activeTable.stake > 0) {
-        const totalPot = activeTable.stake * 2;
-        const fee = totalPot * 0.10;
-        const payout = totalPot - fee;
-        setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
+    let amountChanged = 0;
+
+    if (activeTable && activeTable.stake > 0) {
+        if (result === 'win') {
+            const totalPot = activeTable.stake * 2;
+            const fee = totalPot * 0.10;
+            const payout = totalPot - fee;
+            amountChanged = payout; // Full payout shown (includes return of stake)
+            
+            // NOTE: Stake was already deducted at start. 
+            // We add the full payout to balance here.
+            setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
+        } else if (result === 'loss') {
+            // For loss, we just show what they lost (stake). 
+            // Balance doesn't change now because it was deducted at start.
+            amountChanged = -activeTable.stake;
+        }
     }
+    
+    // Trigger Overlay
+    setGameResult({ result, amount: amountChanged });
+  };
+
+  const finalizeGameEnd = () => {
+    setGameResult(null);
     setActiveTable(null);
     setView('dashboard');
   };
@@ -133,6 +141,16 @@ export default function App() {
       await logout();
       setUser(null);
       setView('landing');
+  };
+  
+  // Dashboard Action Handler
+  const handleDashboardQuickMatch = (gameId?: string) => {
+      if (gameId) {
+          setPreSelectedGame(gameId);
+      } else {
+          setPreSelectedGame(null);
+      }
+      setView('lobby');
   };
 
   if (authLoading) {
@@ -145,13 +163,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
-      {/* Sidebar / Bottom Nav - Only show on main app screens if user exists */}
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
+      {/* Game Result Overlay */}
+      {gameResult && (
+          <GameResultOverlay 
+             result={gameResult.result} 
+             amount={gameResult.amount} 
+             onContinue={finalizeGameEnd} 
+          />
+      )}
+
       <main className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {/* Background Blob */}
         {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
@@ -175,16 +200,13 @@ export default function App() {
 
         {currentView === 'auth' && (
             <AuthScreen onAuthenticated={(guestUser?: User) => {
-                // If we receive a guest user (manual login), set it immediately
                 if (guestUser) {
                     setUser(guestUser);
                     setView('dashboard');
                 }
-                // If undefined, we assume Firebase listener will handle it (standard flow)
             }} />
         )}
 
-        {/* Protected Routes */}
         {user && (
             <>
                 {currentView === 'dashboard' && (
@@ -192,7 +214,7 @@ export default function App() {
                         user={user} 
                         setView={setView} 
                         onTopUp={() => setView('finance')} 
-                        onQuickMatch={() => setView('lobby')}
+                        onQuickMatch={handleDashboardQuickMatch}
                     />
                 )}
                 
@@ -201,6 +223,8 @@ export default function App() {
                         user={user}
                         setView={setView} 
                         onQuickMatch={startMatchmaking}
+                        initialGameId={preSelectedGame}
+                        onClearInitialGame={() => setPreSelectedGame(null)}
                     />
                 )}
                 
@@ -215,6 +239,8 @@ export default function App() {
                     <Profile 
                         user={user} 
                         onLogout={handleLogout}
+                        onUpdateProfile={(updates) => setUser(prev => prev ? ({ ...prev, ...updates }) : null)}
+                        onNavigate={setView}
                     />
                 )}
                 

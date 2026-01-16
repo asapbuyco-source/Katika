@@ -1,19 +1,38 @@
 
-import React, { useState } from 'react';
-import { User, Transaction } from '../types';
+import React, { useState, useEffect } from 'react';
+import { User, ViewState } from '../types';
 import { MOCK_TRANSACTIONS } from '../services/mockData';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProfileProps {
   user: User;
   onLogout: () => void;
+  onUpdateProfile: (updates: Partial<User>) => void;
+  onNavigate: (view: ViewState) => void;
 }
 
-export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
+const PRESET_AVATARS = [
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka',
+    'https://api.dicebear.com/7.x/bottts/svg?seed=Caleb',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Zoe',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Jack',
+    'https://api.dicebear.com/7.x/avataaars/svg?seed=Milo',
+    'https://i.pravatar.cc/150?u=1',
+    'https://i.pravatar.cc/150?u=2',
+    'https://i.pravatar.cc/150?u=3',
+];
+
+export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'settings'>('overview');
+  const [isEditing, setIsEditing] = useState(false);
   
-  // Mock Settings State
+  // Edit State
+  const [tempName, setTempName] = useState(user.name);
+  const [tempAvatar, setTempAvatar] = useState(user.avatar);
+  
+  // Settings State
   const [preferences, setPreferences] = useState({
       biometrics: true,
       notifications: true,
@@ -22,16 +41,30 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
       language: 'English'
   });
 
+  useEffect(() => {
+    if (!isEditing) {
+        setTempName(user.name);
+        setTempAvatar(user.avatar);
+    }
+  }, [user, isEditing]);
+
   const togglePref = (key: keyof typeof preferences) => {
       setPreferences(prev => ({ ...prev, [key]: !prev[key as keyof typeof preferences] }));
   };
 
-  const handleDeposit = () => {
-    alert("Deposit Successful! 10,000 FCFA has been added to your balance.");
+  const handleSaveProfile = () => {
+      if (!tempName.trim()) {
+          alert("Name cannot be empty");
+          return;
+      }
+      onUpdateProfile({ name: tempName, avatar: tempAvatar });
+      setIsEditing(false);
   };
 
-  const handleWithdraw = () => {
-    alert("Withdrawal Initiated! 5,000 FCFA has been sent to your Mobile Money account.");
+  const handleCancelEdit = () => {
+      setTempName(user.name);
+      setTempAvatar(user.avatar);
+      setIsEditing(false);
   };
 
   const getRankColor = (tier: string) => {
@@ -65,40 +98,105 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
            
            <div className="flex flex-col md:flex-row items-end md:items-center justify-between px-4 pb-4">
                <div className="flex flex-col md:flex-row items-center md:items-end gap-6 w-full">
+                   
+                   {/* Avatar Section */}
                    <div className="relative group">
-                       <div className="w-28 h-28 rounded-full border-4 border-royal-950 p-1 bg-royal-800 relative z-10 shadow-2xl">
-                           <img src={user.avatar} alt="Profile" className="w-full h-full rounded-full object-cover" />
-                       </div>
-                       <button className="absolute bottom-1 right-1 bg-gold-500 text-black p-2 rounded-full z-20 hover:scale-110 transition-transform shadow-lg border-2 border-royal-950">
-                           <Edit2 size={14} />
-                       </button>
+                       <motion.div layout className="w-28 h-28 rounded-full border-4 border-royal-950 p-1 bg-royal-800 relative z-10 shadow-2xl overflow-hidden">
+                           <img src={isEditing ? tempAvatar : user.avatar} alt="Profile" className="w-full h-full rounded-full object-cover" />
+                           {isEditing && (
+                               <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+                                   <Camera size={24} className="text-white opacity-80" />
+                               </div>
+                           )}
+                       </motion.div>
                    </div>
                    
-                   <div className="text-center md:text-left mb-2 flex-1">
-                       <h1 className="text-3xl font-display font-bold text-white mb-1 flex items-center justify-center md:justify-start gap-2">
-                           {user.name}
-                           <Shield size={18} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
-                       </h1>
-                       <div className="flex items-center justify-center md:justify-start gap-3 text-sm">
-                           <span className={`px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider ${getRankColor(user.rankTier)}`}>
-                               {user.rankTier} Tier
-                           </span>
-                           <span className="text-slate-400 font-mono flex items-center gap-1">
-                               ID: <span className="text-slate-200">{user.id.toUpperCase()}</span>
-                           </span>
-                       </div>
+                   <div className="text-center md:text-left mb-2 flex-1 w-full md:w-auto">
+                       {isEditing ? (
+                           <div className="flex flex-col items-center md:items-start gap-2">
+                               <input 
+                                  value={tempName}
+                                  onChange={(e) => setTempName(e.target.value)}
+                                  className="text-3xl font-display font-bold text-white bg-black/30 border border-white/20 rounded-lg px-2 py-1 focus:border-gold-500 outline-none w-full max-w-[300px] text-center md:text-left"
+                                  placeholder="Enter Name"
+                               />
+                               <div className="text-xs text-slate-400">ID: {user.id.toUpperCase()}</div>
+                           </div>
+                       ) : (
+                           <>
+                               <h1 className="text-3xl font-display font-bold text-white mb-1 flex items-center justify-center md:justify-start gap-2">
+                                   {user.name}
+                                   <Shield size={18} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
+                               </h1>
+                               <div className="flex items-center justify-center md:justify-start gap-3 text-sm">
+                                   <span className={`px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider ${getRankColor(user.rankTier)}`}>
+                                       {user.rankTier} Tier
+                                   </span>
+                                   <span className="text-slate-400 font-mono flex items-center gap-1">
+                                       ID: <span className="text-slate-200">{user.id.toUpperCase()}</span>
+                                   </span>
+                               </div>
+                           </>
+                       )}
                    </div>
 
                    <div className="flex gap-3 mt-4 md:mt-0 w-full md:w-auto">
-                       <button className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm">
-                           Edit Profile
-                       </button>
-                       <button onClick={onLogout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all">
-                           <LogOut size={20} />
-                       </button>
+                       {isEditing ? (
+                           <>
+                                <button onClick={handleSaveProfile} className="flex-1 md:flex-none px-6 py-3 bg-green-500 hover:bg-green-600 rounded-xl text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg">
+                                    <Check size={18} /> Save
+                                </button>
+                                <button onClick={handleCancelEdit} className="px-4 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all flex items-center justify-center">
+                                    <X size={20} />
+                                </button>
+                           </>
+                       ) : (
+                           <>
+                                <button onClick={() => setIsEditing(true)} className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm flex items-center justify-center gap-2">
+                                    <Edit2 size={16} /> Edit Profile
+                                </button>
+                                <button onClick={onLogout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all flex items-center justify-center">
+                                    <LogOut size={20} />
+                                </button>
+                           </>
+                       )}
                    </div>
                </div>
            </div>
+
+           {/* Avatar Picker Drawer */}
+           <AnimatePresence>
+               {isEditing && (
+                   <motion.div 
+                     initial={{ height: 0, opacity: 0 }}
+                     animate={{ height: 'auto', opacity: 1 }}
+                     exit={{ height: 0, opacity: 0 }}
+                     className="overflow-hidden"
+                   >
+                       <div className="mt-6 p-4 bg-black/20 rounded-xl border border-white/5">
+                           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Choose Avatar</p>
+                           <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                               {PRESET_AVATARS.map((avatar, i) => (
+                                   <button 
+                                      key={i}
+                                      onClick={() => setTempAvatar(avatar)}
+                                      className={`w-14 h-14 flex-shrink-0 rounded-full border-2 transition-all overflow-hidden relative ${
+                                          tempAvatar === avatar ? 'border-gold-500 scale-110 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'
+                                      }`}
+                                   >
+                                       <img src={avatar} className="w-full h-full object-cover" />
+                                       {tempAvatar === avatar && (
+                                           <div className="absolute inset-0 bg-gold-500/20 flex items-center justify-center">
+                                               <Check size={16} className="text-white drop-shadow-md" />
+                                           </div>
+                                       )}
+                                   </button>
+                               ))}
+                           </div>
+                       </div>
+                   </motion.div>
+               )}
+           </AnimatePresence>
        </header>
 
        {/* Navigation Tabs */}
@@ -201,13 +299,13 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
                                   </h2>
                                   <div className="space-y-3">
                                       <button 
-                                        onClick={handleDeposit}
+                                        onClick={() => onNavigate('finance')}
                                         className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-[0_0_20px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] active:scale-95 flex items-center justify-center gap-2"
                                       >
                                           <Wallet size={18} /> Deposit Funds
                                       </button>
                                       <button 
-                                        onClick={handleWithdraw}
+                                        onClick={() => onNavigate('finance')}
                                         className="w-full py-3.5 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10 flex items-center justify-center gap-2"
                                       >
                                           <CreditCard size={18} /> Withdraw
@@ -418,13 +516,22 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
                                    <HelpCircle className="text-blue-400" size={20} /> Support
                                </h3>
                                <div className="space-y-2">
-                                   <button className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center">
+                                   <button 
+                                     onClick={() => alert("Help Center ticket created.")}
+                                     className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
+                                   >
                                        Help Center <ChevronRight size={16} />
                                    </button>
-                                   <button className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center">
+                                   <button 
+                                     onClick={() => alert("Bug report submitted.")}
+                                     className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
+                                   >
                                        Report a Bug <ChevronRight size={16} />
                                    </button>
-                                   <button className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center">
+                                   <button 
+                                     onClick={() => alert("Terms of Service opened.")}
+                                     className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
+                                   >
                                        Terms of Service <ChevronRight size={16} />
                                    </button>
                                </div>

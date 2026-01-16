@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Trophy, Shield, Zap, Hash, Dna } from 'lucide-react';
+import { ArrowLeft, Trophy, Shield, Zap, Hash, Dna, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -83,6 +83,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
   const [currentRoll, setCurrentRoll] = useState({ me: 1, opp: 1 });
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [serverHash, setServerHash] = useState(generateMockHash());
+  const [showForfeitModal, setShowForfeitModal] = useState(false);
 
   function generateMockHash() {
       return Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
@@ -155,9 +156,55 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd }) =>
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-start md:justify-center p-4 pb-28 pt-8 md:pt-4">
        
+       {/* FORFEIT MODAL */}
+       <AnimatePresence>
+          {showForfeitModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowForfeitModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
+                  >
+                      {/* Red Glow */}
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                              <AlertTriangle className="text-red-500" size={32} />
+                          </div>
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>. 
+                              Your staked funds will be transferred to the opponent.
+                          </p>
+                      </div>
+
+                      <div className="flex gap-3">
+                          <button 
+                            onClick={() => setShowForfeitModal(false)}
+                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
+                          >
+                              Stay in Game
+                          </button>
+                          <button 
+                            onClick={() => onGameEnd('quit')}
+                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
+                          >
+                              Yes, Forfeit
+                          </button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
        {/* Header */}
        <div className="w-full max-w-5xl flex justify-between items-center mb-6 md:mb-8 gap-2">
-           <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
+           <button onClick={() => setShowForfeitModal(true)} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
                 <div className="p-2 bg-royal-800 rounded-lg group-hover:bg-royal-700 transition-colors">
                     <ArrowLeft size={20} />
                 </div>

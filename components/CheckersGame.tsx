@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Crown, Shield, Activity, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -20,31 +20,152 @@ interface Piece {
 }
 
 interface Move {
+  fromR: number;
+  fromC: number;
   r: number;
   c: number;
   isJump: boolean;
   jumpId?: string; // ID of captured piece
 }
 
+// --- OPTIMIZED CELL COMPONENT ---
+const CheckersCell = React.memo(({
+  r, c, isDark, piece, isSelected, validMove, isHintSource, isHintDest, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn
+}: {
+  r: number, c: number, isDark: boolean, piece?: Piece, isSelected: boolean, validMove?: Move, 
+  isHintSource: boolean, isHintDest: boolean, isLastFrom: boolean, isLastTo: boolean,
+  onPieceClick: (p: Piece) => void, onMoveClick: (m: Move) => void, isMeTurn: boolean
+}) => {
+  
+  const isMe = piece?.player === 'me';
+  // Only clickable if it's my piece during my turn OR it's a valid move destination
+  const isClickable = (isMeTurn && isMe) || !!validMove;
+
+  return (
+    <div 
+       onClick={(e) => {
+           e.stopPropagation();
+           if (piece && isMe) onPieceClick(piece);
+           if (validMove) onMoveClick(validMove);
+       }}
+       className={`
+          relative w-full h-full flex items-center justify-center
+          ${isDark ? 'bg-royal-900/60' : 'bg-white/5'}
+          ${isClickable ? 'cursor-pointer' : ''}
+       `}
+    >
+        {/* Board Cell Aesthetics */}
+        {isDark && (
+            <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />
+        )}
+        
+        {/* Highlights */}
+        {(isLastFrom || isLastTo) && (
+            <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />
+        )}
+        
+        {/* Valid Move Indicator */}
+        {validMove && (
+           <motion.div 
+              initial={{ scale: 0, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={`absolute inset-2 rounded-full border-2 border-dashed flex items-center justify-center z-10 ${validMove.isJump ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'}`}
+           >
+               <div className={`w-3 h-3 rounded-full ${validMove.isJump ? 'bg-red-500' : 'bg-green-500'} animate-pulse`} />
+           </motion.div>
+        )}
+
+        {/* Hint Arrow Overlay */}
+        {isHintSource && (
+            <div className="absolute inset-0 flex items-center justify-center z-30 pointer-events-none">
+                <div className="w-full h-full border-4 border-yellow-400 rounded-full animate-ping opacity-50"></div>
+            </div>
+        )}
+
+        {/* PIECE RENDERING */}
+        <AnimatePresence mode="popLayout">
+            {piece && (
+                <motion.div
+                    layoutId={`piece-${piece.id}`}
+                    initial={{ scale: 0.5, opacity: 0 }}
+                    animate={{ scale: isSelected ? 1.1 : 1, opacity: 1 }}
+                    exit={{ scale: 0, opacity: 0 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    className="relative w-[80%] h-[80%] z-20 pointer-events-none"
+                >
+                    {/* Shadow Base */}
+                    <div className="absolute bottom-[-10%] left-[5%] w-[90%] h-[20%] bg-black/60 blur-sm rounded-full" />
+                    
+                    {/* The Piece Body */}
+                    <div className={`
+                        w-full h-full rounded-full shadow-[inset_0_2px_4px_rgba(255,255,255,0.4),inset_0_-4px_4px_rgba(0,0,0,0.4)]
+                        border-2 border-opacity-50 flex items-center justify-center relative overflow-hidden
+                        ${isMe 
+                          ? 'bg-gradient-to-br from-gold-300 via-gold-500 to-yellow-800 border-yellow-200' 
+                          : 'bg-gradient-to-br from-red-400 via-red-600 to-red-900 border-red-300'}
+                        ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}
+                    `}>
+                        {/* Inner Bevel Ring */}
+                        <div className={`absolute inset-[15%] rounded-full border border-black/10 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)] ${isMe ? 'bg-gold-400' : 'bg-red-500'}`}></div>
+
+                        {/* King Crown */}
+                        {piece.isKing && (
+                            <motion.div 
+                              initial={{ scale: 0, rotate: -45 }}
+                              animate={{ scale: 1, rotate: 0 }}
+                              className="relative z-10"
+                            >
+                                <Crown size={24} className="text-white drop-shadow-md" fill="currentColor" />
+                            </motion.div>
+                        )}
+                        
+                        {/* Gloss Reflection */}
+                        <div className="absolute top-[5%] left-[10%] w-[40%] h-[20%] bg-gradient-to-b from-white to-transparent opacity-40 rounded-full blur-[1px]"></div>
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
+    </div>
+  );
+}, (prev, next) => {
+    // Props check optimization
+    return (
+        prev.r === next.r && 
+        prev.c === next.c &&
+        prev.isDark === next.isDark &&
+        prev.piece === next.piece &&
+        prev.isSelected === next.isSelected &&
+        prev.validMove === next.validMove &&
+        prev.isHintSource === next.isHintSource &&
+        prev.isHintDest === next.isHintDest &&
+        prev.isLastFrom === next.isLastFrom &&
+        prev.isLastTo === next.isLastTo &&
+        prev.isMeTurn === next.isMeTurn
+    );
+});
+
 export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameEnd }) => {
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [turn, setTurn] = useState<'me' | 'opponent'>('me');
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [validMoves, setValidMoves] = useState<Move[]>([]);
+  const [lastMove, setLastMove] = useState<{from: string, to: string} | null>(null);
+  
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [capturedMe, setCapturedMe] = useState(0);
   const [capturedOpp, setCapturedOpp] = useState(0);
+  
+  const [mustJumpFrom, setMustJumpFrom] = useState<string | null>(null);
+  const [hintMoves, setHintMoves] = useState<Move[]>([]);
+  const [showForfeitModal, setShowForfeitModal] = useState(false);
 
-  // --- INITIALIZATION ---
+  // Initialize
   useEffect(() => {
     const initialPieces: Piece[] = [];
-    // Initialize standard 8x8 checkers setup
-    // Rows 0,1,2: Opponent (Red/Top)
-    // Rows 5,6,7: Me (Gold/Bottom)
     let idCounter = 0;
     for (let r = 0; r < 8; r++) {
       for (let c = 0; c < 8; c++) {
-        if ((r + c) % 2 === 1) { // Dark squares only
+        if ((r + c) % 2 === 1) { 
           if (r < 3) {
             initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
           } else if (r > 4) {
@@ -56,334 +177,444 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     setPieces(initialPieces);
   }, []);
 
-  // --- GAME LOGIC ---
-
-  const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
+  const addLog = useCallback((msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
-  };
+  }, []);
 
-  const getValidMoves = (piece: Piece, currentPieces: Piece[]): Move[] => {
-    const moves: Move[] = [];
-    const directions = piece.isKing ? [-1, 1] : piece.player === 'me' ? [-1] : [1];
+  const triggerHints = useCallback((moves: Move[]) => {
+      setHintMoves(moves);
+      setTimeout(() => setHintMoves([]), 2000);
+  }, []);
 
-    directions.forEach(dRow => {
-      [-1, 1].forEach(dCol => {
-        // 1. Simple Move
-        const targetR = piece.r + dRow;
-        const targetC = piece.c + dCol;
-        
-        if (isValidPos(targetR, targetC) && !getPieceAt(targetR, targetC, currentPieces)) {
-           // Standard move only allowed if NOT currently in a multi-jump sequence (simplified here)
-           moves.push({ r: targetR, c: targetC, isJump: false });
-        }
-
-        // 2. Jump
-        const jumpR = piece.r + (dRow * 2);
-        const jumpC = piece.c + (dCol * 2);
-        const midR = piece.r + dRow;
-        const midC = piece.c + dCol;
-        
-        if (isValidPos(jumpR, jumpC) && !getPieceAt(jumpR, jumpC, currentPieces)) {
-            const midPiece = getPieceAt(midR, midC, currentPieces);
-            if (midPiece && midPiece.player !== piece.player) {
-                moves.push({ r: jumpR, c: jumpC, isJump: true, jumpId: midPiece.id });
-            }
-        }
-      });
-    });
-    return moves;
-  };
-
+  // --- LOGIC ENGINE ---
   const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
-  const getPieceAt = (r: number, c: number, currentList: Piece[]) => currentList.find(p => p.r === r && p.c === c);
 
-  const handlePieceClick = (p: Piece) => {
-    if (turn !== 'me' || p.player !== 'me') return;
-    
-    // Select piece
-    if (selectedPieceId === p.id) {
-        setSelectedPieceId(null);
-        setValidMoves([]);
-    } else {
-        setSelectedPieceId(p.id);
-        const moves = getValidMoves(p, pieces);
-        // Force jump rule? For this demo, we won't strictly enforce "must jump", but we prioritize it visually
-        setValidMoves(moves);
-    }
-  };
+  const getPotentialMoves = useCallback((piece: Piece, currentPieces: Piece[]): Move[] => {
+      const moves: Move[] = [];
+      const isMe = piece.player === 'me';
+      const forwardDirs = isMe ? [-1] : [1];
+      const allDirs = [-1, 1];
+      const moveDirs = piece.isKing ? allDirs : forwardDirs;
+      const captureDirs = allDirs; 
+      
+      const pieceMap = new Map<string, Piece>();
+      currentPieces.forEach(p => pieceMap.set(`${p.r},${p.c}`, p));
+      const getP = (r: number, c: number) => pieceMap.get(`${r},${c}`);
 
-  const handleMoveClick = (move: Move) => {
-      if (!selectedPieceId) return;
-
-      setPieces(prev => {
-          const next = prev.map(p => {
-              if (p.id === selectedPieceId) {
-                  const isKing = p.isKing || (p.player === 'me' && move.r === 0) || (p.player === 'opponent' && move.r === 7);
-                  return { ...p, r: move.r, c: move.c, isKing };
+      // Simple Moves
+      moveDirs.forEach(dRow => {
+          [-1, 1].forEach(dCol => {
+              const targetR = piece.r + dRow;
+              const targetC = piece.c + dCol;
+              if (isValidPos(targetR, targetC) && !getP(targetR, targetC)) {
+                  moves.push({ fromR: piece.r, fromC: piece.c, r: targetR, c: targetC, isJump: false });
               }
-              return p;
           });
-
-          // Handle Capture
-          if (move.isJump && move.jumpId) {
-              addLog("Piece Captured!", "alert");
-              setCapturedOpp(c => c + 1);
-              return next.filter(p => p.id !== move.jumpId);
-          }
-
-          return next;
       });
 
-      setValidMoves([]);
-      setSelectedPieceId(null);
-      setTurn('opponent');
-      addLog("Move Verified on Chain", "secure");
+      // Jumps
+      captureDirs.forEach(dRow => {
+          [-1, 1].forEach(dCol => {
+              const midR = piece.r + dRow;
+              const midC = piece.c + dCol;
+              const jumpR = piece.r + (dRow * 2);
+              const jumpC = piece.c + (dCol * 2);
 
-      // Bot Turn
-      setTimeout(() => botTurn(), 1000);
-  };
+              if (isValidPos(jumpR, jumpC) && !getP(jumpR, jumpC)) {
+                  const midPiece = getP(midR, midC);
+                  if (midPiece && midPiece.player !== piece.player) {
+                      moves.push({ fromR: piece.r, fromC: piece.c, r: jumpR, c: jumpC, isJump: true, jumpId: midPiece.id });
+                  }
+              }
+          });
+      });
+      return moves;
+  }, []);
 
-  const botTurn = () => {
-      setPieces(currentPieces => {
-          // Find all opponent pieces
-          const oppPieces = currentPieces.filter(p => p.player === 'opponent');
-          let bestMove: { pieceId: string, move: Move } | null = null;
-          
-          // Simple AI: Prioritize jumps, then random
-          const allMoves: { pieceId: string, move: Move }[] = [];
-          
-          for (const p of oppPieces) {
-              const moves = getValidMoves(p, currentPieces);
-              moves.forEach(m => allMoves.push({ pieceId: p.id, move: m }));
-          }
+  const getGlobalValidMoves = useCallback((player: 'me' | 'opponent', currentPieces: Piece[], specificPieceId?: string | null): { moves: Move[], hasJump: boolean } => {
+      let allMoves: Move[] = [];
+      const playerPieces = currentPieces.filter(p => p.player === player);
+      const piecesToCheck = specificPieceId ? playerPieces.filter(p => p.id === specificPieceId) : playerPieces;
 
-          if (allMoves.length === 0) {
-              // Opponent has no moves - Player Wins
-              setTimeout(() => onGameEnd('win'), 1000);
-              return currentPieces;
-          }
-
-          const jumps = allMoves.filter(m => m.move.isJump);
-          if (jumps.length > 0) {
-              bestMove = jumps[Math.floor(Math.random() * jumps.length)];
+      piecesToCheck.forEach(p => {
+          const pMoves = getPotentialMoves(p, currentPieces);
+          if (specificPieceId) {
+             allMoves.push(...pMoves.filter(m => m.isJump));
           } else {
-              bestMove = allMoves[Math.floor(Math.random() * allMoves.length)];
+             allMoves.push(...pMoves);
           }
-
-          // Execute Bot Move
-          const next = currentPieces.map(p => {
-              if (p.id === bestMove!.pieceId) {
-                  const m = bestMove!.move;
-                  const isKing = p.isKing || (p.player === 'opponent' && m.r === 7);
-                  return { ...p, r: m.r, c: m.c, isKing };
-              }
-              return p;
-          });
-
-          if (bestMove.move.isJump && bestMove.move.jumpId) {
-             setCapturedMe(c => c + 1);
-             addLog("Opponent captured your piece", "alert");
-             return next.filter(p => p.id !== bestMove!.move.jumpId);
-          }
-
-          addLog("Opponent moved", "secure");
-          setTurn('me');
-          return next;
       });
-  };
 
-  // --- RENDER ---
-  const renderBoard = () => {
-      const squares = [];
-      for(let r=0; r<8; r++){
-          for(let c=0; c<8; c++){
-              const isDark = (r + c) % 2 === 1;
-              const isSelected = selectedPieceId && pieces.find(p => p.id === selectedPieceId)?.r === r && pieces.find(p => p.id === selectedPieceId)?.c === c;
-              const isValidMove = validMoves.find(m => m.r === r && m.c === c);
-              
-              squares.push(
-                  <div 
-                    key={`${r}-${c}`}
-                    onClick={() => isValidMove ? handleMoveClick(isValidMove) : undefined}
-                    className={`
-                        relative w-full h-full flex items-center justify-center
-                        ${isDark ? 'bg-black/40 shadow-inner' : 'bg-transparent'}
-                        ${isValidMove ? 'cursor-pointer' : ''}
-                    `}
-                  >
-                      {/* Valid Move Indicator */}
-                      {isValidMove && (
-                          <motion.div 
-                             initial={{ scale: 0 }} animate={{ scale: 1 }}
-                             className={`w-4 h-4 rounded-full opacity-50 ${isValidMove.isJump ? 'bg-red-500 box-shadow-[0_0_10px_red]' : 'bg-green-400'}`}
-                          />
-                      )}
+      const jumps = allMoves.filter(m => m.isJump);
+      if (jumps.length > 0) return { moves: jumps, hasJump: true };
+      return { moves: allMoves, hasJump: false };
+  }, [getPotentialMoves]);
 
-                      {/* Rank/File Labels for aesthetic */}
-                      {c === 0 && isDark && <span className="absolute left-0.5 top-0.5 text-[8px] text-white/20 font-mono">{8-r}</span>}
-                      {r === 7 && isDark && <span className="absolute right-0.5 bottom-0 text-[8px] text-white/20 font-mono">{String.fromCharCode(97+c)}</span>}
-                  </div>
-              );
+  // --- BOT LOGIC ---
+  const performBotUpdate = useCallback((move: Move, currentBoard: Piece[]) => {
+      const pId = currentBoard.find(p => p.r === move.fromR && p.c === move.fromC)?.id;
+      if (!pId) return;
+
+      const isPromotion = !currentBoard.find(p => p.id === pId)?.isKing && move.r === 7;
+      const nextPieces = currentBoard
+        .filter(p => p.id !== move.jumpId)
+        .map(p => {
+            if (p.id === pId) return { ...p, r: move.r, c: move.c, isKing: p.isKing || isPromotion };
+            return p;
+        });
+      
+      setPieces(nextPieces);
+      setLastMove({ from: `${move.fromR},${move.fromC}`, to: `${move.r},${move.c}` });
+
+      if (move.isJump) {
+          setCapturedMe(c => c + 1);
+          addLog("Opponent captured your piece!", "alert");
+          const movedPiece = nextPieces.find(p => p.id === pId)!;
+          const { moves: moreJumps } = getGlobalValidMoves('opponent', nextPieces, movedPiece.id);
+          
+          if (moreJumps.length > 0 && moreJumps[0].isJump) {
+               setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 800);
+               return;
           }
       }
-      return squares;
+
+      const { moves: playerMoves } = getGlobalValidMoves('me', nextPieces);
+      if (playerMoves.length === 0) {
+          onGameEnd('loss');
+          return;
+      }
+      setTurn('me');
+      setMustJumpFrom(null);
+      setSelectedPieceId(null);
+  }, [getGlobalValidMoves, addLog, onGameEnd]);
+
+  const executeBotMoveRef = useRef<(currentBoard: Piece[], multiJumpPieceId?: string | null) => void>(null);
+
+  const executeBotMove = (currentBoard: Piece[], multiJumpPieceId: string | null = null) => {
+      const { moves } = getGlobalValidMoves('opponent', currentBoard, multiJumpPieceId);
+      if (moves.length === 0) {
+          onGameEnd('win');
+          return;
+      }
+      const move = moves[Math.floor(Math.random() * moves.length)];
+      setSelectedPieceId(currentBoard.find(p => p.r === move.fromR && p.c === move.fromC)?.id || null);
+      setTimeout(() => performBotUpdate(move, currentBoard), 500);
   };
+  executeBotMoveRef.current = executeBotMove;
+
+  // --- USER INTERACTION ---
+  const handlePieceClick = useCallback((p: Piece) => {
+    if (turn !== 'me' || p.player !== 'me') return;
+    const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
+
+    if (mustJumpFrom && mustJumpFrom !== p.id) {
+        addLog("Finish your jump sequence!", "alert");
+        triggerHints(moves); 
+        return;
+    }
+    if (hasJump) {
+        const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c);
+        if (!canThisPieceJump) {
+            addLog("Capture is mandatory!", "alert");
+            triggerHints(moves);
+            return;
+        }
+    }
+    if (selectedPieceId === p.id) {
+        if (!mustJumpFrom) {
+            setSelectedPieceId(null);
+            setValidMoves([]);
+            setHintMoves([]);
+        }
+    } else {
+        const pieceMoves = moves.filter(m => m.fromR === p.r && m.fromC === p.c);
+        if (pieceMoves.length > 0) {
+            setSelectedPieceId(p.id);
+            setValidMoves(pieceMoves);
+            setHintMoves([]);
+        }
+    }
+  }, [turn, pieces, mustJumpFrom, getGlobalValidMoves, selectedPieceId, addLog, triggerHints]);
+
+  const handleMoveClick = useCallback((move: Move) => {
+      if (!selectedPieceId) return;
+      const movingPiece = pieces.find(p => p.id === selectedPieceId);
+      if (!movingPiece) return;
+
+      const isPromotion = !movingPiece.isKing && ((movingPiece.player === 'me' && move.r === 0) || (movingPiece.player === 'opponent' && move.r === 7));
+
+      const nextPieces = pieces
+        .filter(p => p.id !== move.jumpId)
+        .map(p => {
+            if (p.id === selectedPieceId) {
+                return { ...p, r: move.r, c: move.c, isKing: p.isKing || isPromotion };
+            }
+            return p;
+        });
+      
+      setPieces(nextPieces);
+      setValidMoves([]);
+      setHintMoves([]);
+      setLastMove({ from: `${move.fromR},${move.fromC}`, to: `${move.r},${move.c}` });
+
+      if (move.isJump) {
+          addLog("Piece Captured!", "alert");
+          if (turn === 'me') setCapturedOpp(c => c + 1);
+          else setCapturedMe(c => c + 1);
+
+          const movedPiece = nextPieces.find(p => p.id === selectedPieceId)!;
+          const { moves: moreJumps } = getGlobalValidMoves(turn, nextPieces, movedPiece.id);
+          
+          if (moreJumps.length > 0 && moreJumps[0].isJump) {
+              setMustJumpFrom(movedPiece.id);
+              setSelectedPieceId(movedPiece.id);
+              
+              if(turn === 'me') {
+                  setValidMoves(moreJumps);
+                  addLog("Double Jump Available!", "scanning");
+              } else {
+                  setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 1000);
+              }
+              return; 
+          }
+      }
+
+      setMustJumpFrom(null);
+      setSelectedPieceId(null);
+      
+      const nextTurn = turn === 'me' ? 'opponent' : 'me';
+      const { moves: nextPlayerMoves } = getGlobalValidMoves(nextTurn, nextPieces);
+      if (nextPlayerMoves.length === 0) {
+          onGameEnd(turn === 'me' ? 'win' : 'loss');
+          return;
+      }
+
+      setTurn(nextTurn);
+      if (nextTurn === 'opponent') {
+          setTimeout(() => executeBotMoveRef.current?.(nextPieces), 1000);
+      }
+  }, [selectedPieceId, pieces, turn, getGlobalValidMoves, addLog, onGameEnd]);
+
+
+  // Prepare lookup maps for rendering
+  const pieceMap = useMemo(() => {
+    const map = new Map<string, Piece>();
+    pieces.forEach(p => map.set(`${p.r},${p.c}`, p));
+    return map;
+  }, [pieces]);
+
+  const validMoveMap = useMemo(() => {
+    const map = new Map<string, Move>();
+    validMoves.forEach(m => map.set(`${m.r},${m.c}`, m));
+    return map;
+  }, [validMoves]);
+
+  const hintMoveMap = useMemo(() => {
+      const map = new Set<string>();
+      hintMoves.forEach(m => {
+          map.add(`s:${m.fromR},${m.fromC}`);
+          map.add(`d:${m.r},${m.c}`);
+      });
+      return map;
+  }, [hintMoves]);
 
   return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-start md:justify-center p-4 pb-24 md:pb-4 pt-8 md:pt-4">
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
        
-       {/* Header */}
-       <div className="w-full max-w-5xl flex justify-between items-center mb-6 md:mb-8 gap-2">
-           <button onClick={() => onGameEnd('quit')} className="text-slate-400 hover:text-white flex items-center gap-2 group flex-shrink-0">
-                <div className="p-2 bg-royal-800 rounded-lg group-hover:bg-royal-700 transition-colors">
-                    <ArrowLeft size={20} />
-                </div>
-                <div className="hidden md:flex flex-col items-start">
-                    <span className="text-xs text-slate-500 uppercase">Back to Lobby</span>
-                    <span className="font-bold">Forfeit Game</span>
-                </div>
+       {/* FORFEIT MODAL */}
+       <AnimatePresence>
+          {showForfeitModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowForfeitModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
+                  >
+                      {/* Red Glow */}
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                              <AlertTriangle className="text-red-500" size={32} />
+                          </div>
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>. 
+                              Your staked funds will be transferred to the opponent.
+                          </p>
+                      </div>
+
+                      <div className="flex gap-3">
+                          <button 
+                            onClick={() => setShowForfeitModal(false)}
+                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
+                          >
+                              Stay in Game
+                          </button>
+                          <button 
+                            onClick={() => onGameEnd('quit')}
+                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
+                          >
+                              Yes, Forfeit
+                          </button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
+       {/* GAME HEADER */}
+       <div className="w-full max-w-4xl flex items-center justify-between mb-8 mt-4">
+           <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+               <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
+               <span className="font-bold text-sm">Forfeit</span>
            </button>
-
-           <div className="glass-panel px-4 py-2 md:px-8 md:py-3 rounded-2xl flex items-center gap-3 md:gap-6 flex-1 justify-center max-w-[320px]">
-                <div className="flex flex-col items-end">
-                    <span className="hidden md:block text-xs text-slate-400 font-bold uppercase tracking-wider">Opponent</span>
-                    <div className="flex items-center gap-2">
-                        <span className="font-bold text-white text-sm md:text-base">{table.host?.name || "Opponent"}</span>
-                        <div className="w-2 h-2 rounded-full bg-cam-red shadow-[0_0_8px_rgba(206,17,38,0.8)]" />
-                    </div>
-                </div>
-                
-                <div className="h-6 w-px bg-white/10 mx-1 md:h-8 md:mx-2" />
-                
-                <div className="text-center">
-                    <div className="text-xl md:text-2xl font-display font-bold text-white tracking-widest">VS</div>
-                    <div className="text-[8px] md:text-[10px] text-gold-500 font-mono">POT: {(table.stake * 2).toLocaleString()}</div>
-                </div>
-
-                <div className="h-6 w-px bg-white/10 mx-1 md:h-8 md:mx-2" />
-
-                <div className="flex flex-col items-start">
-                    <span className="hidden md:block text-xs text-slate-400 font-bold uppercase tracking-wider">You</span>
-                    <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-gold-400 shadow-[0_0_8px_rgba(251,191,36,0.8)]" />
-                        <span className="font-bold text-white text-sm md:text-base">{user.name}</span>
-                    </div>
-                </div>
-           </div>
-
-           <div className="w-[40px] md:w-[140px] flex-shrink-0">
-               <div className="md:hidden w-10 h-10 bg-royal-800 rounded-lg flex items-center justify-center text-purple-400">
-                   <Shield size={20} />
-               </div>
-               <div className="hidden md:block">
-                   <AIReferee externalLog={refereeLog} />
-               </div>
-           </div>
-       </div>
-
-       {/* Game Area */}
-       <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-center justify-center w-full flex-1">
            
-           {/* Left Sidebar - Captured Pieces (My Losses) */}
-           <div className="hidden md:flex flex-col gap-2">
-                <div className="text-center text-xs text-slate-500 uppercase mb-2">My Losses</div>
-                <div className="w-16 bg-royal-900/50 rounded-2xl p-2 min-h-[200px] border border-white/5 flex flex-col items-center gap-1 shadow-inner">
-                    {Array.from({ length: capturedMe }).map((_, i) => (
-                        <motion.div 
-                            key={i} 
-                            initial={{ scale: 0, y: -20 }} animate={{ scale: 1, y: 0 }}
-                            className="w-8 h-8 rounded-full bg-gradient-to-br from-gold-400 to-gold-600 shadow-lg border border-gold-300/50 opacity-60" 
-                        />
-                    ))}
-                </div>
+           <div className="flex flex-col items-center">
+               <div className="text-xs text-gold-500 font-bold uppercase tracking-widest mb-1">Pot Size</div>
+               <div className="text-2xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} <span className="text-sm text-slate-500">FCFA</span></div>
            </div>
 
-           {/* The Board */}
-           <div className="relative w-full max-w-[360px] aspect-square md:w-auto md:max-w-none md:h-[600px] md:aspect-square">
-               {/* Board Frame */}
-               <div className="relative z-10 w-full h-full bg-royal-900 rounded-lg shadow-2xl border-8 md:border-[12px] border-royal-800">
-                   {/* Board Surface */}
-                   <div className="w-full h-full bg-gradient-to-br from-royal-800 to-black grid grid-cols-8 grid-rows-8 border border-white/5">
-                        {renderBoard()}
-                   </div>
-
-                   {/* Pieces Layer */}
-                   <div className="absolute inset-0 w-full h-full pointer-events-none">
-                       <AnimatePresence>
-                           {pieces.map(p => {
-                               const top = p.r * 12.5;
-                               const left = p.c * 12.5;
-                               const isSelectable = turn === 'me' && p.player === 'me';
-                               const isSelected = selectedPieceId === p.id;
-
-                               return (
-                                   <motion.div
-                                      key={p.id}
-                                      layout
-                                      initial={false}
-                                      animate={{ top: `${top}%`, left: `${left}%` }}
-                                      transition={{ type: "spring", stiffness: 300, damping: 28 }}
-                                      onClick={() => handlePieceClick(p)}
-                                      className="absolute w-[12.5%] h-[12.5%] flex items-center justify-center z-20 pointer-events-auto"
-                                   >
-                                       <div 
-                                          className={`
-                                            relative w-[75%] h-[75%] rounded-full shadow-xl transition-all duration-200
-                                            ${p.player === 'me' 
-                                                ? 'bg-gradient-to-b from-gold-300 to-gold-600 ring-1 ring-gold-200' 
-                                                : 'bg-gradient-to-b from-red-400 to-red-700 ring-1 ring-red-300'}
-                                            ${isSelected ? 'scale-110 ring-4 ring-white/50 z-30 brightness-110' : ''}
-                                            ${isSelectable ? 'cursor-pointer hover:scale-105' : ''}
-                                          `}
-                                       >
-                                           {/* Inner Bevel */}
-                                           <div className="absolute inset-1 rounded-full border border-white/20 bg-gradient-to-b from-white/10 to-transparent" />
-                                           
-                                           {/* King Icon */}
-                                           {p.isKing && (
-                                               <div className="absolute inset-0 flex items-center justify-center text-white/90 drop-shadow-md">
-                                                   <Crown size={20} className="w-[60%] h-[60%]" fill="currentColor" />
-                                               </div>
-                                           )}
-                                       </div>
-                                   </motion.div>
-                               );
-                           })}
-                       </AnimatePresence>
-                   </div>
+           <div className="flex items-center gap-3">
+               {user.isAdmin && (
+                   <button 
+                       onClick={() => onGameEnd('win')}
+                       className="p-2 bg-green-500/10 text-green-400 rounded-xl hover:bg-green-500/20 border border-green-500/20 transition-colors"
+                       title="Force Win (Admin)"
+                   >
+                       <ShieldCheck size={20} />
+                   </button>
+               )}
+               <div className="w-10 md:w-40 flex-shrink-0">
+                    <div className="hidden md:block">
+                        <AIReferee externalLog={refereeLog} />
+                    </div>
+                    <div className="md:hidden w-10 h-10 bg-royal-800 rounded-lg flex items-center justify-center border border-white/10 text-purple-400">
+                        <Shield size={20} />
+                    </div>
                </div>
-               
-               {/* Ambient Glow */}
-               <div className="absolute -inset-4 bg-gold-500/5 rounded-full blur-3xl -z-10" />
            </div>
-
-           {/* Right Sidebar - Captured Pieces (Opponent Losses) */}
-           <div className="hidden md:flex flex-col gap-2">
-                <div className="text-center text-xs text-slate-500 uppercase mb-2">Captures</div>
-                <div className="w-16 bg-royal-900/50 rounded-2xl p-2 min-h-[200px] border border-white/5 flex flex-col items-center gap-1 shadow-inner">
-                    {Array.from({ length: capturedOpp }).map((_, i) => (
-                        <motion.div 
-                            key={i} 
-                            initial={{ scale: 0, y: -20 }} animate={{ scale: 1, y: 0 }}
-                            className="w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-red-600 shadow-lg border border-red-300/50 opacity-60" 
-                        />
-                    ))}
-                </div>
-           </div>
-
        </div>
 
-       {/* Turn Indicator */}
-       <div className="mt-8 flex items-center gap-4 text-xs md:text-sm">
-            <div className={`px-4 py-2 md:px-6 rounded-full border ${turn === 'me' ? 'bg-gold-500/10 border-gold-500 text-gold-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
-                Your Turn
-            </div>
-            <Activity size={20} className="text-slate-600 animate-pulse" />
-            <div className={`px-4 py-2 md:px-6 rounded-full border ${turn === 'opponent' ? 'bg-red-500/10 border-red-500 text-red-400' : 'bg-transparent border-white/10 text-slate-500'}`}>
-                Opponent's Turn
-            </div>
+       {/* MAIN CONTENT ROW */}
+       <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full max-w-5xl">
+           
+           {/* LEFT: OPPONENT STATS */}
+           <div className="order-1 md:order-1 flex md:flex-col items-center gap-4 md:w-32">
+               <div className={`relative ${turn === 'opponent' ? 'scale-110' : 'opacity-70'}`}>
+                   <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-red-900 to-black border-2 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.3)] overflow-hidden">
+                       <img src={table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full object-cover" />
+                   </div>
+                   {turn === 'opponent' && (
+                       <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap animate-pulse">
+                           Thinking...
+                       </div>
+                   )}
+               </div>
+               <div className="text-center">
+                   <div className="text-white font-bold text-sm md:text-base">{table.host?.name || "Opponent"}</div>
+                   <div className="text-red-400 text-xs font-mono">{capturedOpp} Captured</div>
+               </div>
+               <div className="flex flex-wrap gap-1 justify-center max-w-[80px]">
+                   {Array.from({length: capturedOpp}).map((_, i) => (
+                       <div key={i} className="w-3 h-3 rounded-full bg-red-500 border border-white/20 shadow-sm" />
+                   ))}
+               </div>
+           </div>
+
+           {/* CENTER: BOARD */}
+           <div className="order-2 w-full max-w-[500px] aspect-square relative">
+               <div className="absolute -inset-3 md:-inset-5 bg-gradient-to-br from-[#2d1b69] to-[#0f0a1f] rounded-xl shadow-2xl border border-white/10"></div>
+               <div className="absolute inset-0 bg-[#1a103c] rounded-lg shadow-inner overflow-hidden border-4 border-royal-800 grid grid-cols-8 grid-rows-8">
+                   {Array.from({length: 8}).map((_, r) => (
+                       Array.from({length: 8}).map((_, c) => {
+                           const key = `${r},${c}`;
+                           return (
+                               <CheckersCell 
+                                   key={key}
+                                   r={r} c={c}
+                                   isDark={(r + c) % 2 === 1}
+                                   piece={pieceMap.get(key)}
+                                   isSelected={selectedPieceId === pieceMap.get(key)?.id}
+                                   validMove={validMoveMap.get(key)}
+                                   isHintSource={hintMoveMap.has(`s:${key}`)}
+                                   isHintDest={hintMoveMap.has(`d:${key}`)}
+                                   isLastFrom={lastMove?.from === key}
+                                   isLastTo={lastMove?.to === key}
+                                   onPieceClick={handlePieceClick}
+                                   onMoveClick={handleMoveClick}
+                                   isMeTurn={turn === 'me'}
+                               />
+                           );
+                       })
+                   ))}
+               </div>
+               {/* Labels */}
+               <div className="absolute -left-6 top-0 bottom-0 flex flex-col justify-around text-xs text-slate-600 font-mono">
+                   {[8,7,6,5,4,3,2,1].map(n => <span key={n}>{n}</span>)}
+               </div>
+               <div className="absolute -bottom-6 left-0 right-0 flex justify-around text-xs text-slate-600 font-mono">
+                   {['a','b','c','d','e','f','g','h'].map(c => <span key={c}>{c}</span>)}
+               </div>
+           </div>
+
+           {/* RIGHT: PLAYER STATS */}
+           <div className="order-3 flex md:flex-col items-center gap-4 md:w-32">
+               <div className={`relative ${turn === 'me' ? 'scale-110' : 'opacity-70'}`}>
+                   <div className="w-16 h-16 md:w-20 md:h-20 rounded-2xl bg-gradient-to-br from-gold-600 to-black border-2 border-gold-500 shadow-[0_0_20px_rgba(251,191,36,0.3)] overflow-hidden">
+                       <img src={user.avatar} className="w-full h-full object-cover" />
+                   </div>
+                   {turn === 'me' && (
+                       <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">
+                           Your Turn
+                       </div>
+                   )}
+               </div>
+               <div className="text-center">
+                   <div className="text-white font-bold text-sm md:text-base">You</div>
+                   <div className="text-gold-400 text-xs font-mono">{capturedMe} Captured</div>
+               </div>
+               <div className="flex flex-wrap gap-1 justify-center max-w-[80px]">
+                   {Array.from({length: capturedMe}).map((_, i) => (
+                       <div key={i} className="w-3 h-3 rounded-full bg-gold-500 border border-white/20 shadow-sm" />
+                   ))}
+               </div>
+           </div>
        </div>
 
+       {/* STATUS BAR */}
+       <div className="mt-8 h-12">
+           <AnimatePresence mode="wait">
+               {mustJumpFrom ? (
+                   <motion.div 
+                     initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }}
+                     className="flex items-center gap-2 px-4 py-2 bg-red-500/20 border border-red-500/50 rounded-full text-red-400 text-sm font-bold"
+                   >
+                       <AlertCircle size={16} /> Double Jump Available! Select your piece.
+                   </motion.div>
+               ) : turn === 'me' ? (
+                   <motion.div 
+                     initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }}
+                     className="flex items-center gap-2 text-slate-400 text-sm"
+                   >
+                       <span>Select a</span>
+                       <div className="w-3 h-3 rounded-full bg-gold-500"></div>
+                       <span>piece to move</span>
+                   </motion.div>
+               ) : (
+                   <motion.div 
+                     initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -10, opacity: 0 }}
+                     className="flex items-center gap-2 text-slate-500 text-sm"
+                   >
+                       <RefreshCw size={14} className="animate-spin" /> Waiting for opponent...
+                   </motion.div>
+               )}
+           </AnimatePresence>
+       </div>
     </div>
   );
 };

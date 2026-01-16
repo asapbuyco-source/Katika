@@ -8,7 +8,7 @@ interface DashboardProps {
   user: User;
   setView: (view: ViewState) => void;
   onTopUp: () => void;
-  onQuickMatch: () => void;
+  onQuickMatch: (gameId?: string) => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch }) => {
@@ -28,15 +28,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
     }, 4000);
     return () => clearInterval(interval);
   }, []);
-
-  const getRankColor = (tier: string) => {
-      switch(tier) {
-          case 'Diamond': return 'text-cyan-400 border-cyan-400 bg-cyan-400/10';
-          case 'Gold': return 'text-yellow-400 border-yellow-400 bg-yellow-400/10';
-          case 'Silver': return 'text-slate-300 border-slate-300 bg-slate-300/10';
-          default: return 'text-orange-400 border-orange-400 bg-orange-400/10';
-      }
-  };
 
   const games = [
     { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'hover:bg-cam-green/20 hover:border-cam-green/50', gradient: 'from-cam-green/20 to-transparent' },
@@ -71,12 +62,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           <h1 className="text-2xl md:text-3xl font-display font-bold text-white">
             Bonjour, <span className="text-gold-400">{user.name}</span>
           </h1>
-          <div className="flex items-center gap-2 mt-1">
-             <span className={`px-2 py-0.5 rounded text-[10px] font-bold border uppercase tracking-wider ${getRankColor(user.rankTier)}`}>
-                {user.rankTier} Tier
-             </span>
-             <span className="text-slate-400 text-sm font-mono">{user.elo} ELO</span>
-          </div>
+          <p className="text-slate-400 text-xs md:text-sm mt-1">Welcome back to the arena</p>
         </div>
         <motion.div whileHover={{ scale: 1.05 }} className="relative cursor-pointer" onClick={() => setView('profile')}>
           <img
@@ -89,9 +75,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       </header>
 
       {/* Live Winners Ticker */}
-      <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-4 overflow-hidden relative">
-          <div className="flex items-center gap-2 text-gold-400 font-bold text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-4 border-r border-white/10">
-              <Flame size={14} className="animate-bounce" /> Live Wins
+      <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
+          <div className="flex items-center gap-2 text-gold-400 font-bold text-[10px] md:text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-3 border-r border-white/10 shrink-0">
+              <Flame size={12} className="animate-bounce" /> Live Wins
           </div>
           <div className="flex-1 h-6 relative overflow-hidden">
               <AnimatePresence mode='wait'>
@@ -100,13 +86,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                       initial={{ y: 20, opacity: 0 }}
                       animate={{ y: 0, opacity: 1 }}
                       exit={{ y: -20, opacity: 0 }}
-                      className="absolute inset-0 flex items-center gap-2 text-sm text-slate-300"
+                      className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
                   >
-                      <img src={winners[currentWinnerIndex].avatar} className="w-5 h-5 rounded-full border border-white/20" alt="" />
-                      <span className="text-white font-bold">{winners[currentWinnerIndex].name}</span>
-                      <span>just won</span>
-                      <span className="text-gold-400 font-mono font-bold">{winners[currentWinnerIndex].amount} FCFA</span>
-                      <span className="text-slate-500 text-xs">in {winners[currentWinnerIndex].game}</span>
+                      <img src={winners[currentWinnerIndex].avatar} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
+                      <span className="text-white font-bold truncate max-w-[80px]">{winners[currentWinnerIndex].name}</span>
+                      <span className="shrink-0">won</span>
+                      <span className="text-gold-400 font-mono font-bold shrink-0">{winners[currentWinnerIndex].amount} FCFA</span>
+                      <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">in {winners[currentWinnerIndex].game}</span>
                   </motion.div>
               </AnimatePresence>
           </div>
@@ -115,8 +101,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       {/* Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         
-        {/* Money-First Wallet Card */}
-        <motion.div variants={itemVariants} className="glass-panel p-6 rounded-3xl flex flex-col justify-between relative overflow-hidden group border-gold-500/20 bg-gradient-to-br from-royal-800 to-royal-950 shadow-xl md:col-span-2">
+        {/* Money-First Wallet Card - Expanded to full width since rank card is removed */}
+        <motion.div variants={itemVariants} className="glass-panel p-6 rounded-3xl flex flex-col justify-between relative overflow-hidden group border-gold-500/20 bg-gradient-to-br from-royal-800 to-royal-950 shadow-xl md:col-span-3">
           <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity duration-500 transform group-hover:scale-110">
             <Wallet size={180} />
           </div>
@@ -144,48 +130,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           </div>
         </motion.div>
 
-        {/* Stats / Rank Card */}
-        <motion.div variants={itemVariants} className="glass-panel p-6 rounded-3xl md:col-span-1 border-l-4 border-l-cam-red relative overflow-hidden">
-             <div className="absolute -right-4 -top-4 w-24 h-24 bg-cam-red/20 blur-3xl rounded-full"></div>
-             <div className="flex items-center justify-between mb-4 relative z-10">
-                <div className="flex items-center gap-2">
-                    <Trophy className="text-cam-red" size={20} />
-                    <h3 className="text-lg font-bold text-white">Season Rank</h3>
-                </div>
-                <ArrowRight size={16} className="text-slate-500" />
-             </div>
-             
-             <div className="space-y-6 relative z-10">
-                 <div className="text-center py-2">
-                     <div className="text-3xl font-display font-bold text-white mb-1">{user.rankTier}</div>
-                     <div className="text-xs text-slate-400 uppercase tracking-widest">Current Division</div>
-                 </div>
-                 
-                 <div>
-                    <div className="flex justify-between items-center text-xs mb-2">
-                        <span className="text-slate-400">Progress to Gold</span>
-                        <span className="text-white font-mono">85%</span>
-                    </div>
-                    <div className="w-full bg-royal-900 rounded-full h-2 overflow-hidden">
-                        <div className="bg-gradient-to-r from-cam-red to-orange-500 h-2 rounded-full w-[85%] shadow-[0_0_10px_rgba(206,17,38,0.5)] relative overflow-hidden">
-                            <div className="absolute inset-0 bg-white/20 animate-[shimmer_1s_infinite] skew-x-12"></div>
-                        </div>
-                    </div>
-                 </div>
-
-                 <div className="p-3 bg-white/5 rounded-xl flex justify-between items-center">
-                     <span className="text-xs text-slate-400">Global Rank</span>
-                     <span className="text-sm font-mono font-bold text-white">#1,420</span>
-                 </div>
-             </div>
-        </motion.div>
-
         {/* GAMES GRID TITLE */}
         <motion.div variants={itemVariants} className="md:col-span-3 flex items-center justify-between mt-4">
              <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
                  <Zap className="text-gold-400 fill-gold-400" size={20} /> Trending Games
              </h3>
-             <button onClick={onQuickMatch} className="text-xs text-gold-400 font-bold uppercase hover:text-white transition-colors">View Lobby</button>
+             <button onClick={() => onQuickMatch()} className="text-xs text-gold-400 font-bold uppercase hover:text-white transition-colors">View Lobby</button>
         </motion.div>
 
         {/* GAMES GRID */}
@@ -194,10 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                 key={game.id}
                 variants={itemVariants}
                 whileHover={{ y: -5, scale: 1.02 }}
-                onClick={() => {
-                    // Logic to jump to specific game or lobby
-                    onQuickMatch();
-                }}
+                onClick={() => onQuickMatch(game.id)}
                 className={`glass-panel p-5 rounded-2xl border border-white/5 cursor-pointer group relative overflow-hidden transition-all duration-300 ${game.bg}`}
             >
                 {/* Background Gradient on Hover */}
