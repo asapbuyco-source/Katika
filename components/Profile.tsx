@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, ViewState } from '../types';
 import { MOCK_TRANSACTIONS } from '../services/mockData';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProfileProps {
@@ -551,7 +551,3 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
     </div>
   );
 };
-
-function Zap(props: any) {
-    return <TrendingUp {...props} /> 
-}
