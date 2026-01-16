@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { ViewState, User, Table } from './types';
+import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
 import { GameRoom } from './components/GameRoom';
@@ -17,8 +17,11 @@ import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
 import { AdminDashboard } from './components/AdminDashboard';
 import { GameResultOverlay } from './components/GameResultOverlay';
+import { ChallengeRequestModal } from './components/ChallengeRequestModal';
 import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { MOCK_PLAYERS } from './services/mockData';
+import { AnimatePresence } from 'framer-motion';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -32,6 +35,9 @@ export default function App() {
   
   // State to handle game selection from Dashboard -> Lobby
   const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
+
+  // Challenge System State
+  const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
 
   // 1. Firebase Auth & Real-time Database Listener
   useEffect(() => {
@@ -85,6 +91,28 @@ export default function App() {
       }
   }, [user, currentView, authLoading]);
 
+  // 3. Challenge Simulation Effect
+  useEffect(() => {
+      if (!user) return;
+      
+      // Simulate an incoming challenge 15 seconds after app load to demonstrate UI
+      const timer = setTimeout(() => {
+          // Only trigger if we aren't already in a game
+          if (currentView !== 'game' && currentView !== 'matchmaking' && !incomingChallenge) {
+              const challenger = MOCK_PLAYERS[Math.floor(Math.random() * MOCK_PLAYERS.length)];
+              setIncomingChallenge({
+                  id: `ch-${Date.now()}`,
+                  sender: challenger,
+                  gameType: 'Ludo',
+                  stake: 2000,
+                  timestamp: Date.now()
+              });
+          }
+      }, 15000);
+
+      return () => clearTimeout(timer);
+  }, [user, currentView, incomingChallenge]);
+
   // Finance Top Up Handler (Now handled inside Finance component mostly, but this serves as a fallback or event trigger)
   const handleFinanceTopUp = () => {
       // Balance update is handled via Finance component and Firestore listener
@@ -124,6 +152,28 @@ export default function App() {
       }
       setActiveTable(table);
       setView('game');
+  };
+
+  // Challenge Response Handlers
+  const handleAcceptChallenge = async () => {
+      if (!incomingChallenge || !user) return;
+      
+      const table: Table = {
+          id: `match-challenge-${Date.now()}`,
+          gameType: incomingChallenge.gameType as any,
+          stake: incomingChallenge.stake,
+          players: 2,
+          maxPlayers: 2,
+          status: 'active',
+          host: incomingChallenge.sender
+      };
+
+      setIncomingChallenge(null);
+      await handleMatchFound(table);
+  };
+
+  const handleDeclineChallenge = () => {
+      setIncomingChallenge(null);
   };
 
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
@@ -192,6 +242,17 @@ export default function App() {
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
+
+      {/* Challenge Request Modal */}
+      <AnimatePresence>
+          {incomingChallenge && (
+              <ChallengeRequestModal 
+                  challenge={incomingChallenge}
+                  onAccept={handleAcceptChallenge}
+                  onDecline={handleDeclineChallenge}
+              />
+          )}
+      </AnimatePresence>
 
       {/* Game Result Overlay */}
       {gameResult && (

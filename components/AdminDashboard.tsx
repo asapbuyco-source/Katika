@@ -38,6 +38,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   // 2. System State
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [activeMatchesCount, setActiveMatchesCount] = useState(142);
   const [networkTraffic, setNetworkTraffic] = useState(Array.from({ length: 24 }, () => Math.random() * 60 + 20));
 
   // 3. Logs State
@@ -47,6 +48,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       { id: 3, action: "System Update", target: "v1.4.2 Deployed", time: "1 hour ago", type: "info" },
       { id: 4, action: "New Admin", target: user.id || "Admin", time: "2 hours ago", type: "success" },
   ]);
+
+  // Load Maintenance State
+  useEffect(() => {
+      const isMaint = localStorage.getItem('vantage_maintenance') === 'true';
+      setMaintenanceMode(isMaint);
+      if (isMaint) setActiveMatchesCount(0);
+  }, []);
 
   // -- ACTIONS --
 
@@ -75,6 +83,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const handleMaintenanceToggle = () => {
       const newState = !maintenanceMode;
       setMaintenanceMode(newState);
+      localStorage.setItem('vantage_maintenance', String(newState));
       addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
   };
 
@@ -90,10 +99,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   };
 
   const handleEmergencyShutdown = () => {
-      if(window.confirm("CRITICAL WARNING: Are you sure you want to disconnect all players and halt servers?")) {
-           addLog("Emergency Shutdown", "Triggered by Admin", "critical");
-           alert("Emergency Shutdown Initiated. All active sessions terminated.");
+      if(window.confirm("CRITICAL WARNING: Are you sure you want to disconnect all players and halt servers? This will refund all active stakes.")) {
+           
+           let refundedCount = 0;
+           let totalRefunded = 0;
+
+           // Simulate refunds for a subset of users who might be in a game
+           setUsersList(prev => prev.map(u => {
+               // 30% chance a user is in a match for simulation
+               if (Math.random() < 0.3) {
+                   const stake = [1000, 5000, 10000][Math.floor(Math.random() * 3)];
+                   refundedCount++;
+                   totalRefunded += stake;
+                   return { ...u, balance: u.balance + stake };
+               }
+               return u;
+           }));
+
+           setActiveMatchesCount(0);
            setMaintenanceMode(true);
+           localStorage.setItem('vantage_maintenance', 'true');
+           
+           addLog("Emergency Shutdown", `Refunded ${totalRefunded.toLocaleString()} FCFA to ${refundedCount} active players.`, "critical");
+           alert(`Emergency Shutdown Initiated.\n\nSessions Terminated: ${refundedCount}\nTotal Refunded: ${totalRefunded.toLocaleString()} FCFA\n\nMaintenance Mode is now ACTIVE.`);
       }
   };
 
@@ -108,7 +136,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const stats = [
       { label: 'Total Revenue', value: '15.4M', unit: 'FCFA', icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10' },
       { label: 'Registered Users', value: usersList.length.toString(), unit: 'Total', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-      { label: 'Active Matches', value: maintenanceMode ? '0' : '142', unit: 'Live', icon: Activity, color: 'text-gold-400', bg: 'bg-gold-500/10' },
+      { label: 'Active Matches', value: maintenanceMode ? '0' : activeMatchesCount.toString(), unit: 'Live', icon: Activity, color: 'text-gold-400', bg: 'bg-gold-500/10' },
       { label: 'Banned Users', value: usersList.filter(u => u.status === 'Banned').length.toString(), unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
   ];
 
@@ -279,7 +307,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                  {player.rankTier}
                                              </span>
                                          </td>
-                                         <td className="p-4 font-mono text-sm text-white">{player.balance.toLocaleString()} FCFA</td>
+                                         <td className="p-4 font-mono text-sm text-white">
+                                             <AnimatePresence mode='popLayout'>
+                                                 <motion.span 
+                                                    key={player.balance}
+                                                    initial={{ opacity: 0.5, scale: 1.1 }}
+                                                    animate={{ opacity: 1, scale: 1 }}
+                                                    className={player.balance > 12500 ? "text-green-400 font-bold" : ""}
+                                                 >
+                                                     {player.balance.toLocaleString()} FCFA
+                                                 </motion.span>
+                                             </AnimatePresence>
+                                         </td>
                                          <td className="p-4">
                                              <span className={`flex items-center gap-1.5 text-xs font-bold ${player.status === 'Active' ? 'text-green-400' : 'text-red-400'}`}>
                                                  <span className={`w-1.5 h-1.5 rounded-full ${player.status === 'Active' ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`}></span>
@@ -358,7 +397,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                         <div className="flex items-center justify-between p-4 bg-red-500/10 rounded-xl border border-red-500/20">
                             <div>
                                 <div className="font-bold text-red-400">Emergency Shutdown</div>
-                                <div className="text-xs text-red-300/70">Disconnect all active sessions</div>
+                                <div className="text-xs text-red-300/70">Disconnect and Refund Players</div>
                             </div>
                             <button 
                                 onClick={handleEmergencyShutdown}

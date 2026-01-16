@@ -1,10 +1,11 @@
 
 import React, { useState, useEffect } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot } from 'lucide-react';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2 } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
-import { GAME_TIERS, MOCK_PLAYERS } from '../services/mockData';
+import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
+import { searchUsers } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LobbyProps {
@@ -26,20 +27,29 @@ const AVAILABLE_GAMES = [
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
   const [viewState, setViewState] = useState<'games' | 'stakes'>('games');
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
+  const [isMaintenance, setIsMaintenance] = useState(false);
   
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [neededAmount, setNeededAmount] = useState(0);
 
   // Challenge Mode State
   const [showChallengeModal, setShowChallengeModal] = useState(false);
-  const [challengeStep, setChallengeStep] = useState<'search' | 'config'>('search');
+  const [challengeStep, setChallengeStep] = useState<'search' | 'config' | 'sending'>('search');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<PlayerProfile[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<PlayerProfile | null>(null);
   const [challengeStake, setChallengeStake] = useState<number>(1000);
   const [challengeGame, setChallengeGame] = useState('Ludo');
   
   // Payment State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // Load Maintenance State
+  useEffect(() => {
+      const maintenance = localStorage.getItem('vantage_maintenance') === 'true';
+      setIsMaintenance(maintenance);
+  }, []);
 
   // Handle Initial Deep Link
   useEffect(() => {
@@ -52,7 +62,28 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     }
   }, [initialGameId]);
 
+  // Real-time Search Effect
+  useEffect(() => {
+      const delayDebounceFn = setTimeout(async () => {
+          if (searchQuery.length >= 3) {
+              setIsSearching(true);
+              try {
+                  const results = await searchUsers(searchQuery);
+                  setSearchResults(results);
+              } catch (error) {
+                  console.error("Search failed", error);
+              }
+              setIsSearching(false);
+          } else {
+              setSearchResults([]);
+          }
+      }, 500);
+
+      return () => clearTimeout(delayDebounceFn);
+  }, [searchQuery]);
+
   const handleGameSelect = (gameId: string) => {
+      if (isMaintenance) return;
       setSelectedGame(gameId);
       setViewState('stakes');
       playSFX('click');
@@ -67,6 +98,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
   const handleTierSelect = (tier: GameTier) => {
       playSFX('click');
+      if (isMaintenance) return;
       if (!selectedGame) return;
       if (user.balance < tier.stake) {
           setNeededAmount(tier.stake - user.balance);
@@ -93,23 +125,34 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       }
   };
 
-  const filteredFriends = MOCK_PLAYERS.filter(p => 
-    p.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
   const handleSendChallenge = () => {
       playSFX('click');
+      if (isMaintenance) return;
       if (user.balance < challengeStake) {
           setNeededAmount(challengeStake - user.balance);
           setShowChallengeModal(false);
           setShowDepositModal(true);
           return;
       }
-      setShowChallengeModal(false);
-      alert(`Challenge sent to ${selectedFriend?.name} for ${challengeStake} FCFA in ${challengeGame}!`);
-      setChallengeStep('search');
-      setSearchQuery('');
-      setSelectedFriend(null);
+
+      setChallengeStep('sending');
+      
+      // Simulate network delay and friend acceptance
+      setTimeout(() => {
+          // In a real app, this waits for socket event.
+          // Here we assume auto-accept for UX flow or close and show toast.
+          setShowChallengeModal(false);
+          // Trigger game start with specific friend
+          onQuickMatch(challengeStake, challengeGame); 
+          alert(`${selectedFriend?.name} accepted the challenge! Starting game...`);
+          
+          // Reset
+          setTimeout(() => {
+              setChallengeStep('search');
+              setSearchQuery('');
+              setSelectedFriend(null);
+          }, 500);
+      }, 2000);
   };
 
   const activeGameData = AVAILABLE_GAMES.find(g => g.id === selectedGame);
@@ -124,6 +167,27 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   return (
     <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative overflow-hidden">
       
+      {/* --- MAINTENANCE OVERLAY --- */}
+      {isMaintenance && (
+          <div className="absolute inset-0 z-50 bg-royal-950/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8">
+              <div className="bg-royal-900 border border-red-500/30 p-8 rounded-3xl shadow-2xl max-w-md relative overflow-hidden">
+                  {/* Background Pulse */}
+                  <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>
+                  
+                  <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                      <AlertTriangle size={40} className="text-red-500" />
+                  </div>
+                  <h2 className="text-3xl font-display font-bold text-white mb-3">System Maintenance</h2>
+                  <p className="text-slate-400 mb-6 leading-relaxed">
+                      The Vantage Network is currently undergoing critical upgrades. All active stakes have been <span className="text-white font-bold">automatically refunded</span> to user wallets.
+                  </p>
+                  <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs font-mono text-slate-500">
+                      ESTIMATED DOWNTIME: 2 HOURS
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* --- DEPOSIT MODAL --- */}
       <AnimatePresence>
           {showDepositModal && (
@@ -208,27 +272,37 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                       </div>
                                       
                                       <div className="space-y-2">
-                                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Suggested Friends</p>
-                                          {filteredFriends.map((friend, idx) => (
-                                              <motion.button
-                                                  key={idx}
-                                                  whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                                                  onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
-                                                  className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
-                                              >
-                                                  <div className="flex items-center gap-3">
-                                                      <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full" />
-                                                      <div className="text-left">
-                                                          <div className="font-bold text-white">{friend.name}</div>
-                                                          <div className="text-xs text-slate-400">{friend.rankTier}</div>
+                                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Results</p>
+                                          {isSearching ? (
+                                              <div className="flex items-center justify-center py-8 text-gold-400 gap-2">
+                                                   <Loader2 className="animate-spin" size={20} /> Searching Database...
+                                              </div>
+                                          ) : searchResults.length === 0 ? (
+                                              <div className="text-center text-slate-600 text-sm py-8">
+                                                  {searchQuery.length > 0 ? "No users found." : "Type a name to search existing users."}
+                                              </div>
+                                          ) : (
+                                              searchResults.map((friend, idx) => (
+                                                  <motion.button
+                                                      key={idx}
+                                                      whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                                                      onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
+                                                      className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
+                                                  >
+                                                      <div className="flex items-center gap-3">
+                                                          <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full" />
+                                                          <div className="text-left">
+                                                              <div className="font-bold text-white">{friend.name}</div>
+                                                              <div className="text-xs text-slate-400">{friend.rankTier}</div>
+                                                          </div>
                                                       </div>
-                                                  </div>
-                                                  <div className="p-2 bg-royal-800 rounded-lg text-gold-400 opacity-0 group-hover:opacity-100"><Swords size={16} /></div>
-                                              </motion.button>
-                                          ))}
+                                                      <div className="p-2 bg-royal-800 rounded-lg text-gold-400 opacity-0 group-hover:opacity-100"><Swords size={16} /></div>
+                                                  </motion.button>
+                                              ))
+                                          )}
                                       </div>
                                   </motion.div>
-                              ) : (
+                              ) : challengeStep === 'config' ? (
                                   <motion.div
                                       key="config"
                                       initial={{ x: 50, opacity: 0 }}
@@ -288,6 +362,23 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                           </button>
                                       </div>
                                   </motion.div>
+                              ) : (
+                                  <motion.div
+                                      key="sending"
+                                      initial={{ opacity: 0 }}
+                                      animate={{ opacity: 1 }}
+                                      exit={{ opacity: 0 }}
+                                      className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center"
+                                  >
+                                      <div className="w-20 h-20 relative mb-6">
+                                          <div className="absolute inset-0 bg-gold-500/20 rounded-full animate-ping"></div>
+                                          <div className="relative bg-royal-800 rounded-full w-full h-full flex items-center justify-center border-2 border-gold-500">
+                                               <Swords size={32} className="text-gold-400" />
+                                          </div>
+                                      </div>
+                                      <h3 className="text-xl font-bold text-white mb-2">Sending Challenge...</h3>
+                                      <p className="text-slate-400 text-sm">Waiting for <span className="text-white font-bold">{selectedFriend?.name}</span> to accept.</p>
+                                  </motion.div>
                               )}
                           </AnimatePresence>
                       </div>
@@ -334,7 +425,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                           key={game.id}
                           layoutId={`game-card-${game.id}`}
                           onClick={() => handleGameSelect(game.id)}
-                          whileHover={{ y: -8, scale: 1.02 }}
+                          whileHover={isMaintenance ? {} : { y: -8, scale: 1.02 }}
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.1 }}
@@ -396,7 +487,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                 initial={{ opacity: 0, scale: 0.9 }}
                                 animate={{ opacity: 1, scale: 1 }}
                                 transition={{ delay: idx * 0.05 }}
-                                whileHover={{ y: -8, scale: 1.02 }}
+                                whileHover={isMaintenance ? {} : { y: -8, scale: 1.02 }}
                                 onClick={() => handleTierSelect(tier)}
                                 className={`glass-panel p-6 rounded-3xl border cursor-pointer group relative overflow-visible transition-all duration-300 ${
                                     isPopular ? 'border-gold-500/50 bg-royal-800/80 shadow-[0_0_30px_rgba(251,191,36,0.1)] ring-1 ring-gold-500/20' : 'border-white/10 hover:border-gold-500/30'

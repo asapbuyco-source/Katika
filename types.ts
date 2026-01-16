@@ -18,6 +18,14 @@ export interface PlayerProfile {
   rankTier: 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
 }
 
+export interface Challenge {
+  id: string;
+  sender: PlayerProfile;
+  gameType: string;
+  stake: number;
+  timestamp: number;
+}
+
 export interface Transaction {
   id: string;
   type: 'deposit' | 'withdrawal' | 'winnings' | 'stake';

@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft } from 'lucide-react';
-import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest } from '../services/firebase';
+import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile } from '../services/firebase';
 import { User as AppUser } from '../types';
 
 interface AuthScreenProps {
@@ -25,26 +25,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       setIsLoading(true);
       setError('');
       try {
-          await signInWithGoogle();
-          // onAuthenticated will be triggered by the App.tsx onAuthStateChanged listener for real logins
+          const firebaseUser = await signInWithGoogle();
+          // If we got a simulated user back immediately, we might need to manually trigger the parent callback
+          // because onAuthStateChanged might not fire for custom mock objects
+          if (firebaseUser && (firebaseUser as any).uid.startsWith('google-user-')) {
+               const appUser = await syncUserProfile(firebaseUser as any);
+               onAuthenticated(appUser);
+          }
+          // For real firebase users, the listener in App.tsx handles it
       } catch (err: any) {
           console.error("Auth Error:", err);
-          
-          // Auto-Switch to Guest Mode for Unauthorized Domains (Common in Preview Envs)
-          if (err.code === 'auth/unauthorized-domain' || err.message?.includes('unauthorized domain')) {
-              setError("Preview domain not authorized. Switching to Guest Mode...");
-              setTimeout(async () => {
-                  await handleGuestLogin();
-              }, 1500);
-              return;
-          }
-
-          if (err.code === 'auth/internal-error') {
-             setError("Connection error. Try Guest Mode.");
-             setShowGuest(true);
-          } else {
-             setError("Login failed. Please try again.");
-          }
+          setError("Login failed. Trying Guest Mode...");
+          setTimeout(handleGuestLogin, 1500);
           setIsLoading(false);
       }
   };
@@ -75,23 +67,29 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       setError('');
 
       try {
+          let resultUser;
           if (isRegistering) {
-              await registerWithEmail(email, password);
+              resultUser = await registerWithEmail(email, password);
           } else {
-              await loginWithEmail(email, password);
+              resultUser = await loginWithEmail(email, password);
           }
-          // Success handled by listener in App.tsx
+          
+          // Check if it's a simulated user (which won't trigger standard Firebase listeners automatically if not actually in auth state)
+          // Real users trigger App.tsx listener. Simulated ones need manual push.
+          // Note: our simulated user follows partial FirebaseUser shape
+          if (resultUser) {
+              const appUser = await syncUserProfile(resultUser as any);
+              onAuthenticated(appUser);
+          }
+
       } catch (err: any) {
           console.error(err);
+          // Fallback if manual simulation inside service also threw (unlikely now)
           if (err.code === 'auth/email-already-in-use') {
               setError("Email already registered. Please login.");
-          } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
-              setError("Invalid email or password.");
-          } else if (err.code === 'auth/unauthorized-domain') {
-               setError("Domain not authorized. Switching to Guest...");
-               setTimeout(handleGuestLogin, 1000);
           } else {
-              setError("Authentication failed. Try again.");
+              setError("Authentication failed. Try Guest Mode.");
+              setShowGuest(true);
           }
           setIsLoading(false);
       }
@@ -189,7 +187,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
                     )}
                     
                     <div className="mt-4 text-center">
-                        <p className="text-[10px] text-slate-500">Secure Authentication</p>
+                        <button onClick={() => setShowGuest(!showGuest)} className="text-[10px] text-slate-500 hover:text-white">
+                            {showGuest ? "Hide Guest Option" : "Having trouble? Try Guest Mode"}
+                        </button>
                     </div>
                 </motion.div>
             )}
