@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
@@ -19,30 +19,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   // System State
   const [maintenanceMode, setMaintenanceMode] = useState(false);
-  const [activeMatchesCount, setActiveMatchesCount] = useState(12); // Real app would fetch this count
+  const [activeMatchesCount, setActiveMatchesCount] = useState(0); 
   const [networkTraffic] = useState(Array.from({ length: 24 }, () => Math.random() * 60 + 20));
+  const [totalSystemFunds, setTotalSystemFunds] = useState(0);
 
   // Logs State
-  const [logs, setLogs] = useState([
-      { id: 1, action: "System Init", target: "Admin Panel Loaded", time: "Just now", type: "info" }
-  ]);
+  const [logs, setLogs] = useState<any[]>([]);
 
-  // Load Initial Data
+  // Load Real Data
   useEffect(() => {
       const isMaint = localStorage.getItem('vantage_maintenance') === 'true';
       setMaintenanceMode(isMaint);
       
-      const fetchUsers = async () => {
+      const fetchData = async () => {
           setLoadingUsers(true);
           try {
+              // 1. Fetch Users
               const users = await getAllUsers();
               setUsersList(users);
+              
+              // 2. Calculate Total Funds
+              const totalFunds = users.reduce((acc, u) => acc + (u.balance || 0), 0);
+              setTotalSystemFunds(totalFunds);
+
+              // 3. Fetch Active Games
+              const gamesCount = await getActiveGamesCount();
+              setActiveMatchesCount(gamesCount);
+
+              // 4. Fetch Logs
+              const recentLogs = await getSystemLogs();
+              setLogs(recentLogs);
+
           } catch (e) {
-              console.error(e);
+              console.error("Admin data fetch error", e);
           }
           setLoadingUsers(false);
       };
-      fetchUsers();
+      fetchData();
   }, []);
 
   // -- ACTIONS --
@@ -65,6 +78,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
   };
 
+  const formatNumber = (num: number) => {
+      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+      if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
+      return num.toLocaleString();
+  };
+
   // Filter Users
   const filteredUsers = usersList.filter(u => 
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -73,7 +92,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   // Stats
   const stats = [
-      { label: 'Total Revenue', value: '15.4M', unit: 'FCFA', icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10' },
+      { label: 'Total User Funds', value: formatNumber(totalSystemFunds), unit: 'FCFA', icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10' },
       { label: 'Registered Users', value: usersList.length.toString(), unit: 'Total', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
       { label: 'Active Matches', value: maintenanceMode ? '0' : activeMatchesCount.toString(), unit: 'Live', icon: Activity, color: 'text-gold-400', bg: 'bg-gold-500/10' },
       { label: 'Banned Users', value: '0', unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
@@ -165,29 +184,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                     {/* Recent Logs */}
                     <div className="glass-panel p-6 rounded-2xl border border-white/5 flex flex-col h-[380px]">
                         <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                            <Shield size={18} className="text-red-400" /> Audit Log
+                            <Shield size={18} className="text-red-400" /> Live Audit Log
                         </h3>
                         <div className="space-y-4 overflow-y-auto custom-scrollbar flex-1 pr-2">
-                            <AnimatePresence>
-                                {logs.map((log) => (
-                                    <motion.div 
-                                        key={log.id} 
-                                        initial={{ opacity: 0, x: 20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        className="flex gap-3 items-start pb-4 border-b border-white/5 last:border-0 last:pb-0"
-                                    >
-                                        <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
-                                            log.type === 'critical' ? 'bg-red-500 shadow-[0_0_8px_red]' :
-                                            log.type === 'warning' ? 'bg-yellow-500' :
-                                            'bg-blue-500'
-                                        }`} />
-                                        <div>
-                                            <div className="text-sm font-bold text-white">{log.action}</div>
-                                            <div className="text-xs text-slate-400">{log.target}</div>
-                                            <div className="text-[10px] text-slate-600 mt-1 font-mono">{log.time}</div>
-                                        </div>
-                                    </motion.div>
-                                ))}
+                            <AnimatePresence initial={false}>
+                                {logs.length > 0 ? (
+                                    logs.map((log) => (
+                                        <motion.div 
+                                            key={log.id} 
+                                            initial={{ opacity: 0, x: 20 }}
+                                            animate={{ opacity: 1, x: 0 }}
+                                            className="flex gap-3 items-start pb-4 border-b border-white/5 last:border-0 last:pb-0"
+                                        >
+                                            <div className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${
+                                                log.type === 'critical' ? 'bg-red-500 shadow-[0_0_8px_red]' :
+                                                log.type === 'warning' ? 'bg-yellow-500' :
+                                                'bg-blue-500'
+                                            }`} />
+                                            <div>
+                                                <div className="text-sm font-bold text-white">{log.action}</div>
+                                                <div className="text-xs text-slate-400">{log.target}</div>
+                                                <div className="text-[10px] text-slate-600 mt-1 font-mono">{log.time}</div>
+                                            </div>
+                                        </motion.div>
+                                    ))
+                                ) : (
+                                    <div className="text-center text-slate-500 text-sm py-4">No recent logs</div>
+                                )}
                             </AnimatePresence>
                         </div>
                     </div>
@@ -215,7 +238,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                  </div>
                  <div className="overflow-x-auto">
                      {loadingUsers ? (
-                         <div className="p-8 text-center text-slate-500">Loading database...</div>
+                         <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
+                             <RefreshCw className="animate-spin" size={16} /> Loading database...
+                         </div>
                      ) : (
                      <table className="w-full text-left">
                          <thead className="bg-royal-950 text-xs uppercase text-slate-500">

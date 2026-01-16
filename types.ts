@@ -1,6 +1,5 @@
 
-
-export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin';
+export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'forum';
 
 export interface User {
   id: string;
@@ -70,4 +69,15 @@ export interface AIRefereeLog {
   message: string;
   status: 'scanning' | 'alert' | 'secure';
   timestamp: number;
+}
+
+export interface ForumPost {
+  id: string;
+  userId: string;
+  userName: string;
+  userAvatar: string;
+  userRank: 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
+  content: string;
+  timestamp: any; // Firestore timestamp
+  likes: number;
 }

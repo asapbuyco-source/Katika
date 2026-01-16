@@ -24,9 +24,10 @@ import {
   updateDoc, 
   onSnapshot, 
   serverTimestamp,
-  runTransaction
+  runTransaction,
+  deleteDoc
 } from "firebase/firestore";
-import { User, Transaction, Table, PlayerProfile } from "../types";
+import { User, Transaction, Table, PlayerProfile, ForumPost } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
@@ -311,4 +312,66 @@ export const loginAsGuest = async (): Promise<User> => {
     const { signInAnonymously } = await import("firebase/auth");
     const cred = await signInAnonymously(auth);
     return syncUserProfile(cred.user);
+};
+
+// --- ADMIN & STATS ---
+
+export const getActiveGamesCount = async (): Promise<number> => {
+    const q = query(collection(db, "games"), where("status", "in", ["active", "waiting"]));
+    const snapshot = await getDocs(q);
+    return snapshot.size;
+};
+
+export const getSystemLogs = async () => {
+    // Fetch recent games creation as proxy for system logs
+    const q = query(collection(db, "games"), orderBy("createdAt", "desc"), limit(10));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => {
+        const data = doc.data();
+        let time = 'Recent';
+        if (data.createdAt) {
+            time = data.createdAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        }
+        return {
+            id: doc.id,
+            action: data.status === 'waiting' ? 'Match Created' : 'Match Started',
+            target: `${data.gameType} - ${data.stake} FCFA`,
+            time: time,
+            type: data.stake > 5000 ? 'warning' : 'info'
+        };
+    });
+};
+
+// --- FORUM ---
+
+export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
+    const q = query(
+        collection(db, "forum_posts"),
+        orderBy("timestamp", "desc"),
+        limit(50)
+    );
+    
+    return onSnapshot(q, (snapshot) => {
+        const posts = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as ForumPost)).reverse(); // Show oldest first (top to bottom reading) or handle in UI
+        callback(posts);
+    });
+};
+
+export const sendForumMessage = async (user: User, content: string) => {
+    await addDoc(collection(db, "forum_posts"), {
+        userId: user.id,
+        userName: user.name,
+        userAvatar: user.avatar,
+        userRank: user.rankTier,
+        content: content,
+        timestamp: serverTimestamp(),
+        likes: 0
+    });
+};
+
+export const deleteForumMessage = async (postId: string) => {
+    await deleteDoc(doc(db, "forum_posts", postId));
 };

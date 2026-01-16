@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert } from 'lucide-react';
+import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
 import { ViewState, User as AppUser } from '../types';
 
 interface NavigationProps {
@@ -13,6 +13,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
   const navItems = [
     { id: 'dashboard', icon: Home, label: 'Home' },
     { id: 'lobby', icon: LayoutGrid, label: 'Lobby' },
+    { id: 'forum', icon: MessageSquare, label: 'Forum' },
     { id: 'finance', icon: Wallet, label: 'Wallet' },
   ];
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { User, ViewState } from '../types';
-import { MOCK_TRANSACTIONS } from '../services/mockData';
+import { User, ViewState, Transaction } from '../types';
+import { getUserTransactions } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
 import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -29,6 +29,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'settings'>('overview');
   const [isEditing, setIsEditing] = useState(false);
   
+  // Real Data State
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [stats, setStats] = useState({
+      totalGames: 0,
+      winRate: 0,
+      streak: 0,
+      totalEarnings: 0
+  });
+
   // Edit State
   const [tempName, setTempName] = useState(user.name);
   const [tempAvatar, setTempAvatar] = useState(user.avatar);
@@ -48,6 +57,57 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
         setTempAvatar(user.avatar);
     }
   }, [user, isEditing]);
+
+  // Fetch Data for Profile
+  useEffect(() => {
+      const fetchData = async () => {
+          if (user.id.startsWith('guest-')) return;
+          
+          try {
+              const txs = await getUserTransactions(user.id);
+              setTransactions(txs);
+
+              // Calculate Stats
+              const stakes = txs.filter(t => t.type === 'stake');
+              const winnings = txs.filter(t => t.type === 'winnings');
+              
+              const totalGames = stakes.length;
+              const totalWins = winnings.length;
+              // Win rate calculation (simplistic)
+              const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
+              const totalEarnings = winnings.reduce((acc, curr) => acc + curr.amount, 0);
+
+              // Calculate Streak (Consecutive wins in recent history)
+              let streak = 0;
+              let pendingWins = 0;
+              
+              // Transactions are sorted desc (newest first)
+              for (const tx of txs) {
+                   if (tx.type === 'winnings') {
+                       pendingWins++;
+                   } else if (tx.type === 'stake') {
+                       if (pendingWins > 0) {
+                           streak++;
+                           pendingWins--; 
+                       } else {
+                           break; // Loss found
+                       }
+                   }
+              }
+
+              setStats({
+                  totalGames,
+                  winRate,
+                  streak,
+                  totalEarnings
+              });
+
+          } catch (e) {
+              console.error("Failed to load profile stats", e);
+          }
+      };
+      fetchData();
+  }, [user.id]);
 
   const togglePref = (key: keyof typeof preferences) => {
       const newVal = !preferences[key];
@@ -84,6 +144,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
           case 'Silver': return 'text-slate-300 bg-slate-300/10 border-slate-300/20';
           default: return 'text-orange-400 bg-orange-400/10 border-orange-400/20';
       }
+  };
+
+  const formatEarnings = (amount: number) => {
+      if (amount >= 1000000) return (amount / 1000000).toFixed(1) + 'M';
+      if (amount >= 1000) return (amount / 1000).toFixed(1) + 'k';
+      return amount.toLocaleString();
   };
 
   const containerVariants = {
@@ -143,7 +209,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        {user.rankTier} Tier
                                    </span>
                                    <span className="text-slate-400 font-mono flex items-center gap-1">
-                                       ID: <span className="text-slate-200">{user.id.toUpperCase()}</span>
+                                       ID: <span className="text-slate-200">{user.id.substring(0, 12)}...</span>
                                    </span>
                                </div>
                            </>
@@ -246,10 +312,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                       <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               {[
-                                  { label: 'Total Games', value: '142', icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
-                                  { label: 'Win Rate', value: '68%', icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-                                  { label: 'Current Streak', value: '4 🔥', icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
-                                  { label: 'Total Earnings', value: '1.2M', icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
+                                  { label: 'Total Games', value: stats.totalGames.toString(), icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+                                  { label: 'Win Rate', value: `${stats.winRate}%`, icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
+                                  { label: 'Current Streak', value: `${stats.streak} 🔥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+                                  { label: 'Total Earnings', value: formatEarnings(stats.totalEarnings), icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
                               ].map((stat, idx) => (
                                   <div key={idx} className={`glass-panel p-4 rounded-2xl border ${stat.border} hover:bg-white/5 transition-colors`}>
                                       <div className={`w-10 h-10 rounded-xl ${stat.bg} ${stat.color} flex items-center justify-center mb-3`}>
@@ -270,6 +336,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                   </select>
                               </div>
                               <div className="h-48 flex items-end justify-between gap-3 relative z-10 px-2">
+                                  {/* Dummy Chart Data for Visual */}
                                   {[30, 45, 25, 60, 75, 50, 80].map((h, i) => (
                                       <div key={i} className="w-full bg-royal-800/50 rounded-t-lg relative group">
                                           <motion.div 
@@ -327,7 +394,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                           <div className="p-5 rounded-2xl border border-dashed border-white/10 text-center bg-royal-900/30">
                               <p className="text-sm text-slate-400 mb-2 font-medium">Referral Code</p>
                               <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/5 select-all">
-                                  AMARA-2024
+                                  {user.name.toUpperCase().substring(0,5)}-2024
                               </div>
                               <p className="text-xs text-slate-500">Share to earn <span className="text-white font-bold">500 FCFA</span> per friend</p>
                           </div>
@@ -344,48 +411,54 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                <button className="text-xs text-gold-400 font-bold uppercase hover:text-white">Export CSV</button>
                            </div>
                            <div className="overflow-x-auto">
-                               <table className="w-full text-left whitespace-nowrap">
-                                   <thead className="bg-royal-950/50 text-xs uppercase text-slate-500 font-medium">
-                                       <tr>
-                                           <th className="p-4">Transaction Type</th>
-                                           <th className="p-4">Reference ID</th>
-                                           <th className="p-4">Date & Time</th>
-                                           <th className="p-4">Status</th>
-                                           <th className="p-4 text-right">Amount</th>
-                                       </tr>
-                                   </thead>
-                                   <tbody className="divide-y divide-white/5">
-                                       {MOCK_TRANSACTIONS.map((tx) => (
-                                           <tr key={tx.id} className="hover:bg-white/5 transition-colors">
-                                               <td className="p-4">
-                                                   <div className="flex items-center gap-3">
-                                                       <div className={`p-2 rounded-lg ${
-                                                           tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
-                                                       }`}>
-                                                           {tx.type === 'deposit' ? <CreditCard size={16} /> : 
-                                                            tx.type === 'winnings' ? <Trophy size={16} /> : <TrendingUp size={16} />}
-                                                       </div>
-                                                       <span className="capitalize font-bold text-slate-300">{tx.type}</span>
-                                                   </div>
-                                               </td>
-                                               <td className="p-4 text-xs text-slate-500 font-mono uppercase">{tx.id}</td>
-                                               <td className="p-4 text-sm text-slate-400">{tx.date}</td>
-                                               <td className="p-4">
-                                                   <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase border ${
-                                                       tx.status === 'completed' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-                                                   }`}>
-                                                       {tx.status}
-                                                   </span>
-                                               </td>
-                                               <td className={`p-4 text-right font-mono font-bold text-sm ${
-                                                   tx.amount > 0 ? 'text-green-400' : 'text-slate-200'
-                                               }`}>
-                                                   {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()} FCFA
-                                               </td>
+                               {transactions.length > 0 ? (
+                                   <table className="w-full text-left whitespace-nowrap">
+                                       <thead className="bg-royal-950/50 text-xs uppercase text-slate-500 font-medium">
+                                           <tr>
+                                               <th className="p-4">Transaction Type</th>
+                                               <th className="p-4">Reference ID</th>
+                                               <th className="p-4">Date & Time</th>
+                                               <th className="p-4">Status</th>
+                                               <th className="p-4 text-right">Amount</th>
                                            </tr>
-                                       ))}
-                                   </tbody>
-                               </table>
+                                       </thead>
+                                       <tbody className="divide-y divide-white/5">
+                                           {transactions.map((tx) => (
+                                               <tr key={tx.id} className="hover:bg-white/5 transition-colors">
+                                                   <td className="p-4">
+                                                       <div className="flex items-center gap-3">
+                                                           <div className={`p-2 rounded-lg ${
+                                                               tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                                                           }`}>
+                                                               {tx.type === 'deposit' ? <CreditCard size={16} /> : 
+                                                                tx.type === 'winnings' ? <Trophy size={16} /> : <TrendingUp size={16} />}
+                                                           </div>
+                                                           <span className="capitalize font-bold text-slate-300">{tx.type}</span>
+                                                       </div>
+                                                   </td>
+                                                   <td className="p-4 text-xs text-slate-500 font-mono uppercase">{tx.id}</td>
+                                                   <td className="p-4 text-sm text-slate-400">{tx.date}</td>
+                                                   <td className="p-4">
+                                                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                                                           tx.status === 'completed' ? 'bg-green-500/10 text-green-400 border-green-500/20' : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                                                       }`}>
+                                                           {tx.status}
+                                                       </span>
+                                                   </td>
+                                                   <td className={`p-4 text-right font-mono font-bold text-sm ${
+                                                       tx.amount > 0 ? 'text-green-400' : 'text-slate-200'
+                                                   }`}>
+                                                       {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()} FCFA
+                                                   </td>
+                                               </tr>
+                                           ))}
+                                       </tbody>
+                                   </table>
+                               ) : (
+                                   <div className="p-12 text-center text-slate-500 text-sm">
+                                       No transactions found. Start playing to build your history!
+                                   </div>
+                               )}
                            </div>
                        </div>
                    </motion.div>
@@ -527,19 +600,19 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                </h3>
                                <div className="space-y-2">
                                    <button 
-                                     onClick={() => { alert("Help Center ticket created."); playSFX('click'); }}
+                                     onClick={() => { onNavigate('help-center'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Help Center <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => { alert("Bug report submitted."); playSFX('click'); }}
+                                     onClick={() => { onNavigate('report-bug'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Report a Bug <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => { alert("Terms of Service opened."); playSFX('click'); }}
+                                     onClick={() => { onNavigate('terms'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        Terms of Service <ChevronRight size={16} />

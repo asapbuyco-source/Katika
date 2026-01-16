@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -17,6 +16,10 @@ import { AuthScreen } from './components/AuthScreen';
 import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
 import { AdminDashboard } from './components/AdminDashboard';
+import { HelpCenter } from './components/HelpCenter';
+import { ReportBug } from './components/ReportBug';
+import { TermsOfService } from './components/TermsOfService';
+import { Forum } from './components/Forum';
 import { GameResultOverlay } from './components/GameResultOverlay';
 import { ChallengeRequestModal } from './components/ChallengeRequestModal';
 import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, createBotMatch } from './services/firebase';
@@ -84,7 +87,7 @@ export default function App() {
               setView('dashboard');
           }
       } else {
-          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin'];
+          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum'];
           if (protectedViews.includes(currentView)) {
               setView('landing');
           }
@@ -244,7 +247,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
-      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin'].includes(currentView) && (
+      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
@@ -335,6 +338,14 @@ export default function App() {
                         onNavigate={setView}
                     />
                 )}
+                
+                {currentView === 'forum' && <Forum user={user} />}
+
+                {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
+                
+                {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
+                
+                {currentView === 'terms' && <TermsOfService onBack={() => setView('profile')} />}
                 
                 {currentView === 'admin' && user.isAdmin && (
                     <AdminDashboard user={user} />
