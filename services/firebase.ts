@@ -27,7 +27,7 @@ import {
   runTransaction,
   deleteDoc
 } from "firebase/firestore";
-import { User, Transaction, Table, PlayerProfile, ForumPost } from "../types";
+import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
@@ -127,6 +127,7 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
         const data = doc.data() as User;
         if (data.name.toLowerCase().includes(searchTerm.toLowerCase())) {
             results.push({
+                id: data.id,
                 name: data.name,
                 elo: data.elo,
                 avatar: data.avatar,
@@ -285,6 +286,14 @@ export const subscribeToGame = (gameId: string, callback: (data: any) => void) =
     });
 };
 
+export const getGame = async (gameId: string): Promise<any> => {
+    const docSnap = await getDoc(doc(db, "games", gameId));
+    if (docSnap.exists()) {
+        return { id: docSnap.id, ...docSnap.data() };
+    }
+    return null;
+};
+
 export const updateGameState = async (gameId: string, newState: any) => {
     const gameRef = doc(db, "games", gameId);
     await updateDoc(gameRef, {
@@ -312,6 +321,87 @@ export const loginAsGuest = async (): Promise<User> => {
     const { signInAnonymously } = await import("firebase/auth");
     const cred = await signInAnonymously(auth);
     return syncUserProfile(cred.user);
+};
+
+// --- CHALLENGES ---
+
+export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
+    const challengeData = {
+        sender: {
+            id: sender.id,
+            name: sender.name,
+            avatar: sender.avatar,
+            elo: sender.elo,
+            rankTier: sender.rankTier
+        },
+        targetId: targetId,
+        gameType: gameType,
+        stake: stake,
+        status: 'pending',
+        timestamp: serverTimestamp(),
+        createdAt: Date.now()
+    };
+    const docRef = await addDoc(collection(db, "challenges"), challengeData);
+    return docRef.id;
+};
+
+export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
+    // Listen for the most recent pending challenge
+    const q = query(
+        collection(db, "challenges"),
+        where("targetId", "==", userId),
+        where("status", "==", "pending"),
+        orderBy("timestamp", "desc"),
+        limit(1)
+    );
+
+    return onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+            const doc = snapshot.docs[0];
+            callback({ id: doc.id, ...doc.data() } as Challenge);
+        } else {
+            callback(null);
+        }
+    });
+};
+
+export const subscribeToChallengeStatus = (challengeId: string, callback: (data: Challenge) => void) => {
+    return onSnapshot(doc(db, "challenges", challengeId), (docSnap) => {
+        if (docSnap.exists()) {
+            callback({ id: docSnap.id, ...docSnap.data() } as Challenge);
+        }
+    });
+};
+
+export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined', gameId?: string) => {
+    await updateDoc(doc(db, "challenges", challengeId), {
+        status: status,
+        gameId: gameId || null
+    });
+};
+
+export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
+    // Create specific game for these two
+    const newGame = {
+        gameType: challenge.gameType,
+        stake: challenge.stake,
+        status: "active",
+        host: challenge.sender, // Sender is host
+        guest: {
+            id: receiver.id,
+            name: receiver.name,
+            avatar: receiver.avatar,
+            elo: receiver.elo,
+            rankTier: receiver.rankTier
+        },
+        players: [challenge.sender.id!, receiver.id],
+        createdAt: serverTimestamp(),
+        turn: challenge.sender.id,
+        gameState: {}
+    };
+    
+    const docRef = await addDoc(collection(db, "games"), newGame);
+    return docRef.id;
 };
 
 // --- ADMIN & STATS ---

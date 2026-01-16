@@ -22,9 +22,12 @@ export interface PlayerProfile {
 export interface Challenge {
   id: string;
   sender: PlayerProfile;
+  targetId?: string; // ID of the player being challenged
   gameType: string;
   stake: number;
   timestamp: number;
+  status?: 'pending' | 'accepted' | 'declined';
+  gameId?: string; // The game created if accepted
 }
 
 export interface Transaction {
@@ -54,6 +57,7 @@ export interface Table {
   status: 'waiting' | 'starting' | 'active';
   host?: PlayerProfile; // The player waiting at the table
   minElo?: number;      // Minimum ELO required to join
+  guest?: PlayerProfile; // The second player
 }
 
 export interface GameEvent {

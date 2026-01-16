@@ -1,17 +1,17 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
-import { searchUsers, createBotMatch } from '../services/firebase';
+import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface LobbyProps {
   user: User;
   setView: (view: ViewState) => void;
-  onQuickMatch: (stake: number, gameType: string) => void;
+  onQuickMatch: (stake: number, gameType: string, specificGameId?: string) => void;
   initialGameId?: string | null;
   onClearInitialGame?: () => void;
 }
@@ -42,6 +42,10 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   const [challengeStake, setChallengeStake] = useState<number>(1000);
   const [challengeGame, setChallengeGame] = useState('Ludo');
   
+  // Active Challenge Monitoring
+  const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+  const challengeUnsubscribeRef = useRef<(() => void) | null>(null);
+  
   // Payment State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
@@ -69,7 +73,8 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
               setIsSearching(true);
               try {
                   const results = await searchUsers(searchQuery);
-                  setSearchResults(results);
+                  // Filter out self
+                  setSearchResults(results.filter(r => r.id !== user.id));
               } catch (error) {
                   console.error("Search failed", error);
               }
@@ -80,7 +85,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       }, 500);
 
       return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery]);
+  }, [searchQuery, user.id]);
+
+  // Cleanup challenge listener
+  useEffect(() => {
+      return () => {
+          if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+      };
+  }, []);
 
   const handleGameSelect = (gameId: string) => {
       if (isMaintenance) return;
@@ -131,9 +143,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       }
   };
 
-  const handleSendChallenge = () => {
+  const handleSendChallenge = async () => {
       playSFX('click');
       if (isMaintenance) return;
+      if (!selectedFriend || !selectedFriend.id) {
+          alert("Invalid user selected");
+          return;
+      }
+      
       if (user.balance < challengeStake) {
           setNeededAmount(challengeStake - user.balance);
           setShowChallengeModal(false);
@@ -143,22 +160,45 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
       setChallengeStep('sending');
       
-      // Simulate network delay and friend acceptance
-      setTimeout(() => {
-          // In a real app, this waits for socket event.
-          // Here we assume auto-accept for UX flow or close and show toast.
-          setShowChallengeModal(false);
-          // Trigger game start with specific friend
-          onQuickMatch(challengeStake, challengeGame); 
-          alert(`${selectedFriend?.name} accepted the challenge! Starting game...`);
-          
-          // Reset
-          setTimeout(() => {
-              setChallengeStep('search');
-              setSearchQuery('');
-              setSelectedFriend(null);
-          }, 500);
-      }, 2000);
+      try {
+          // 1. Send Challenge to Firestore
+          const challengeId = await sendChallenge(user, selectedFriend.id, challengeGame, challengeStake);
+          setActiveChallengeId(challengeId);
+
+          // 2. Subscribe to status changes
+          challengeUnsubscribeRef.current = subscribeToChallengeStatus(challengeId, (data) => {
+              if (data.status === 'accepted' && data.gameId) {
+                  playSFX('win'); // Success sound
+                  setShowChallengeModal(false);
+                  
+                  // Join Game
+                  onQuickMatch(challengeStake, challengeGame, data.gameId);
+                  
+                  // Clear
+                  setActiveChallengeId(null);
+                  if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+                  
+              } else if (data.status === 'declined') {
+                  playSFX('error');
+                  alert(`${selectedFriend.name} declined the challenge.`);
+                  setChallengeStep('search'); // Reset
+                  setActiveChallengeId(null);
+                  if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+              }
+          });
+
+      } catch (error) {
+          console.error("Failed to send challenge", error);
+          alert("Error sending challenge.");
+          setChallengeStep('config');
+      }
+  };
+
+  const handleCancelChallenge = () => {
+      if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+      setActiveChallengeId(null);
+      setChallengeStep('search');
+      setShowChallengeModal(false);
   };
 
   const activeGameData = AVAILABLE_GAMES.find(g => g.id === selectedGame);
@@ -238,7 +278,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
               <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                   <motion.div 
                     initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowChallengeModal(false)}
+                    onClick={handleCancelChallenge}
                     className="absolute inset-0 bg-black/80 backdrop-blur-sm"
                   />
                   <motion.div 
@@ -251,7 +291,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                               <Swords className="text-gold-400" size={20} />
                               {challengeStep === 'search' ? 'Challenge a Friend' : 'Configure Match'}
                           </h2>
-                          <button onClick={() => setShowChallengeModal(false)} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                          <button onClick={handleCancelChallenge} className="text-slate-400 hover:text-white"><X size={20} /></button>
                       </div>
 
                       <div className="p-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
@@ -384,6 +424,13 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                       </div>
                                       <h3 className="text-xl font-bold text-white mb-2">Sending Challenge...</h3>
                                       <p className="text-slate-400 text-sm">Waiting for <span className="text-white font-bold">{selectedFriend?.name}</span> to accept.</p>
+                                      
+                                      <button 
+                                          onClick={handleCancelChallenge}
+                                          className="mt-8 text-red-400 text-xs font-bold uppercase tracking-wider hover:text-red-300"
+                                      >
+                                          Cancel Request
+                                      </button>
                                   </motion.div>
                               )}
                           </AnimatePresence>

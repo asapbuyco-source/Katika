@@ -22,7 +22,10 @@ import { TermsOfService } from './components/TermsOfService';
 import { Forum } from './components/Forum';
 import { GameResultOverlay } from './components/GameResultOverlay';
 import { ChallengeRequestModal } from './components/ChallengeRequestModal';
-import { auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, createBotMatch } from './services/firebase';
+import { 
+    auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, 
+    createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame 
+} from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence } from 'framer-motion';
 
@@ -45,6 +48,7 @@ export default function App() {
   // 1. Firebase Auth & Real-time Database Listener
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
+      let unsubscribeChallenges: (() => void) | undefined;
 
       const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
@@ -58,11 +62,17 @@ export default function App() {
                       setUser(updatedUser);
                   });
 
+                  // Setup Real-time Listener for Incoming Challenges
+                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
+                      setIncomingChallenge(challenge);
+                  });
+
               } catch (error) {
                   console.error("Profile sync failed:", error);
               }
           } else {
               if (unsubscribeSnapshot) unsubscribeSnapshot();
+              if (unsubscribeChallenges) unsubscribeChallenges();
               if (!user || user.id.startsWith('guest-')) {
                   // Keep guest or null
               } else {
@@ -75,6 +85,7 @@ export default function App() {
       return () => {
           unsubscribeAuth();
           if (unsubscribeSnapshot) unsubscribeSnapshot();
+          if (unsubscribeChallenges) unsubscribeChallenges();
       };
   }, []); // Run once on mount
 
@@ -99,17 +110,54 @@ export default function App() {
       // Balance update is handled via Finance component and Firestore listener
   };
 
-  const startMatchmaking = async (stake: number, gameType: string) => {
+  const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user) return;
+
+      if (specificGameId) {
+          // Join specific game (e.g. from challenge accepted by other party)
+          try {
+              const gameData = await getGame(specificGameId);
+              if (gameData) {
+                  const table: Table = {
+                      id: gameData.id,
+                      gameType: gameData.gameType,
+                      stake: gameData.stake,
+                      players: 2,
+                      maxPlayers: 2,
+                      status: 'active',
+                      host: gameData.host // Visual host
+                  };
+                  // Process stake for sender if not already handled? 
+                  // In challenge flow, sender usually stakes when creating challenge or joining game.
+                  // For simplicity, we handle stake deduction in handleMatchFound usually.
+                  // But here we are joining an active game.
+                  // Let's assume stake was handled or will be handled. 
+                  // If 'specificGameId' is used, it usually means we are the sender of a challenge that was accepted.
+                  
+                  if (stake > 0) {
+                      await addUserTransaction(user.id, {
+                          type: 'stake',
+                          amount: -stake,
+                          status: 'completed',
+                          date: new Date().toISOString()
+                      });
+                  }
+
+                  setActiveTable(table);
+                  setView('game');
+              } else {
+                  alert("Game not found.");
+              }
+          } catch(e) {
+              console.error("Error joining game:", e);
+          }
+          return;
+      }
 
       if (stake === -1) {
           // BOT MATCH
           try {
               const gameId = await createBotMatch(user, gameType);
-              // Fetch game data to construct table
-              // In a real app we might just subscribe, but here we construct a table object
-              // Since createBotMatch creates it, we can fetch it once or trust defaults
-              // We'll trust defaults for speed:
               const table: Table = {
                   id: gameId,
                   gameType: gameType as any,
@@ -166,22 +214,52 @@ export default function App() {
   const handleAcceptChallenge = async () => {
       if (!incomingChallenge || !user) return;
       
-      const table: Table = {
-          id: `match-challenge-${Date.now()}`,
-          gameType: incomingChallenge.gameType as any,
-          stake: incomingChallenge.stake,
-          players: 2,
-          maxPlayers: 2,
-          status: 'active',
-          host: incomingChallenge.sender
-      };
+      if (user.balance < incomingChallenge.stake) {
+          alert("Insufficient funds to accept challenge.");
+          return;
+      }
 
-      setIncomingChallenge(null);
-      await handleMatchFound(table);
+      try {
+          // 1. Create Game
+          const gameId = await createChallengeGame(incomingChallenge, user);
+          
+          // 2. Respond to Challenge (mark accepted and link game)
+          await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
+
+          // 3. Deduct Stake for Receiver
+          await addUserTransaction(user.id, {
+              type: 'stake',
+              amount: -incomingChallenge.stake,
+              status: 'completed',
+              date: new Date().toISOString()
+          });
+
+          // 4. Start Game
+          const table: Table = {
+              id: gameId,
+              gameType: incomingChallenge.gameType as any,
+              stake: incomingChallenge.stake,
+              players: 2,
+              maxPlayers: 2,
+              status: 'active',
+              host: incomingChallenge.sender // The sender is the 'host' visually
+          };
+
+          setIncomingChallenge(null);
+          setActiveTable(table);
+          setView('game');
+
+      } catch (error) {
+          console.error("Failed to accept challenge", error);
+          alert("Error accepting challenge.");
+      }
   };
 
-  const handleDeclineChallenge = () => {
-      setIncomingChallenge(null);
+  const handleDeclineChallenge = async () => {
+      if (incomingChallenge) {
+          await respondToChallenge(incomingChallenge.id, 'declined');
+          setIncomingChallenge(null);
+      }
   };
 
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
