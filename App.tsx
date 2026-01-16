@@ -4,6 +4,7 @@ import { ViewState, User, Table } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
 import { GameRoom } from './components/GameRoom';
+import { CheckersGame } from './components/CheckersGame';
 import { Navigation } from './components/Navigation';
 import { LandingPage } from './components/LandingPage';
 import { MatchmakingScreen } from './components/MatchmakingScreen';
@@ -134,10 +135,21 @@ export default function App() {
         )}
 
         {currentView === 'game' && activeTable && (
-            <GameRoom 
-                table={activeTable} 
-                onGameEnd={handleGameEnd} 
-            />
+            <>
+                {activeTable.gameType === 'Checkers' ? (
+                    <CheckersGame 
+                        table={activeTable}
+                        user={user}
+                        onGameEnd={handleGameEnd}
+                    />
+                ) : (
+                    <GameRoom 
+                        table={activeTable} 
+                        user={user}
+                        onGameEnd={handleGameEnd} 
+                    />
+                )}
+            </>
         )}
       </main>
     </div>

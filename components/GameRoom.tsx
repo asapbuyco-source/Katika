@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Dice5, Lock, RotateCcw, Crown, Star, User as UserIcon, Zap, Shield } from 'lucide-react';
-import { Table, AIRefereeLog } from '../types';
+import { Table, AIRefereeLog, User } from '../types';
 import { AIReferee } from './AIReferee';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -19,6 +19,7 @@ interface Piece {
 
 interface GameRoomProps {
   table: Table;
+  user: User;
   onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
 }
 
@@ -68,7 +69,7 @@ const SAFE_SPOTS = new Set([
   "6,1", "2,6", "1,8", "6,12", "8,13", "12,8", "13,6", "8,2"
 ]);
 
-export const GameRoom: React.FC<GameRoomProps> = ({ table, onGameEnd }) => {
+export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) => {
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [turn, setTurn] = useState<PlayerColor>('Red');
   const [dice, setDice] = useState<number | null>(null);
@@ -427,15 +428,37 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, onGameEnd }) => {
 
               {/* Player List */}
               <div className="space-y-2">
-                  {COLORS.map(c => (
-                      <div key={c} className={`flex items-center justify-between p-3 rounded-xl border ${turn === c ? 'bg-white/10 border-white/20' : 'border-transparent opacity-50'}`}>
-                          <div className="flex items-center gap-2">
-                              <div className={`w-2 h-2 rounded-full ${c === 'Red' ? 'bg-cam-red' : c === 'Green' ? 'bg-cam-green' : c === 'Yellow' ? 'bg-cam-yellow' : 'bg-[#2563eb]'}`} />
-                              <span className="text-sm font-bold text-white">{c}</span>
+                  {COLORS.map(c => {
+                      // Determine who plays this color
+                      let playerInfo = null;
+                      if (c === 'Red') playerInfo = user;
+                      else if (c === 'Green') playerInfo = table.host;
+                      
+                      return (
+                      <div key={c} className={`flex items-center justify-between p-2 rounded-xl border transition-all ${turn === c ? 'bg-white/10 border-white/20 shadow-lg' : 'border-transparent opacity-60'}`}>
+                          <div className="flex items-center gap-3">
+                              <div className="relative">
+                                  <div className="w-8 h-8 rounded-full bg-royal-800 border border-white/10 overflow-hidden flex items-center justify-center">
+                                      {playerInfo ? (
+                                          <img src={playerInfo.avatar} alt={playerInfo.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                          <UserIcon size={16} className="text-slate-600" />
+                                      )}
+                                  </div>
+                                  <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-royal-950 ${c === 'Red' ? 'bg-cam-red' : c === 'Green' ? 'bg-cam-green' : c === 'Yellow' ? 'bg-cam-yellow' : 'bg-[#2563eb]'}`} />
+                              </div>
+                              <div>
+                                  <div className="text-xs font-bold text-white leading-tight flex items-center gap-1">
+                                    {c}
+                                    {c === 'Red' && <span className="text-[8px] bg-gold-500/20 text-gold-400 px-1 rounded uppercase tracking-wider">You</span>}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-medium">
+                                      {playerInfo ? playerInfo.name : 'Bot / Empty'}
+                                  </div>
+                              </div>
                           </div>
-                          {c === 'Red' && <UserIcon size={14} className="text-gold-400" />}
                       </div>
-                  ))}
+                  )})}
               </div>
           </div>
 
