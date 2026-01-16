@@ -241,7 +241,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
           pieces: updatedPieces,
           diceRolled: false,
           diceValue: roll,
-          currentTurn: bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red')
+          currentTurn: (bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red')) as PlayerColor
       };
 
       setGameState(nextTurnState);
@@ -353,7 +353,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
           pieces: updatedPieces,
           diceRolled: false,
           diceValue: gameState.diceValue, // keep for visual until next roll
-          currentTurn: bonusTurn ? myColor : (myColor === 'Red' ? 'Yellow' : 'Red')
+          currentTurn: (bonusTurn ? myColor : (myColor === 'Red' ? 'Yellow' : 'Red')) as PlayerColor
       };
 
       if (bonusTurn) addLog("Rolled 6! Bonus Turn", "secure");
@@ -363,7 +363,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   };
 
   const passTurn = async (currentState: LudoGameState) => {
-       const nextColor = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
+       const nextColor = (currentState.currentTurn === 'Red' ? 'Yellow' : 'Red') as PlayerColor;
        const newState = {
            ...currentState,
            diceRolled: false,
