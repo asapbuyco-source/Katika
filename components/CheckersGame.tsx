@@ -288,7 +288,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       setSelectedPieceId(null);
   }, [getGlobalValidMoves, addLog, onGameEnd]);
 
-  const executeBotMoveRef = useRef<(currentBoard: Piece[], multiJumpPieceId?: string | null) => void>(null);
+  // Fix: Explicitly type the ref to allow mutation
+  const executeBotMoveRef = useRef<((currentBoard: Piece[], multiJumpPieceId?: string | null) => void) | null>(null);
 
   const executeBotMove = (currentBoard: Piece[], multiJumpPieceId: string | null = null) => {
       const { moves } = getGlobalValidMoves('opponent', currentBoard, multiJumpPieceId);
