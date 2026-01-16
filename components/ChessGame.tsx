@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Shield, Trophy, RefreshCw, AlertTriangle, Crown, Brain } from 'lucide-react';
+import { ArrowLeft, Shield, Trophy, RefreshCw, AlertTriangle, Crown, Brain, Clock } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -44,6 +44,27 @@ const getInitialBoard = (): Board => {
     );
 };
 
+// --- HELPER: TIME FORMATTER ---
+const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+const TimerDisplay = ({ time, isActive }: { time: number, isActive: boolean }) => (
+    <div className={`
+        flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors duration-300
+        ${isActive 
+            ? time < 60 
+                ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' 
+                : 'bg-white text-royal-950 border-white shadow-[0_0_15px_rgba(255,255,255,0.3)]' 
+            : 'bg-black/30 border-white/10 text-slate-500'}
+    `}>
+        <Clock size={16} className={isActive ? 'animate-pulse' : ''} />
+        <span className="font-mono font-bold text-xl leading-none pt-0.5">{formatTime(time)}</span>
+    </div>
+);
+
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) => {
   // State
   const [board, setBoard] = useState<Board>(getInitialBoard);
@@ -57,24 +78,40 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [serverHash, setServerHash] = useState("");
 
+  // Timer State (10 minutes each)
+  const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
+  const [isGameOver, setIsGameOver] = useState(false);
+
   // Init
   useEffect(() => {
     // Game is already initialized by useState, just set hash
     setServerHash(Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join(''));
   }, []);
 
+  // Timer Effect
+  useEffect(() => {
+      if (isGameOver || status === 'checkmate' || status === 'stalemate') return;
+
+      const timer = setInterval(() => {
+          setTimeRemaining(prev => {
+              const newTime = { ...prev };
+              if (newTime[turn] > 0) {
+                  newTime[turn] -= 1;
+              } else {
+                  clearInterval(timer);
+                  setIsGameOver(true);
+                  if (turn === 'w') onGameEnd('loss'); // User ran out of time
+                  else onGameEnd('win'); // Bot ran out of time
+              }
+              return newTime;
+          });
+      }, 1000);
+
+      return () => clearInterval(timer);
+  }, [turn, isGameOver, status, onGameEnd]);
+
   const addLog = (msg: string, logStatus: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status: logStatus, timestamp: Date.now() });
-  };
-
-  const initializeGame = () => {
-    setBoard(getInitialBoard());
-    setTurn('w');
-    setStatus('playing');
-    setCaptured({ w: [], b: [] });
-    setValidMoves([]);
-    setSelectedPos(null);
-    setLastMove(null);
   };
 
   // --- ENGINE LOGIC ---
@@ -259,7 +296,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
   const handleSquareClick = (r: number, c: number) => {
       // Allow moving if playing OR if in check. Only block on mate/stalemate.
-      if (turn === 'b' || (status !== 'playing' && status !== 'check')) return; // Bot turn
+      if (turn === 'b' || (status !== 'playing' && status !== 'check') || isGameOver) return; // Bot turn
       if (!board[r]) return;
 
       const clickedPiece = board[r][c];
@@ -317,9 +354,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
       if (inCheck && !hasMoves) {
           setStatus('checkmate');
+          setIsGameOver(true);
           onGameEnd(turn === 'w' ? 'win' : 'loss');
       } else if (!inCheck && !hasMoves) {
           setStatus('stalemate');
+          setIsGameOver(true);
           onGameEnd('quit'); // Draw
       } else if (inCheck) {
           setStatus('check');
@@ -334,13 +373,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
   // Bot Turn
   useEffect(() => {
-      if (turn === 'b' && status !== 'checkmate' && status !== 'stalemate') {
+      if (turn === 'b' && status !== 'checkmate' && status !== 'stalemate' && !isGameOver) {
           const timeout = setTimeout(() => {
               makeBotMove();
           }, 1000);
           return () => clearTimeout(timeout);
       }
-  }, [turn, status, board]); // Added board dependency
+  }, [turn, status, board, isGameOver]); 
 
   const makeBotMove = () => {
       // Collect all moves
@@ -467,10 +506,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
                </div>
                <div>
                    <div className="text-sm font-bold text-white">{table.host?.name || "Opponent"}</div>
-                   <div className="flex gap-1 text-gold-400 text-xs">{captured.w.map((p, i) => <span key={i}>{getPieceSymbol(p)}</span>)}</div>
+                   <div className="flex gap-1 text-gold-400 text-xs mb-1">{captured.w.map((p, i) => <span key={i}>{getPieceSymbol(p)}</span>)}</div>
                </div>
            </div>
-           {turn === 'b' && <span className="text-xs text-purple-400 animate-pulse font-mono">THINKING...</span>}
+           <TimerDisplay time={timeRemaining.b} isActive={turn === 'b'} />
        </div>
 
        {/* Chess Board */}
@@ -520,13 +559,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
                </div>
                <div>
                    <div className="text-sm font-bold text-white">You</div>
-                   <div className="flex gap-1 text-purple-400 text-xs">{captured.b.map((p, i) => <span key={i}>{getPieceSymbol(p)}</span>)}</div>
+                   <div className="flex gap-1 text-purple-400 text-xs mb-1">{captured.b.map((p, i) => <span key={i}>{getPieceSymbol(p)}</span>)}</div>
                </div>
            </div>
-           <div className="flex flex-col items-end">
-                <div className="text-[10px] text-slate-500 uppercase tracking-widest">Server Hash</div>
-                <div className="font-mono text-[8px] text-slate-600 max-w-[100px] truncate">{serverHash}</div>
-           </div>
+           <TimerDisplay time={timeRemaining.w} isActive={turn === 'w'} />
        </div>
 
     </div>

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle, Clock } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -28,6 +28,27 @@ interface Move {
   isJump: boolean;
   jumpId?: string; // ID of captured piece
 }
+
+// --- HELPER: TIME FORMATTER ---
+const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
+
+const TimerDisplay = ({ time, isActive, label }: { time: number, isActive: boolean, label?: string }) => (
+    <div className={`
+        flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors duration-300
+        ${isActive 
+            ? time < 60 
+                ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' 
+                : 'bg-white text-royal-950 border-white shadow-[0_0_15px_rgba(255,255,255,0.3)]' 
+            : 'bg-black/30 border-white/10 text-slate-500'}
+    `}>
+        <Clock size={14} className={isActive ? 'animate-pulse' : ''} />
+        <span className="font-mono font-bold text-lg leading-none pt-0.5">{formatTime(time)}</span>
+    </div>
+);
 
 // --- OPTIMIZED CELL COMPONENT ---
 const CheckersCell = React.memo(({
@@ -91,23 +112,23 @@ const CheckersCell = React.memo(({
                     initial={{ scale: 0.5, opacity: 0 }}
                     animate={{ scale: isSelected ? 1.1 : 1, opacity: 1 }}
                     exit={{ scale: 0, opacity: 0 }}
-                    transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                    transition={{ type: 'spring', stiffness: 500, damping: 30, mass: 0.8 }}
                     className="relative w-[80%] h-[80%] z-20 pointer-events-none"
                 >
                     {/* Shadow Base */}
-                    <div className="absolute bottom-[-10%] left-[5%] w-[90%] h-[20%] bg-black/60 blur-sm rounded-full" />
+                    <div className="absolute bottom-[-10%] left-[5%] w-[90%] h-[20%] bg-black/40 blur-sm rounded-full" />
                     
-                    {/* The Piece Body */}
+                    {/* The Piece Body - Simplified Design for Speed */}
                     <div className={`
-                        w-full h-full rounded-full shadow-[inset_0_2px_4px_rgba(255,255,255,0.4),inset_0_-4px_4px_rgba(0,0,0,0.4)]
+                        w-full h-full rounded-full shadow-md
                         border-2 border-opacity-50 flex items-center justify-center relative overflow-hidden
                         ${isMe 
-                          ? 'bg-gradient-to-br from-gold-300 via-gold-500 to-yellow-800 border-yellow-200' 
-                          : 'bg-gradient-to-br from-red-400 via-red-600 to-red-900 border-red-300'}
+                          ? 'bg-gradient-to-br from-gold-400 to-yellow-600 border-yellow-200' 
+                          : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300'}
                         ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}
                     `}>
-                        {/* Inner Bevel Ring */}
-                        <div className={`absolute inset-[15%] rounded-full border border-black/10 shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)] ${isMe ? 'bg-gold-400' : 'bg-red-500'}`}></div>
+                        {/* Inner Bevel Ring (Simplified) */}
+                        <div className={`absolute inset-[20%] rounded-full border border-black/10 ${isMe ? 'bg-gold-300' : 'bg-red-400'}`}></div>
 
                         {/* King Crown */}
                         {piece.isKing && (
@@ -116,12 +137,9 @@ const CheckersCell = React.memo(({
                               animate={{ scale: 1, rotate: 0 }}
                               className="relative z-10"
                             >
-                                <Crown size={24} className="text-white drop-shadow-md" fill="currentColor" />
+                                <Crown size={20} className="text-white drop-shadow-md" fill="currentColor" />
                             </motion.div>
                         )}
-                        
-                        {/* Gloss Reflection */}
-                        <div className="absolute top-[5%] left-[10%] w-[40%] h-[20%] bg-gradient-to-b from-white to-transparent opacity-40 rounded-full blur-[1px]"></div>
                     </div>
                 </motion.div>
             )}
@@ -160,6 +178,10 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [hintMoves, setHintMoves] = useState<Move[]>([]);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
 
+  // Timer State (10 minutes per player = 600 seconds)
+  const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
+  const [isGameOver, setIsGameOver] = useState(false);
+
   // Initialize
   useEffect(() => {
     const initialPieces: Piece[] = [];
@@ -177,6 +199,32 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     }
     setPieces(initialPieces);
   }, []);
+
+  // Timer Effect
+  useEffect(() => {
+      if (isGameOver) return;
+
+      const timer = setInterval(() => {
+          setTimeRemaining(prev => {
+              const newTime = { ...prev };
+              if (newTime[turn] > 0) {
+                  newTime[turn] -= 1;
+              } else {
+                  // Time ran out
+                  clearInterval(timer);
+                  setIsGameOver(true);
+                  if (turn === 'me') {
+                      onGameEnd('loss');
+                  } else {
+                      onGameEnd('win');
+                  }
+              }
+              return newTime;
+          });
+      }, 1000);
+
+      return () => clearInterval(timer);
+  }, [turn, isGameOver, onGameEnd]);
 
   const addLog = useCallback((msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
@@ -275,7 +323,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           const { moves: moreJumps } = getGlobalValidMoves('opponent', nextPieces, movedPiece.id);
           
           if (moreJumps.length > 0 && moreJumps[0].isJump) {
-               setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 800);
+               setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 400); // Faster reaction
                return;
           }
       } else {
@@ -286,6 +334,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
       const { moves: playerMoves } = getGlobalValidMoves('me', nextPieces);
       if (playerMoves.length === 0) {
+          setIsGameOver(true);
           onGameEnd('loss');
           return;
       }
@@ -298,20 +347,22 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const executeBotMoveRef = useRef<((currentBoard: Piece[], multiJumpPieceId?: string | null) => void) | null>(null);
 
   const executeBotMove = (currentBoard: Piece[], multiJumpPieceId: string | null = null) => {
+      if (isGameOver) return;
       const { moves } = getGlobalValidMoves('opponent', currentBoard, multiJumpPieceId);
       if (moves.length === 0) {
+          setIsGameOver(true);
           onGameEnd('win');
           return;
       }
       const move = moves[Math.floor(Math.random() * moves.length)];
       setSelectedPieceId(currentBoard.find(p => p.r === move.fromR && p.c === move.fromC)?.id || null);
-      setTimeout(() => performBotUpdate(move, currentBoard), 500);
+      setTimeout(() => performBotUpdate(move, currentBoard), 300); // Faster execution
   };
   executeBotMoveRef.current = executeBotMove;
 
   // --- USER INTERACTION ---
   const handlePieceClick = useCallback((p: Piece) => {
-    if (turn !== 'me' || p.player !== 'me') return;
+    if (turn !== 'me' || p.player !== 'me' || isGameOver) return;
     const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
 
     if (mustJumpFrom && mustJumpFrom !== p.id) {
@@ -344,10 +395,10 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             playSFX('click');
         }
     }
-  }, [turn, pieces, mustJumpFrom, getGlobalValidMoves, selectedPieceId, addLog, triggerHints]);
+  }, [turn, pieces, mustJumpFrom, getGlobalValidMoves, selectedPieceId, addLog, triggerHints, isGameOver]);
 
   const handleMoveClick = useCallback((move: Move) => {
-      if (!selectedPieceId) return;
+      if (!selectedPieceId || isGameOver) return;
       const movingPiece = pieces.find(p => p.id === selectedPieceId);
       if (!movingPiece) return;
 
@@ -384,7 +435,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                   setValidMoves(moreJumps);
                   addLog("Double Jump Available!", "scanning");
               } else {
-                  setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 1000);
+                  setTimeout(() => executeBotMoveRef.current?.(nextPieces, movedPiece.id), 600); // Faster double jump
               }
               return; 
           }
@@ -400,15 +451,16 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       const nextTurn = turn === 'me' ? 'opponent' : 'me';
       const { moves: nextPlayerMoves } = getGlobalValidMoves(nextTurn, nextPieces);
       if (nextPlayerMoves.length === 0) {
+          setIsGameOver(true);
           onGameEnd(turn === 'me' ? 'win' : 'loss');
           return;
       }
 
       setTurn(nextTurn);
       if (nextTurn === 'opponent') {
-          setTimeout(() => executeBotMoveRef.current?.(nextPieces), 1000);
+          setTimeout(() => executeBotMoveRef.current?.(nextPieces), 600); // Faster turn switch
       }
-  }, [selectedPieceId, pieces, turn, getGlobalValidMoves, addLog, onGameEnd]);
+  }, [selectedPieceId, pieces, turn, getGlobalValidMoves, addLog, onGameEnd, isGameOver]);
 
 
   // Prepare lookup maps for rendering
@@ -532,7 +584,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                </div>
                <div className="text-center">
                    <div className="text-white font-bold text-sm md:text-base">{table.host?.name || "Opponent"}</div>
-                   <div className="text-red-400 text-xs font-mono">{capturedOpp} Captured</div>
+                   <div className="text-red-400 text-xs font-mono mb-2">{capturedOpp} Captured</div>
+                   <TimerDisplay time={timeRemaining.opponent} isActive={turn === 'opponent'} />
                </div>
                <div className="flex flex-wrap gap-1 justify-center max-w-[80px]">
                    {Array.from({length: capturedOpp}).map((_, i) => (
@@ -591,7 +644,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                </div>
                <div className="text-center">
                    <div className="text-white font-bold text-sm md:text-base">You</div>
-                   <div className="text-gold-400 text-xs font-mono">{capturedMe} Captured</div>
+                   <div className="text-gold-400 text-xs font-mono mb-2">{capturedMe} Captured</div>
+                   <TimerDisplay time={timeRemaining.me} isActive={turn === 'me'} />
                </div>
                <div className="flex flex-wrap gap-1 justify-center max-w-[80px]">
                    {Array.from({length: capturedMe}).map((_, i) => (
