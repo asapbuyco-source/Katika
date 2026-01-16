@@ -10,6 +10,13 @@ export const CURRENT_USER: User = {
   rankTier: 'Silver',
 };
 
+export const BOT_PROFILE: PlayerProfile = {
+  name: 'V-Bot 2.0',
+  elo: 1000,
+  avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=vantage',
+  rankTier: 'Bronze',
+};
+
 export const GAME_TIERS: GameTier[] = [
   { id: 'tier-1', name: 'Starter', stake: 100, potentialWin: 180, playersOnline: 842, speed: 'Instant', minElo: 0 },
   { id: 'tier-2', name: 'Casual', stake: 500, potentialWin: 900, playersOnline: 420, speed: 'Instant', minElo: 0 },

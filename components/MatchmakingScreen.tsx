@@ -2,7 +2,8 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Table, PlayerProfile } from '../types';
-import { Search, Lock } from 'lucide-react';
+import { Search, Lock, Bot, AlertCircle } from 'lucide-react';
+import { BOT_PROFILE } from '../services/mockData';
 
 interface MatchmakingScreenProps {
   user: User;
@@ -13,50 +14,79 @@ interface MatchmakingScreenProps {
 }
 
 export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, gameType, stake, onMatchFound, onCancel }) => {
-  const [status, setStatus] = useState<'connecting' | 'scanning' | 'analyzing' | 'found'>('connecting');
+  const [status, setStatus] = useState<'connecting' | 'scanning' | 'analyzing' | 'found' | 'no_match'>('connecting');
   const [foundOpponent, setFoundOpponent] = useState<PlayerProfile | null>(null);
 
   // Simulated Matchmaking Logic
   useEffect(() => {
+    let mounted = true;
+
     const sequence = async () => {
       // Step 1: Connecting
       await new Promise(r => setTimeout(r, 1000));
+      if (!mounted) return;
       setStatus('scanning');
 
       // Step 2: Scanning for ELO match
       await new Promise(r => setTimeout(r, 2000));
+      if (!mounted) return;
       setStatus('analyzing');
 
       // Step 3: Analyzing specific opponents
-      await new Promise(r => setTimeout(r, 1500));
+      await new Promise(r => setTimeout(r, 2000));
+      if (!mounted) return;
       
-      // Step 4: Found Match
-      const mockOpponent: PlayerProfile = {
-        name: 'Jean-Paul',
-        elo: user.elo + Math.floor(Math.random() * 50) - 25, // +/- 25 ELO
-        rankTier: user.rankTier,
-        avatar: 'https://i.pravatar.cc/150?u=JeanPaul'
-      };
-      setFoundOpponent(mockOpponent);
-      setStatus('found');
+      // LOGIC: Randomly decide if we find a match or fail (for demo purposes, 50/50)
+      // Or since the prompt asks to "ensure bot is suggested", we can bias it towards failure if stake is low or high, 
+      // but let's just make it always fail for testing the bot flow if the name implies testing.
+      // For MVP real-feel, let's randomise.
+      const matchFound = Math.random() > 0.6; 
 
-      // Step 5: Launch Game (Delay allows user to see "Escrow Secured")
-      await new Promise(r => setTimeout(r, 3000));
-      
-      const newTable: Table = {
-        id: `match-${Date.now()}`,
-        gameType: gameType as any,
-        stake: stake,
-        players: 2,
-        maxPlayers: 2,
-        status: 'active',
-        host: mockOpponent
-      };
-      onMatchFound(newTable);
+      if (matchFound) {
+          const mockOpponent: PlayerProfile = {
+            name: 'Jean-Paul',
+            elo: user.elo + Math.floor(Math.random() * 50) - 25,
+            rankTier: user.rankTier,
+            avatar: 'https://i.pravatar.cc/150?u=JeanPaul'
+          };
+          setFoundOpponent(mockOpponent);
+          setStatus('found');
+
+          // Step 5: Launch Game
+          await new Promise(r => setTimeout(r, 3000));
+          if (!mounted) return;
+          
+          const newTable: Table = {
+            id: `match-${Date.now()}`,
+            gameType: gameType as any,
+            stake: stake,
+            players: 2,
+            maxPlayers: 2,
+            status: 'active',
+            host: mockOpponent
+          };
+          onMatchFound(newTable);
+      } else {
+          setStatus('no_match');
+      }
     };
 
     sequence();
+    return () => { mounted = false; };
   }, [user, gameType, stake, onMatchFound]);
+
+  const handlePlayBot = () => {
+      const newTable: Table = {
+        id: `match-bot-${Date.now()}`,
+        gameType: gameType as any,
+        stake: 0, // Practice mode = 0 stake
+        players: 2,
+        maxPlayers: 2,
+        status: 'active',
+        host: BOT_PROFILE
+      };
+      onMatchFound(newTable);
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-royal-950 flex flex-col items-center justify-center p-6">
@@ -90,20 +120,11 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                 {status === 'scanning' && `Searching for ${user.rankTier} Opponents...`}
                 {status === 'analyzing' && "Analyzing Skill Compatibility..."}
                 {status === 'found' && "MATCH CONFIRMED"}
+                {status === 'no_match' && "No Live Opponents Found"}
             </h2>
             
             <div className="flex flex-col items-center gap-2">
-                {status !== 'found' ? (
-                    <>
-                        <p className="text-slate-400 font-mono text-sm">
-                            ELO Range: {user.elo - 100} - {user.elo + 100}
-                        </p>
-                        <div className="px-3 py-1 bg-royal-800 rounded-full border border-gold-500/30 text-gold-400 text-xs font-bold">
-                            Stake: {stake.toLocaleString()} FCFA
-                        </div>
-                    </>
-                ) : (
-                    /* THE HANDSHAKE ANIMATION */
+                {status === 'found' ? (
                     <motion.div 
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
@@ -112,6 +133,19 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                         <Lock size={20} className="animate-pulse" />
                         <span className="font-bold font-mono tracking-wider">ESCROW LOCKED: {stake * 2} FCFA</span>
                     </motion.div>
+                ) : status === 'no_match' ? (
+                    <div className="bg-royal-800/50 border border-white/10 px-4 py-2 rounded-xl text-slate-400 text-sm">
+                        High traffic in your region. Try again later or play offline.
+                    </div>
+                ) : (
+                    <>
+                        <p className="text-slate-400 font-mono text-sm">
+                            ELO Range: {user.elo - 100} - {user.elo + 100}
+                        </p>
+                        <div className="px-3 py-1 bg-royal-800 rounded-full border border-gold-500/30 text-gold-400 text-xs font-bold">
+                            Stake: {stake.toLocaleString()} FCFA
+                        </div>
+                    </>
                 )}
             </div>
         </motion.div>
@@ -150,6 +184,14 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                                 <div className="text-xs text-red-400 font-mono">{foundOpponent.elo} ELO</div>
                             </div>
                         </motion.div>
+                    ) : status === 'no_match' ? (
+                        <motion.div 
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            className="w-24 h-24 rounded-full border-4 border-slate-700 bg-royal-900 flex items-center justify-center"
+                        >
+                            <AlertCircle className="text-slate-500" size={32} />
+                        </motion.div>
                     ) : (
                         <motion.div 
                             animate={{ opacity: [0.5, 1, 0.5] }}
@@ -164,17 +206,31 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
 
         </div>
 
-        {/* Cancel Button */}
-        {status !== 'found' && (
-            <motion.button 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                onClick={onCancel}
-                className="mt-20 text-slate-500 hover:text-white text-sm font-medium transition-colors"
-            >
-                Cancel Matchmaking
-            </motion.button>
-        )}
+        {/* Action Buttons */}
+        <div className="mt-16 space-y-3">
+            {status === 'no_match' && (
+                <motion.button 
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    onClick={handlePlayBot}
+                    className="w-full bg-white text-royal-950 font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors"
+                >
+                    <Bot size={20} />
+                    <span>Play vs Bot (Practice Mode)</span>
+                </motion.button>
+            )}
+            
+            {status !== 'found' && (
+                <motion.button 
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    onClick={onCancel}
+                    className="text-slate-500 hover:text-white text-sm font-medium transition-colors"
+                >
+                    {status === 'no_match' ? 'Return to Lobby' : 'Cancel Matchmaking'}
+                </motion.button>
+            )}
+        </div>
 
       </div>
     </div>

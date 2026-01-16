@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ViewState, User, Table } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -14,40 +14,55 @@ import { AuthScreen } from './components/AuthScreen';
 import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
 import { CURRENT_USER } from './services/mockData';
+import { auth, syncUserProfile, logout } from './services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 export default function App() {
-  const [user, setUser] = useState<User>(CURRENT_USER);
+  const [user, setUser] = useState<User | null>(null);
   const [currentView, setView] = useState<ViewState>('landing');
   const [activeTable, setActiveTable] = useState<Table | null>(null);
   const [matchmakingConfig, setMatchmakingConfig] = useState<{stake: number, gameType: string} | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+
+  // Firebase Auth Listener
+  useEffect(() => {
+      const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+          if (firebaseUser) {
+              // User is signed in, sync data from Firestore
+              try {
+                  const appUser = await syncUserProfile(firebaseUser);
+                  setUser(appUser);
+                  // If we were on landing or auth, move to dashboard
+                  if (currentView === 'landing' || currentView === 'auth') {
+                      setView('dashboard');
+                  }
+              } catch (error) {
+                  console.error("Profile sync failed:", error);
+                  // Fallback or error handling
+              }
+          } else {
+              // User is signed out
+              setUser(null);
+              setView('landing');
+          }
+          setAuthLoading(false);
+      });
+
+      return () => unsubscribe();
+  }, [currentView]);
 
   const handleTopUp = () => {
-    // Simulate a Mobile Money deposit
+    if(!user) return;
     const amount = 5000;
-    setUser(prev => ({ ...prev, balance: prev.balance + amount }));
-    // If we are in finance view, we don't need the alert if the finance component handles success feedback
-    // But for the dashboard "Deposit" button, this is still useful.
-    // Ideally, the Finance component should handle the user state update itself or pass amount up.
+    setUser(prev => prev ? ({ ...prev, balance: prev.balance + amount }) : null);
   };
   
-  // Custom handler for Finance component to be more flexible
   const handleFinanceTopUp = () => {
-      // Amount would ideally be passed here, but for mock purposes we just add 5000 or handle it in the component
+      if(!user) return;
       const amount = 5000;
-      setUser(prev => ({ ...prev, balance: prev.balance + amount }));
+      setUser(prev => prev ? ({ ...prev, balance: prev.balance + amount }) : null);
   };
 
-  const handleJoinTable = (table: Table) => {
-    if (user.balance < table.stake) {
-      alert("Insufficient balance! Please Top Up.");
-      return;
-    }
-    // Lock funds in Escrow
-    setUser(prev => ({ ...prev, balance: prev.balance - table.stake }));
-    setActiveTable(table);
-    setView('game');
-  };
-  
   const startMatchmaking = (stake: number, gameType: string) => {
       setMatchmakingConfig({ stake, gameType });
       setView('matchmaking');
@@ -59,44 +74,56 @@ export default function App() {
   };
 
   const handleMatchFound = (table: Table) => {
-      if (user.balance < table.stake) {
-          alert("Match found but insufficient balance.");
-          setView('lobby');
-          return;
+      if (!user) return;
+      
+      // Only deduct balance if there is a stake (Practice mode has 0 stake)
+      if (table.stake > 0) {
+          if (user.balance < table.stake) {
+              alert("Match found but insufficient balance.");
+              setView('lobby');
+              return;
+          }
+          setUser(prev => prev ? ({ ...prev, balance: prev.balance - table.stake }) : null);
       }
-      // Deduct stake for match
-      setUser(prev => ({ ...prev, balance: prev.balance - table.stake }));
+      
       setActiveTable(table);
       setView('game');
   };
 
   const handleGameEnd = (result: 'win' | 'loss' | 'quit') => {
-    if (activeTable && result === 'win') {
-        const totalPot = activeTable.stake * 2; // 1v1
-        const fee = totalPot * 0.10; // 10% Service Fee
+    // Only award winnings if it was a paid game (stake > 0)
+    if (activeTable && result === 'win' && user && activeTable.stake > 0) {
+        const totalPot = activeTable.stake * 2;
+        const fee = totalPot * 0.10;
         const payout = totalPot - fee;
-        
-        setUser(prev => ({ ...prev, balance: prev.balance + payout }));
+        setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
     }
-    // If loss, money remains in escrow (burned/transferred to winner)
-    
     setActiveTable(null);
     setView('dashboard');
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+      await logout();
       setView('landing');
   };
 
+  if (authLoading) {
+      return (
+          <div className="min-h-screen bg-royal-950 flex items-center justify-center">
+              <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+      );
+  }
+
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
-      {/* Sidebar / Bottom Nav - Only show on main app screens */}
-      {['dashboard', 'lobby', 'profile', 'finance'].includes(currentView) && (
+      {/* Sidebar / Bottom Nav - Only show on main app screens if user exists */}
+      {user && ['dashboard', 'lobby', 'profile', 'finance'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} />
       )}
 
       <main className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {/* Decorative background blobs - shared across app states (except landing which has its own) */}
+        {/* Background Blob */}
         {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
@@ -119,70 +146,77 @@ export default function App() {
         )}
 
         {currentView === 'auth' && (
-            <AuthScreen onAuthenticated={() => setView('dashboard')} />
+            <AuthScreen onAuthenticated={() => {
+                // Auth listener handles view transition, but this callback can be used for analytics/toasts
+            }} />
         )}
 
-        {currentView === 'dashboard' && (
-            <Dashboard 
-                user={user} 
-                setView={setView} 
-                onTopUp={() => setView('finance')} 
-                onQuickMatch={() => setView('lobby')}
-            />
-        )}
-        
-        {currentView === 'lobby' && (
-            <Lobby 
-                user={user}
-                setView={setView} 
-                onQuickMatch={startMatchmaking}
-            />
-        )}
-        
-        {currentView === 'finance' && (
-            <Finance 
-                user={user} 
-                onTopUp={handleFinanceTopUp}
-            />
-        )}
-        
-        {currentView === 'profile' && (
-            <Profile 
-                user={user} 
-                onLogout={handleLogout}
-            />
-        )}
-        
-        {currentView === 'matchmaking' && matchmakingConfig && (
-            <MatchmakingScreen 
-                user={user} 
-                gameType={matchmakingConfig.gameType}
-                stake={matchmakingConfig.stake}
-                onMatchFound={handleMatchFound}
-                onCancel={cancelMatchmaking}
-            />
-        )}
-
-        {currentView === 'game' && activeTable && (
+        {/* Protected Routes */}
+        {user && (
             <>
-                {activeTable.gameType === 'Dice' ? (
-                    <DiceGame 
-                        table={activeTable}
-                        user={user}
-                        onGameEnd={handleGameEnd}
+                {currentView === 'dashboard' && (
+                    <Dashboard 
+                        user={user} 
+                        setView={setView} 
+                        onTopUp={() => setView('finance')} 
+                        onQuickMatch={() => setView('lobby')}
                     />
-                ) : activeTable.gameType === 'Checkers' ? (
-                    <CheckersGame 
-                        table={activeTable}
+                )}
+                
+                {currentView === 'lobby' && (
+                    <Lobby 
                         user={user}
-                        onGameEnd={handleGameEnd}
+                        setView={setView} 
+                        onQuickMatch={startMatchmaking}
                     />
-                ) : (
-                    <GameRoom 
-                        table={activeTable} 
-                        user={user}
-                        onGameEnd={handleGameEnd} 
+                )}
+                
+                {currentView === 'finance' && (
+                    <Finance 
+                        user={user} 
+                        onTopUp={handleFinanceTopUp}
                     />
+                )}
+                
+                {currentView === 'profile' && (
+                    <Profile 
+                        user={user} 
+                        onLogout={handleLogout}
+                    />
+                )}
+                
+                {currentView === 'matchmaking' && matchmakingConfig && (
+                    <MatchmakingScreen 
+                        user={user} 
+                        gameType={matchmakingConfig.gameType}
+                        stake={matchmakingConfig.stake}
+                        onMatchFound={handleMatchFound}
+                        onCancel={cancelMatchmaking}
+                    />
+                )}
+
+                {currentView === 'game' && activeTable && (
+                    <>
+                        {activeTable.gameType === 'Dice' ? (
+                            <DiceGame 
+                                table={activeTable}
+                                user={user}
+                                onGameEnd={handleGameEnd}
+                            />
+                        ) : activeTable.gameType === 'Checkers' ? (
+                            <CheckersGame 
+                                table={activeTable}
+                                user={user}
+                                onGameEnd={handleGameEnd}
+                            />
+                        ) : (
+                            <GameRoom 
+                                table={activeTable} 
+                                user={user}
+                                onGameEnd={handleGameEnd} 
+                            />
+                        )}
+                    </>
                 )}
             </>
         )}
