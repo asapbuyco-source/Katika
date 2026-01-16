@@ -317,29 +317,40 @@ export const loginAsGuest = async (): Promise<User> => {
 // --- ADMIN & STATS ---
 
 export const getActiveGamesCount = async (): Promise<number> => {
-    const q = query(collection(db, "games"), where("status", "in", ["active", "waiting"]));
-    const snapshot = await getDocs(q);
-    return snapshot.size;
+    try {
+        const q = query(collection(db, "games"), where("status", "in", ["active", "waiting"]));
+        const snapshot = await getDocs(q);
+        return snapshot.size;
+    } catch (e) {
+        console.warn("Active games query failed (likely index missing), returning 0", e);
+        return 0;
+    }
 };
 
 export const getSystemLogs = async () => {
     // Fetch recent games creation as proxy for system logs
     const q = query(collection(db, "games"), orderBy("createdAt", "desc"), limit(10));
-    const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => {
-        const data = doc.data();
-        let time = 'Recent';
-        if (data.createdAt) {
-            time = data.createdAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-        }
-        return {
-            id: doc.id,
-            action: data.status === 'waiting' ? 'Match Created' : 'Match Started',
-            target: `${data.gameType} - ${data.stake} FCFA`,
-            time: time,
-            type: data.stake > 5000 ? 'warning' : 'info'
-        };
-    });
+    try {
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => {
+            const data = doc.data();
+            let time = 'Just now';
+            // Safety check: createdAt can be null for serverTimestamp in local snapshot
+            if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+                time = data.createdAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+            }
+            return {
+                id: doc.id,
+                action: data.status === 'waiting' ? 'Match Created' : 'Match Started',
+                target: `${data.gameType} - ${data.stake} FCFA`,
+                time: time,
+                type: data.stake > 5000 ? 'warning' : 'info'
+            };
+        });
+    } catch (e) {
+        console.error("Logs fetch error", e);
+        return [];
+    }
 };
 
 // --- FORUM ---
