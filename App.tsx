@@ -13,6 +13,7 @@ import { MatchmakingScreen } from './components/MatchmakingScreen';
 import { AuthScreen } from './components/AuthScreen';
 import { Profile } from './components/Profile';
 import { HowItWorks } from './components/HowItWorks';
+import { AdminDashboard } from './components/AdminDashboard';
 import { CURRENT_USER } from './services/mockData';
 import { auth, syncUserProfile, logout } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -24,7 +25,8 @@ export default function App() {
   const [matchmakingConfig, setMatchmakingConfig] = useState<{stake: number, gameType: string} | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
 
-  // Firebase Auth Listener
+  // 1. Firebase Auth Listener: Sync User State ONLY
+  // Removed dependency on currentView to prevent navigation loops
   useEffect(() => {
       const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
@@ -32,24 +34,49 @@ export default function App() {
               try {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
-                  // If we were on landing or auth, move to dashboard
-                  if (currentView === 'landing' || currentView === 'auth') {
-                      setView('dashboard');
-                  }
               } catch (error) {
                   console.error("Profile sync failed:", error);
                   // Fallback or error handling
               }
           } else {
-              // User is signed out
-              setUser(null);
-              setView('landing');
+              // Only reset if we are NOT in a manual Guest session
+              // Since we don't track session type explicitly here, this might clear guest user on reload.
+              // For MVP, this is acceptable. If real auth fails, the user is null.
+              if (!user || user.id.startsWith('guest-')) {
+                  // Keep guest or null? 
+                  // If firebase sends null, it means no firebase user. 
+                  // If we are guest, we are bypassing firebase.
+                  // But onAuthStateChanged fires initially. 
+                  // We will handle Guest Mode by manually setting user in AuthScreen callback.
+              } else {
+                 setUser(null);
+              }
           }
           setAuthLoading(false);
       });
 
       return () => unsubscribe();
-  }, [currentView]);
+  }, []);
+
+  // 2. Navigation Guard: Handle Automatic Redirections
+  useEffect(() => {
+      if (authLoading) return;
+
+      if (user) {
+          // If user is logged in but on a public-only page (Landing/Auth), redirect to Dashboard
+          // We allow 'how-it-works' even if logged in? Usually yes, but standard flow goes to dashboard.
+          // Let's redirect Landing/Auth to Dashboard.
+          if (currentView === 'landing' || currentView === 'auth') {
+              setView('dashboard');
+          }
+      } else {
+          // If user is logged out but on a protected page, redirect to Landing
+          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin'];
+          if (protectedViews.includes(currentView)) {
+              setView('landing');
+          }
+      }
+  }, [user, currentView, authLoading]);
 
   const handleTopUp = () => {
     if(!user) return;
@@ -104,6 +131,7 @@ export default function App() {
 
   const handleLogout = async () => {
       await logout();
+      setUser(null);
       setView('landing');
   };
 
@@ -118,8 +146,8 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
       {/* Sidebar / Bottom Nav - Only show on main app screens if user exists */}
-      {user && ['dashboard', 'lobby', 'profile', 'finance'].includes(currentView) && (
-        <Navigation currentView={currentView} setView={setView} />
+      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin'].includes(currentView) && (
+        <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
       <main className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
@@ -146,8 +174,13 @@ export default function App() {
         )}
 
         {currentView === 'auth' && (
-            <AuthScreen onAuthenticated={() => {
-                // Auth listener handles view transition, but this callback can be used for analytics/toasts
+            <AuthScreen onAuthenticated={(guestUser?: User) => {
+                // If we receive a guest user (manual login), set it immediately
+                if (guestUser) {
+                    setUser(guestUser);
+                    setView('dashboard');
+                }
+                // If undefined, we assume Firebase listener will handle it (standard flow)
             }} />
         )}
 
@@ -183,6 +216,10 @@ export default function App() {
                         user={user} 
                         onLogout={handleLogout}
                     />
+                )}
+                
+                {currentView === 'admin' && user.isAdmin && (
+                    <AdminDashboard user={user} />
                 )}
                 
                 {currentView === 'matchmaking' && matchmakingConfig && (

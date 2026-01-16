@@ -1,5 +1,5 @@
 
-export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works';
+export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin';
 
 export interface User {
   id: string;
@@ -8,6 +8,7 @@ export interface User {
   avatar: string;
   elo: number;
   rankTier: 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
+  isAdmin?: boolean;
 }
 
 export interface PlayerProfile {

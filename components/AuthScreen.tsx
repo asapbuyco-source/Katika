@@ -1,20 +1,24 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Scan, Smartphone, ChevronRight, Fingerprint, Lock, Globe, Mail } from 'lucide-react';
-import { signInWithGoogle, setupRecaptcha, auth } from '../services/firebase';
-import { signInWithPhoneNumber } from 'firebase/auth';
+import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft } from 'lucide-react';
+import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest } from '../services/firebase';
+import { User as AppUser } from '../types';
 
 interface AuthScreenProps {
-  onAuthenticated: () => void;
+  onAuthenticated: (user?: AppUser) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
-  const [method, setMethod] = useState<'menu' | 'phone' | 'otp'>('menu');
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [otp, setOtp] = useState('');
+  const [method, setMethod] = useState<'menu' | 'email'>('menu');
+  const [isRegistering, setIsRegistering] = useState(false);
+  
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showGuest, setShowGuest] = useState(false);
 
   // Google Sign In Handler
   const handleGoogleLogin = async () => {
@@ -22,62 +26,71 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
       setError('');
       try {
           await signInWithGoogle();
-          // onAuthenticated will be triggered by the App.tsx onAuthStateChanged listener
-      } catch (err: any) {
-          setError("Login failed. Please try again.");
-          setIsLoading(false);
-      }
-  };
-
-  // Phone Auth Step 1: Send SMS
-  const handleSendCode = async () => {
-      if(phoneNumber.length < 9) {
-          setError("Invalid phone number format.");
-          return;
-      }
-      setIsLoading(true);
-      setError('');
-      
-      try {
-          const verifier = setupRecaptcha('recaptcha-container');
-          // Format phone for Cameroon (assuming input is local e.g. 6...)
-          const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `+237${phoneNumber}`;
-          
-          const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-          window.confirmationResult = confirmationResult;
-          
-          setIsLoading(false);
-          setMethod('otp');
+          // onAuthenticated will be triggered by the App.tsx onAuthStateChanged listener for real logins
       } catch (err: any) {
           console.error(err);
-          setError("Failed to send SMS. Verify the number.");
-          setIsLoading(false);
-          // Reset captcha if failed
-          if(window.recaptchaVerifier) {
-              window.recaptchaVerifier.clear();
-              window.recaptchaVerifier = null;
+          // Handle unauthorized domain (common in dev environments)
+          if (err.code === 'auth/unauthorized-domain' || err.code === 'auth/internal-error' || err.message?.includes('unauthorized domain')) {
+              setError("Domain not authorized by Firebase.");
+              setShowGuest(true);
+          } else {
+              setError("Login failed. Please try again.");
           }
+          setIsLoading(false);
       }
   };
 
-  // Phone Auth Step 2: Verify OTP
-  const handleVerifyOtp = async () => {
-      if(otp.length < 6) return;
+  const handleGuestLogin = async () => {
       setIsLoading(true);
       try {
-          await window.confirmationResult.confirm(otp);
-          // Success handled by App.tsx listener
-      } catch (err) {
-          setError("Invalid Code.");
+          const guest = await loginAsGuest();
+          // Pass the guest user up to App.tsx
+          onAuthenticated(guest);
+      } catch (e) {
+          setError("Guest login failed");
+          setIsLoading(false);
+      }
+  };
+
+  const handleEmailAuth = async () => {
+      if(!email || !password) {
+          setError("Please fill in all fields.");
+          return;
+      }
+      if(password.length < 6) {
+          setError("Password must be at least 6 characters.");
+          return;
+      }
+
+      setIsLoading(true);
+      setError('');
+
+      try {
+          if (isRegistering) {
+              await registerWithEmail(email, password);
+          } else {
+              await loginWithEmail(email, password);
+          }
+          // Success handled by listener in App.tsx
+      } catch (err: any) {
+          console.error(err);
+          if (err.code === 'auth/email-already-in-use') {
+              setError("Email already registered. Please login.");
+          } else if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') {
+              setError("Invalid email or password.");
+          } else if (err.code === 'auth/unauthorized-domain') {
+               setError("Domain not authorized. Use Guest Mode.");
+               setShowGuest(true);
+          } else {
+              setError("Authentication failed. Try again.");
+          }
           setIsLoading(false);
       }
   };
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      {/* Hidden container for ReCAPTCHA */}
-      <div id="recaptcha-container"></div>
-
+      
       {/* Dynamic Background */}
       <div className="absolute inset-0 pointer-events-none">
           <motion.div 
@@ -109,116 +122,133 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
             
             {/* Error Message */}
             {error && (
-                <div className="absolute top-0 left-0 w-full p-3 bg-red-500/80 text-white text-xs text-center font-bold">
-                    {error}
+                <div className="absolute top-0 left-0 w-full p-3 bg-red-500/80 text-white text-xs text-center font-bold flex items-center justify-center gap-2">
+                    <AlertTriangle size={14} /> {error}
                 </div>
             )}
 
             {/* METHOD SELECTION */}
             {method === 'menu' && (
                 <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
-                    <button 
-                        onClick={handleGoogleLogin}
-                        disabled={isLoading}
-                        className="w-full bg-white hover:bg-slate-100 text-royal-900 font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
-                    >
-                        {isLoading ? (
-                            <span className="animate-pulse">Connecting...</span>
-                        ) : (
-                            <>
-                                <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5" />
-                                <span>Continue with Google</span>
-                                <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-royal-900 transition-colors" />
-                            </>
-                        )}
-                    </button>
+                    
+                    {/* Standard Logins */}
+                    {!showGuest && (
+                        <>
+                            <button 
+                                onClick={handleGoogleLogin}
+                                disabled={isLoading}
+                                className="w-full bg-white hover:bg-slate-100 text-royal-900 font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
+                            >
+                                {isLoading ? (
+                                    <span className="animate-pulse">Connecting...</span>
+                                ) : (
+                                    <>
+                                        <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5" />
+                                        <span>Continue with Google</span>
+                                        <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-royal-900 transition-colors" />
+                                    </>
+                                )}
+                            </button>
 
-                    <div className="relative py-2">
-                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-                        <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">Or use phone</span></div>
-                    </div>
+                            <div className="relative py-2">
+                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
+                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">Or use email</span></div>
+                            </div>
 
-                    <button 
-                        onClick={() => setMethod('phone')}
-                        className="w-full bg-royal-800/50 hover:bg-royal-800 border border-white/10 text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
-                    >
-                        <Smartphone size={20} className="text-gold-400" />
-                        <span>Mobile Number</span>
-                        <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-white transition-colors" />
-                    </button>
+                            <button 
+                                onClick={() => setMethod('email')}
+                                className="w-full bg-royal-800/50 hover:bg-royal-800 border border-white/10 text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
+                            >
+                                <Mail size={20} className="text-gold-400" />
+                                <span>Email & Password</span>
+                                <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-white transition-colors" />
+                            </button>
+                        </>
+                    )}
+
+                    {/* Guest Fallback - Shows if error occurs or always available for dev */}
+                    {showGuest && (
+                        <motion.button 
+                            initial={{ scale: 0.9, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            onClick={handleGuestLogin}
+                            className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-3 hover:scale-105 transition-transform"
+                        >
+                            <User size={20} />
+                            <span>Continue as Guest (Dev Mode)</span>
+                        </motion.button>
+                    )}
                     
                     <div className="mt-4 text-center">
-                        <p className="text-[10px] text-slate-500">Secure, Passwordless Authentication</p>
+                        <p className="text-[10px] text-slate-500">Secure Authentication</p>
                     </div>
                 </motion.div>
             )}
 
-            {/* PHONE INPUT */}
-            {method === 'phone' && (
-                <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
-                    <div className="mb-6">
-                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Mobile Number</label>
-                        <div className="relative">
-                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400 font-bold text-sm">+237</span>
-                            <input 
-                                type="tel" 
-                                placeholder="6XX XXX XXX"
-                                value={phoneNumber}
-                                onChange={(e) => setPhoneNumber(e.target.value)}
-                                className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-16 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-mono text-lg"
-                                autoFocus
-                            />
-                        </div>
-                    </div>
-                    <div className="flex gap-3">
-                        <button 
-                            onClick={() => { setMethod('menu'); setError(''); }}
-                            className="px-4 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400"
-                        >
-                            Back
-                        </button>
-                        <button 
-                            onClick={handleSendCode}
-                            disabled={isLoading || phoneNumber.length < 8}
-                            className="flex-1 bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 flex items-center justify-center gap-2"
-                        >
-                            {isLoading ? <span className="animate-pulse">Sending...</span> : <>Send Code <ChevronRight size={18}/></>}
-                        </button>
-                    </div>
-                </motion.div>
-            )}
-
-            {/* OTP VERIFICATION */}
-            {method === 'otp' && (
+            {/* EMAIL / PASSWORD INPUT */}
+            {method === 'email' && (
                 <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                     <div className="text-center mb-6">
-                        <div className="mx-auto w-12 h-12 bg-royal-800 rounded-full flex items-center justify-center mb-2">
-                            <Lock className="text-gold-400" size={24} />
-                        </div>
-                        <h3 className="text-white font-bold">Verification Code</h3>
-                        <p className="text-xs text-slate-400">Sent to +237 {phoneNumber}</p>
+                        <h3 className="text-white font-bold text-xl">{isRegistering ? 'Create Account' : 'Sign In'}</h3>
+                        <p className="text-xs text-slate-400">Enter your credentials below</p>
                     </div>
 
-                    <div className="mb-8">
-                        <input 
-                            type="text" 
-                            placeholder="Enter 6-digit code"
-                            maxLength={6}
-                            value={otp}
-                            onChange={(e) => setOtp(e.target.value)}
-                            className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 text-center text-white placeholder:text-slate-700 focus:outline-none focus:border-gold-500 transition-colors font-mono text-2xl tracking-[0.5em]"
-                            autoFocus
-                        />
+                    <div className="space-y-4 mb-6">
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+                            <div className="relative">
+                                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
+                                <input 
+                                    type="email" 
+                                    placeholder="name@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-12 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-sans"
+                                    autoFocus
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
+                            <div className="relative">
+                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
+                                <input 
+                                    type="password" 
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-12 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-sans"
+                                />
+                            </div>
+                        </div>
                     </div>
                     
-                    <button 
-                         onClick={handleVerifyOtp}
-                         disabled={isLoading || otp.length < 6}
-                         className="w-full bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all flex items-center justify-center gap-2 shadow-lg shadow-gold-500/20"
-                    >
-                        {isLoading ? "Verifying..." : "Confirm Access"}
-                    </button>
-                    <button onClick={() => setMethod('phone')} className="w-full mt-4 text-xs text-slate-500 hover:text-white">Wrong Number?</button>
+                    <div className="flex gap-3">
+                        <button 
+                            onClick={() => { setMethod('menu'); setError(''); setShowGuest(false); }}
+                            className="px-4 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 transition-colors"
+                        >
+                            <ArrowLeft size={20} />
+                        </button>
+                        <button 
+                            onClick={handleEmailAuth}
+                            disabled={isLoading}
+                            className="flex-1 bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 flex items-center justify-center gap-2"
+                        >
+                            {isLoading ? <span className="animate-pulse">Processing...</span> : <span>{isRegistering ? 'Create Account' : 'Sign In'}</span>}
+                        </button>
+                    </div>
+
+                    <div className="mt-6 text-center">
+                        <button 
+                            onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
+                            className="text-xs text-gold-400 hover:text-white transition-colors font-medium underline-offset-4 hover:underline"
+                        >
+                            {isRegistering ? "Already have an account? Sign In" : "Don't have an account? Sign Up"}
+                        </button>
+                    </div>
+
                 </motion.div>
             )}
         </div>

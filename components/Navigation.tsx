@@ -1,14 +1,15 @@
 
 import React from 'react';
-import { Home, LayoutGrid, User, Bell, Wallet } from 'lucide-react';
-import { ViewState } from '../types';
+import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert } from 'lucide-react';
+import { ViewState, User as AppUser } from '../types';
 
 interface NavigationProps {
   currentView: ViewState;
   setView: (view: ViewState) => void;
+  user: AppUser;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) => {
+export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user }) => {
   const navItems = [
     { id: 'dashboard', icon: Home, label: 'Home' },
     { id: 'lobby', icon: LayoutGrid, label: 'Lobby' },
@@ -54,6 +55,24 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView }) 
              <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-1 h-8 bg-gold-500 rounded-l-full hidden md:block" />
           )}
         </button>
+
+        {/* ADMIN LINK */}
+        {user.isAdmin && (
+            <button 
+                onClick={() => setView('admin')}
+                className={`flex flex-col items-center gap-1 transition-all relative group ${
+                currentView === 'admin' ? 'text-red-400' : 'text-slate-500 hover:text-red-300'
+                }`}
+            >
+            <div className={`p-2 rounded-xl transition-all ${currentView === 'admin' ? 'bg-red-500/20' : 'group-hover:bg-red-500/10'}`}>
+                <ShieldAlert size={24} className={currentView === 'admin' ? 'drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''} />
+            </div>
+            <span className="text-[10px] font-bold tracking-wide">Admin</span>
+            {currentView === 'admin' && (
+                <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-1 h-8 bg-red-500 rounded-l-full hidden md:block" />
+            )}
+            </button>
+        )}
       </div>
     </div>
   );

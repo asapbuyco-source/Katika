@@ -4,13 +4,13 @@ import {
   getAuth, 
   GoogleAuthProvider, 
   signInWithPopup, 
-  signInWithPhoneNumber, 
-  RecaptchaVerifier,
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut as firebaseSignOut,
   User as FirebaseUser
 } from "firebase/auth";
-import { getFirestore, doc, getDoc, setDoc, updateDoc } from "firebase/firestore";
+import { getFirestore, doc, getDoc, setDoc } from "firebase/firestore";
 import { User } from "../types";
 
 const firebaseConfig = {
@@ -40,6 +40,26 @@ export const signInWithGoogle = async () => {
   }
 };
 
+export const registerWithEmail = async (email: string, pass: string) => {
+    try {
+        const result = await createUserWithEmailAndPassword(auth, email, pass);
+        return result.user;
+    } catch (error) {
+        console.error("Registration Error:", error);
+        throw error;
+    }
+};
+
+export const loginWithEmail = async (email: string, pass: string) => {
+    try {
+        const result = await signInWithEmailAndPassword(auth, email, pass);
+        return result.user;
+    } catch (error) {
+        console.error("Login Error:", error);
+        throw error;
+    }
+};
+
 export const logout = async () => {
     await firebaseSignOut(auth);
 };
@@ -49,39 +69,41 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
     const userRef = doc(db, "users", firebaseUser.uid);
     const userSnap = await getDoc(userRef);
 
+    // Hardcoded Admin Logic
+    const isAdmin = firebaseUser.email === 'abrackly@gmail.com';
+
     if (userSnap.exists()) {
-        return userSnap.data() as User;
+        const data = userSnap.data() as User;
+        // Ensure admin status is updated if it matches specific email
+        if (isAdmin && !data.isAdmin) {
+            await setDoc(userRef, { ...data, isAdmin: true, rankTier: 'Diamond' }, { merge: true });
+            return { ...data, isAdmin: true, rankTier: 'Diamond' };
+        }
+        return data;
     } else {
         // Create new user profile
         const newUser: User = {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            balance: 1000, // Starting bonus
-            elo: 1000,
-            rankTier: 'Bronze'
+            balance: isAdmin ? 1000000 : 1000, // Admin gets 1M start
+            elo: isAdmin ? 2500 : 1000,
+            rankTier: isAdmin ? 'Diamond' : 'Bronze',
+            isAdmin: isAdmin
         };
         await setDoc(userRef, newUser);
         return newUser;
     }
 };
 
-export const setupRecaptcha = (elementId: string) => {
-    if (!window.recaptchaVerifier) {
-        window.recaptchaVerifier = new RecaptchaVerifier(auth, elementId, {
-            'size': 'invisible',
-            'callback': () => {
-                // reCAPTCHA solved, allow signInWithPhoneNumber.
-            }
-        });
-    }
-    return window.recaptchaVerifier;
+export const loginAsGuest = async (): Promise<User> => {
+    // Return a mock user for development when Firebase is blocked
+    return {
+        id: 'guest-' + Date.now(),
+        name: 'Guest Player',
+        avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}`,
+        balance: 5000,
+        elo: 1000,
+        rankTier: 'Bronze'
+    };
 };
-
-// Types for window extension
-declare global {
-    interface Window {
-        recaptchaVerifier: any;
-        confirmationResult: any;
-    }
-}
