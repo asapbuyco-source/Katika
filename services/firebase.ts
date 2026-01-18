@@ -346,19 +346,27 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
 };
 
 export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
-    // Listen for the most recent pending challenge
+    // Listen for incoming challenges
+    // Removed orderBy('timestamp', 'desc') to avoid needing a composite index. 
+    // Sorting is handled client-side.
     const q = query(
         collection(db, "challenges"),
         where("targetId", "==", userId),
-        where("status", "==", "pending"),
-        orderBy("timestamp", "desc"),
-        limit(1)
+        where("status", "==", "pending")
     );
 
     return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
-            const doc = snapshot.docs[0];
-            callback({ id: doc.id, ...doc.data() } as Challenge);
+            const challenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Challenge));
+            
+            // Sort by timestamp descending
+            challenges.sort((a, b) => {
+                const tA = (a.timestamp as any)?.toMillis ? (a.timestamp as any).toMillis() : (a.timestamp || 0);
+                const tB = (b.timestamp as any)?.toMillis ? (b.timestamp as any).toMillis() : (b.timestamp || 0);
+                return tB - tA;
+            });
+
+            callback(challenges[0]);
         } else {
             callback(null);
         }

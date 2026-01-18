@@ -132,7 +132,10 @@ export const HelpCenter: React.FC<HelpCenterProps> = ({ onBack }) => {
                     <h3 className="text-lg font-bold text-white mb-1">Still need help?</h3>
                     <p className="text-sm text-slate-400">Our support team is available 24/7 via WhatsApp or Email.</p>
                 </div>
-                <button className="px-6 py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-bold rounded-xl shadow-lg flex items-center gap-2 transition-transform active:scale-95">
+                <button 
+                    onClick={() => window.open('https://wa.me/237657960690', '_blank')}
+                    className="px-6 py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-bold rounded-xl shadow-lg flex items-center gap-2 transition-transform active:scale-95"
+                >
                     <MessageCircle size={18} /> Chat with Us
                 </button>
             </div>

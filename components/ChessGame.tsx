@@ -77,6 +77,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [serverHash, setServerHash] = useState("");
+  const [showCheckAlert, setShowCheckAlert] = useState(false);
 
   // Timer State (10 minutes each)
   const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
@@ -109,6 +110,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
       return () => clearInterval(timer);
   }, [turn, isGameOver, status, onGameEnd]);
+
+  // Alert Timer Effect
+  useEffect(() => {
+      if (showCheckAlert) {
+          const timer = setTimeout(() => setShowCheckAlert(false), 1000);
+          return () => clearTimeout(timer);
+      }
+  }, [showCheckAlert]);
 
   const addLog = (msg: string, logStatus: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status: logStatus, timestamp: Date.now() });
@@ -297,6 +306,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
   const handleSquareClick = (r: number, c: number) => {
       // Allow moving if playing OR if in check. Only block on mate/stalemate.
       if (turn === 'b' || (status !== 'playing' && status !== 'check') || isGameOver) return; // Bot turn
+      
+      // Re-trigger alert on interaction if in check
+      if (status === 'check') {
+          setShowCheckAlert(true);
+      }
+
       if (!board[r]) return;
 
       const clickedPiece = board[r][c];
@@ -365,6 +380,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
           addLog("CHECK!", "alert");
           playSFX('notification');
           setTurn(nextTurn);
+          setShowCheckAlert(true); // Trigger alert for new check state
       } else {
           setStatus('playing');
           setTurn(nextTurn);
@@ -538,7 +554,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd }) 
 
             {/* Small Check Alert */}
             <AnimatePresence>
-                {status === 'check' && (
+                {status === 'check' && showCheckAlert && (
                      <motion.div 
                         initial={{ y: -20, opacity: 0 }} 
                         animate={{ y: 0, opacity: 1 }} 

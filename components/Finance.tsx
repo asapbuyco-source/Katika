@@ -418,7 +418,10 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                 <div className="p-6 rounded-2xl bg-royal-950/50 border border-dashed border-slate-700">
                     <h4 className="font-bold text-slate-300 text-sm mb-2">Need Help?</h4>
                     <p className="text-xs text-slate-500 mb-4">Issues with a deposit or withdrawal? Our support team is available 24/7.</p>
-                    <button className="w-full py-2 bg-royal-800 hover:bg-royal-700 text-white text-xs font-bold rounded-lg transition-colors">
+                    <button 
+                        onClick={() => window.open('https://wa.me/237657960690', '_blank')}
+                        className="w-full py-2 bg-royal-800 hover:bg-royal-700 text-white text-xs font-bold rounded-lg transition-colors"
+                    >
                         Contact Support
                     </button>
                 </div>

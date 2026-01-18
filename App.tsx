@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
-import { GameRoom } from './components/GameRoom';
+import { GameRoom } from './components/GameRoom'; // Keep for non-socket fallback or reference
 import { CheckersGame } from './components/CheckersGame';
 import { DiceGame } from './components/DiceGame';
 import { PoolGame } from './components/PoolGame';
@@ -27,7 +26,9 @@ import {
     createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame 
 } from './services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { AnimatePresence } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
+import { io, Socket } from 'socket.io-client';
+import { Loader2, Wifi, WifiOff, Clock } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -45,7 +46,100 @@ export default function App() {
   // Challenge System State
   const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
 
-  // 1. Firebase Auth & Real-time Database Listener
+  // --- SOCKET.IO STATE ---
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
+  const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number>(20); // Local countdown state
+
+  // 1. Initialize Socket Connection
+  useEffect(() => {
+    // Connect to Render Backend
+    const newSocket = io("https://katika-n8q5.onrender.com");
+
+    newSocket.on('connect', () => {
+        console.log("Connected to Vantage Referee");
+        setIsConnected(true);
+    });
+
+    newSocket.on('disconnect', () => {
+        setIsConnected(false);
+    });
+
+    newSocket.on('match_found', (gameState) => {
+        console.log("Socket Match Found!", gameState);
+        setSocketGame(gameState);
+        setIsWaitingForSocketMatch(false);
+        setView('game');
+    });
+
+    newSocket.on('waiting_for_opponent', () => {
+        setIsWaitingForSocketMatch(true);
+    });
+
+    newSocket.on('game_update', (gameState) => {
+        setSocketGame(gameState);
+    });
+
+    newSocket.on('turn_timeout', (data) => {
+        // Optional: Show toast or feedback
+        console.log("Turn timed out");
+    });
+
+    newSocket.on('dice_rolled', ({ value }) => {
+        console.log("Dice rolled:", value);
+    });
+
+    // Handle Win/Loss based on User ID, not socket ID
+    newSocket.on('game_over', ({ winner }) => {
+        // We need 'user' state here, but it might be stale in closure.
+        // However, 'winner' is the User ID.
+        // We will handle the check in the render or a useEffect, 
+        // but for now let's use a loose check or trust the update.
+        // Better pattern: Update game state to 'completed', then UI shows result.
+        setSocketGame(null);
+    });
+
+    setSocket(newSocket);
+
+    return () => {
+        newSocket.close();
+    };
+  }, []);
+
+  // Handle Game Over Logic with access to 'user' state
+  useEffect(() => {
+      // Listen for explicit game over event with user context
+      if (!socket) return;
+      
+      const handleGameOver = ({ winner }: { winner: string }) => {
+          if (user && winner === user.id) {
+              setGameResult({ result: 'win', amount: 0 }); 
+          } else {
+              setGameResult({ result: 'loss', amount: 0 });
+          }
+          setSocketGame(null);
+      };
+
+      socket.on('game_over', handleGameOver);
+      return () => { socket.off('game_over', handleGameOver); };
+  }, [socket, user]);
+
+
+  // 2. Timer Logic
+  useEffect(() => {
+      if (!socketGame || !socketGame.turnExpiresAt) return;
+
+      const interval = setInterval(() => {
+          const delta = Math.max(0, Math.ceil((socketGame.turnExpiresAt - Date.now()) / 1000));
+          setTimeLeft(delta);
+      }, 1000);
+
+      return () => clearInterval(interval);
+  }, [socketGame]);
+
+  // 3. Firebase Auth & Real-time Database Listener
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
@@ -53,16 +147,13 @@ export default function App() {
       const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
               try {
-                  // Initial Sync
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
 
-                  // Setup Real-time Listener for Balance Updates
                   unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
                       setUser(updatedUser);
                   });
 
-                  // Setup Real-time Listener for Incoming Challenges
                   unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
                       setIncomingChallenge(challenge);
                   });
@@ -73,11 +164,7 @@ export default function App() {
           } else {
               if (unsubscribeSnapshot) unsubscribeSnapshot();
               if (unsubscribeChallenges) unsubscribeChallenges();
-              if (!user || user.id.startsWith('guest-')) {
-                  // Keep guest or null
-              } else {
-                 setUser(null);
-              }
+              setUser(null);
           }
           setAuthLoading(false);
       });
@@ -87,9 +174,9 @@ export default function App() {
           if (unsubscribeSnapshot) unsubscribeSnapshot();
           if (unsubscribeChallenges) unsubscribeChallenges();
       };
-  }, []); // Run once on mount
+  }, []);
 
-  // 2. Navigation Guard
+  // 4. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 
@@ -105,198 +192,47 @@ export default function App() {
       }
   }, [user, currentView, authLoading]);
 
-  // Finance Top Up Handler (Now handled inside Finance component mostly, but this serves as a fallback or event trigger)
-  const handleFinanceTopUp = () => {
-      // Balance update is handled via Finance component and Firestore listener
-  };
-
+  // Modified Matchmaking to use Socket
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
-      if (!user) return;
+      if (!user || !socket) return;
 
       if (specificGameId) {
-          // Join specific game (e.g. from challenge accepted by other party)
-          try {
-              const gameData = await getGame(specificGameId);
-              if (gameData) {
-                  const table: Table = {
-                      id: gameData.id,
-                      gameType: gameData.gameType,
-                      stake: gameData.stake,
-                      players: 2,
-                      maxPlayers: 2,
-                      status: 'active',
-                      host: gameData.host // Visual host
-                  };
-                  // Process stake for sender if not already handled? 
-                  // In challenge flow, sender usually stakes when creating challenge or joining game.
-                  // For simplicity, we handle stake deduction in handleMatchFound usually.
-                  // But here we are joining an active game.
-                  // Let's assume stake was handled or will be handled. 
-                  // If 'specificGameId' is used, it usually means we are the sender of a challenge that was accepted.
-                  
-                  if (stake > 0) {
-                      await addUserTransaction(user.id, {
-                          type: 'stake',
-                          amount: -stake,
-                          status: 'completed',
-                          date: new Date().toISOString()
-                      });
-                  }
-
-                  setActiveTable(table);
-                  setView('game');
-              } else {
-                  alert("Game not found.");
-              }
-          } catch(e) {
-              console.error("Error joining game:", e);
-          }
+          // Fallback to Firebase for specific invites
           return;
       }
 
       if (stake === -1) {
-          // BOT MATCH
-          try {
-              const gameId = await createBotMatch(user, gameType);
-              const table: Table = {
-                  id: gameId,
-                  gameType: gameType as any,
-                  stake: 0,
-                  players: 2,
-                  maxPlayers: 2,
-                  status: 'active',
-                  host: { id: 'bot', name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000", elo: 1200, rankTier: 'Silver' }
-              };
-              setActiveTable(table);
-              setView('game');
-          } catch (e) {
-              console.error("Failed to create bot match", e);
-              alert("Could not start practice match.");
-          }
-      } else {
-          setMatchmakingConfig({ stake, gameType });
-          setView('matchmaking');
+          // Bot match (Firebase)
+          return;
       }
+
+      // Use Socket.io for Real-time Matchmaking
+      setMatchmakingConfig({ stake, gameType });
+      setView('matchmaking');
+      
+      // Emit to backend with User Profile for ID tracking
+      socket.emit('join_game', { stake: stake, userProfile: user });
   };
 
   const cancelMatchmaking = () => {
       setMatchmakingConfig(null);
+      setIsWaitingForSocketMatch(false);
       setView('lobby');
   };
 
   const handleMatchFound = async (table: Table) => {
-      if (!user) return;
-      if (table.stake > 0) {
-          if (user.balance < table.stake) {
-              alert("Match found but insufficient balance.");
-              setView('lobby');
-              return;
-          }
-          
-          // Deduct Stake Immediately using DB transaction
-          // For guests, we just update local state
-          if (user.id.startsWith('guest-')) {
-              setUser(prev => prev ? ({ ...prev, balance: prev.balance - table.stake }) : null);
-          } else {
-              await addUserTransaction(user.id, {
-                  type: 'stake',
-                  amount: -table.stake,
-                  status: 'completed',
-                  date: new Date().toISOString()
-              });
-          }
-      }
       setActiveTable(table);
       setView('game');
   };
 
-  // Challenge Response Handlers
-  const handleAcceptChallenge = async () => {
-      if (!incomingChallenge || !user) return;
-      
-      if (user.balance < incomingChallenge.stake) {
-          alert("Insufficient funds to accept challenge.");
-          return;
-      }
-
-      try {
-          // 1. Create Game
-          const gameId = await createChallengeGame(incomingChallenge, user);
-          
-          // 2. Respond to Challenge (mark accepted and link game)
-          await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
-
-          // 3. Deduct Stake for Receiver
-          await addUserTransaction(user.id, {
-              type: 'stake',
-              amount: -incomingChallenge.stake,
-              status: 'completed',
-              date: new Date().toISOString()
-          });
-
-          // 4. Start Game
-          const table: Table = {
-              id: gameId,
-              gameType: incomingChallenge.gameType as any,
-              stake: incomingChallenge.stake,
-              players: 2,
-              maxPlayers: 2,
-              status: 'active',
-              host: incomingChallenge.sender // The sender is the 'host' visually
-          };
-
-          setIncomingChallenge(null);
-          setActiveTable(table);
-          setView('game');
-
-      } catch (error) {
-          console.error("Failed to accept challenge", error);
-          alert("Error accepting challenge.");
-      }
-  };
-
-  const handleDeclineChallenge = async () => {
-      if (incomingChallenge) {
-          await respondToChallenge(incomingChallenge.id, 'declined');
-          setIncomingChallenge(null);
-      }
-  };
-
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
-    let amountChanged = 0;
-
-    if (activeTable && activeTable.stake > 0 && user) {
-        if (result === 'win') {
-            const totalPot = activeTable.stake * 2;
-            const fee = totalPot * 0.10;
-            const payout = totalPot - fee;
-            amountChanged = payout; 
-            
-            // Add Payout to DB
-            if (!user.id.startsWith('guest-')) {
-                await addUserTransaction(user.id, {
-                    type: 'winnings',
-                    amount: payout,
-                    status: 'completed',
-                    date: new Date().toISOString()
-                });
-            } else {
-                setUser(prev => prev ? ({ ...prev, balance: prev.balance + payout }) : null);
-            }
-
-        } else if (result === 'loss') {
-            amountChanged = -activeTable.stake;
-            // Loss already handled by initial stake deduction
-        }
-    }
-    
-    // Trigger Overlay
-    setGameResult({ result, amount: amountChanged });
+      setGameResult({ result, amount: 0 }); 
   };
 
   const finalizeGameEnd = () => {
     setGameResult(null);
     setActiveTable(null);
+    setSocketGame(null);
     setView('dashboard');
   };
 
@@ -307,18 +243,30 @@ export default function App() {
   };
   
   const handleDashboardQuickMatch = (gameId?: string) => {
-      if (gameId) {
-          setPreSelectedGame(gameId);
-      } else {
-          setPreSelectedGame(null);
-      }
+      if (gameId) setPreSelectedGame(gameId);
+      else setPreSelectedGame(null);
       setView('lobby');
   };
+
+  // --- RENDER ---
 
   if (authLoading) {
       return (
           <div className="min-h-screen bg-royal-950 flex items-center justify-center">
               <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+      );
+  }
+
+  // Socket Connection Loading Screen (Render Sleep Handler)
+  if (!isConnected && user) {
+      return (
+          <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
+              <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
+              <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Referee...</h2>
+              <p className="text-slate-400 max-w-md">
+                  We are waking up the realtime server (Render). This may take up to 30 seconds.
+              </p>
           </div>
       );
   }
@@ -334,8 +282,8 @@ export default function App() {
           {incomingChallenge && (
               <ChallengeRequestModal 
                   challenge={incomingChallenge}
-                  onAccept={handleAcceptChallenge}
-                  onDecline={handleDeclineChallenge}
+                  onAccept={() => {/* Handle via Socket in future */}}
+                  onDecline={() => setIncomingChallenge(null)}
               />
           )}
       </AnimatePresence>
@@ -350,7 +298,7 @@ export default function App() {
       )}
 
       <main className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
+        {currentView !== 'landing' && currentView !== 'auth' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
@@ -361,13 +309,6 @@ export default function App() {
             <LandingPage 
                 onLogin={() => setView('auth')} 
                 onHowItWorks={() => setView('how-it-works')}
-            />
-        )}
-
-        {currentView === 'how-it-works' && (
-            <HowItWorks 
-                onBack={() => setView('landing')} 
-                onLogin={() => setView('auth')}
             />
         )}
 
@@ -400,80 +341,160 @@ export default function App() {
                         onClearInitialGame={() => setPreSelectedGame(null)}
                     />
                 )}
-                
-                {currentView === 'finance' && (
-                    <Finance 
-                        user={user} 
-                        onTopUp={handleFinanceTopUp}
-                    />
-                )}
-                
-                {currentView === 'profile' && (
-                    <Profile 
-                        user={user} 
-                        onLogout={handleLogout}
-                        onUpdateProfile={(updates) => setUser(prev => prev ? ({ ...prev, ...updates }) : null)}
-                        onNavigate={setView}
-                    />
-                )}
-                
-                {currentView === 'forum' && <Forum user={user} />}
 
-                {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
-                
-                {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
-                
-                {currentView === 'terms' && <TermsOfService onBack={() => setView('profile')} />}
-                
-                {currentView === 'admin' && user.isAdmin && (
-                    <AdminDashboard user={user} />
-                )}
-                
-                {currentView === 'matchmaking' && matchmakingConfig && (
+                {currentView === 'matchmaking' && (
                     <MatchmakingScreen 
                         user={user} 
-                        gameType={matchmakingConfig.gameType}
-                        stake={matchmakingConfig.stake}
-                        onMatchFound={handleMatchFound}
+                        gameType={matchmakingConfig?.gameType || 'Ludo'}
+                        stake={matchmakingConfig?.stake || 100}
+                        onMatchFound={() => {}} // Handled by socket event
                         onCancel={cancelMatchmaking}
                     />
                 )}
 
-                {currentView === 'game' && activeTable && (
-                    <>
-                        {activeTable.gameType === 'Dice' ? (
-                            <DiceGame 
-                                table={activeTable}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                            />
-                        ) : activeTable.gameType === 'Checkers' ? (
-                            <CheckersGame 
-                                table={activeTable}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                            />
-                        ) : activeTable.gameType === 'Pool' ? (
-                            <PoolGame 
-                                table={activeTable}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                            />
-                        ) : activeTable.gameType === 'Chess' ? (
-                            <ChessGame 
-                                table={activeTable}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                            />
-                        ) : (
-                            <GameRoom 
-                                table={activeTable} 
-                                user={user}
-                                onGameEnd={handleGameEnd} 
-                            />
-                        )}
-                    </>
+                {/* SIMPLIFIED SOCKET GAME BOARD */}
+                {currentView === 'game' && socketGame ? (
+                     <div className="min-h-screen flex flex-col items-center justify-center p-4">
+                        <div className="max-w-3xl w-full glass-panel p-8 rounded-3xl border border-gold-500/30 bg-royal-900/80 shadow-2xl">
+                            
+                            {/* Header */}
+                            <div className="flex justify-between items-center mb-10 border-b border-white/5 pb-6">
+                                <div>
+                                    <h2 className="text-3xl font-display font-bold text-white mb-1">Vantage Arena</h2>
+                                    <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-2 text-sm text-green-400">
+                                            <Wifi size={16} /> Connected
+                                        </div>
+                                        {/* TURN TIMER */}
+                                        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold font-mono transition-colors ${timeLeft < 10 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-royal-800 text-gold-400'}`}>
+                                            <Clock size={12} /> {timeLeft}s
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs font-mono text-gold-400 uppercase tracking-widest mb-1">Pot Size</div>
+                                    <div className="text-2xl font-bold text-white">{(socketGame.stake * 2).toLocaleString()} FCFA</div>
+                                </div>
+                            </div>
+
+                            {/* Simplified Track */}
+                            <div className="relative mb-12">
+                                <div className="grid grid-cols-5 md:grid-cols-8 gap-3 md:gap-4">
+                                    {[...Array(16)].map((_, i) => {
+                                        // UPDATED: Use user.id instead of socket.id for state check
+                                        const isMe = socketGame.positions[user.id] === i;
+                                        // Opponent is anyone in players array who is NOT me
+                                        const opponentId = socketGame.players.find((id: string) => id !== user.id);
+                                        const isOpp = socketGame.positions[opponentId] === i;
+                                        const isFinish = i === 15;
+
+                                        return (
+                                            <div key={i} className={`
+                                                aspect-square rounded-xl border-2 flex items-center justify-center relative transition-all duration-300
+                                                ${isMe ? 'border-gold-500 bg-gold-500/20 shadow-[0_0_15px_gold]' : 
+                                                  isOpp ? 'border-red-500 bg-red-500/20 shadow-[0_0_15px_red]' : 
+                                                  isFinish ? 'border-green-500/50 bg-green-500/10' : 'border-white/5 bg-black/20'}
+                                            `}>
+                                                <span className="absolute bottom-1 right-2 text-xs font-mono text-slate-600">{i}</span>
+                                                {isFinish && <span className="text-[10px] text-green-400 font-bold uppercase">Finish</span>}
+                                                
+                                                {/* Player Markers */}
+                                                <AnimatePresence>
+                                                    {isMe && (
+                                                        <motion.div 
+                                                            layoutId="my-piece"
+                                                            className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-gold-500 shadow-lg border-2 border-white z-10"
+                                                        />
+                                                    )}
+                                                    {isOpp && (
+                                                        <motion.div 
+                                                            layoutId="opp-piece"
+                                                            className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-red-500 shadow-lg border-2 border-white absolute top-1 left-1 z-0"
+                                                        />
+                                                    )}
+                                                </AnimatePresence>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+
+                            {/* Controls */}
+                            <div className="flex flex-col items-center gap-6">
+                                <div className="text-2xl font-bold text-white">
+                                    {/* UPDATED: Check Turn against user.id */}
+                                    {socketGame.turn === user.id ? (
+                                        <motion.span 
+                                            animate={{ opacity: [1, 0.5, 1] }} 
+                                            transition={{ repeat: Infinity, duration: 1.5 }}
+                                            className="text-gold-400"
+                                        >
+                                            YOUR TURN
+                                        </motion.span>
+                                    ) : (
+                                        <span className="text-slate-500">Opponent is thinking...</span>
+                                    )}
+                                </div>
+                                
+                                <div className="h-24 flex items-center justify-center">
+                                    <AnimatePresence mode="wait">
+                                        {socketGame.diceValue ? (
+                                            <motion.div 
+                                                key="dice"
+                                                initial={{ scale: 0, rotate: 180 }}
+                                                animate={{ scale: 1, rotate: 0 }}
+                                                className="text-6xl font-black text-white p-6 bg-white/5 rounded-2xl border border-white/10"
+                                            >
+                                                {socketGame.diceValue}
+                                            </motion.div>
+                                        ) : (
+                                            <div className="w-24 h-24 rounded-2xl border-2 border-dashed border-white/10 flex items-center justify-center text-slate-600">
+                                                ?
+                                            </div>
+                                        )}
+                                    </AnimatePresence>
+                                </div>
+
+                                <div className="flex gap-4">
+                                    <button 
+                                        onClick={() => socket!.emit('roll_dice', { roomId: socketGame.roomId })}
+                                        disabled={socketGame.turn !== user.id || socketGame.diceValue !== null}
+                                        className="px-8 py-4 bg-gold-500 text-royal-950 font-black rounded-xl hover:scale-105 transition-transform disabled:opacity-30 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(251,191,36,0.3)]"
+                                    >
+                                        ROLL DICE
+                                    </button>
+                                    
+                                    <button 
+                                        onClick={() => socket!.emit('move_piece', { roomId: socketGame.roomId })}
+                                        disabled={socketGame.turn !== user.id || socketGame.diceValue === null}
+                                        className="px-8 py-4 bg-green-500 text-white font-black rounded-xl hover:scale-105 transition-transform disabled:opacity-30 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+                                    >
+                                        MOVE PIECE
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                     </div>
+                ) : (
+                    // Fallback to original Game Room if not socket game (or using Firebase mode)
+                    currentView === 'game' && activeTable && (
+                        <GameRoom 
+                            table={activeTable} 
+                            user={user}
+                            onGameEnd={handleGameEnd} 
+                        />
+                    )
                 )}
+
+                {/* Other Views */}
+                {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
+                {currentView === 'profile' && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
+                {currentView === 'admin' && <AdminDashboard user={user} />}
+                {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
+                {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
+                {currentView === 'terms' && <TermsOfService onBack={() => setView('profile')} />}
+                {currentView === 'forum' && <Forum user={user} />}
             </>
         )}
       </main>

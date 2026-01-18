@@ -131,7 +131,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   useEffect(() => {
       if (!isBotGame || !isHost || !gameState) return;
 
-      const botColor = myColor === 'Red' ? 'Yellow' : 'Red';
+      const botColor: PlayerColor = myColor === 'Red' ? 'Yellow' : 'Red';
       
       // If it's Bot's turn
       if (gameState.currentTurn === botColor && !gameState.winner) {
@@ -139,7 +139,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
               // 1. Roll Dice
               setTimeout(() => {
                   const roll = Math.floor(Math.random() * 6) + 1;
-                  const newState = { ...gameState, diceValue: roll, diceRolled: true };
+                  const newState: LudoGameState = { ...gameState, diceValue: roll, diceRolled: true };
                   setGameState(newState);
                   updateGameState(table.id, newState);
                   playSFX('dice');
@@ -228,7 +228,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       // Check Win
       const myFinished = updatedPieces.filter(p => p.color === botColor && p.status === 'FINISHED').length;
       if (myFinished === 4) {
-          const finalState = { ...state, pieces: updatedPieces, winner: botColor };
+          const finalState: LudoGameState = { ...state, pieces: updatedPieces, winner: botColor };
           await updateGameState(table.id, finalState);
           await setGameResult(table.id, 'bot'); // Bot wins
           return;
@@ -236,12 +236,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
 
       // Next Turn
       const bonusTurn = roll === 6;
+      const nextTurnColor: PlayerColor = bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red');
       const nextTurnState: LudoGameState = {
           ...state,
           pieces: updatedPieces,
           diceRolled: false,
           diceValue: roll,
-          currentTurn: (bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red')) as PlayerColor
+          currentTurn: nextTurnColor
       };
 
       setGameState(nextTurnState);
@@ -257,7 +258,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       const roll = Math.floor(Math.random() * 6) + 1;
       
       // Optimistic Update
-      const newState = { ...gameState, diceValue: roll, diceRolled: true };
+      const newState: LudoGameState = { ...gameState, diceValue: roll, diceRolled: true };
       setGameState(newState);
       await updateGameState(table.id, newState);
 
@@ -338,7 +339,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       // Determine Winner
       const myFinished = updatedPieces.filter(p => p.color === myColor && p.status === 'FINISHED').length;
       if (myFinished === 4) {
-          const finalState = { ...gameState, pieces: updatedPieces, winner: myColor };
+          const finalState: LudoGameState = { ...gameState, pieces: updatedPieces, winner: myColor };
           await updateGameState(table.id, finalState);
           await setGameResult(table.id, user.id); // Set winner ID in game doc
           return;
@@ -347,13 +348,14 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
       // Determine Next Turn
       // Bonus turn if rolled 6
       const bonusTurn = gameState.diceValue === 6;
+      const nextTurnColor: PlayerColor = bonusTurn ? myColor : (myColor === 'Red' ? 'Yellow' : 'Red');
       
       const nextTurnState: LudoGameState = {
           ...gameState,
           pieces: updatedPieces,
           diceRolled: false,
           diceValue: gameState.diceValue, // keep for visual until next roll
-          currentTurn: (bonusTurn ? myColor : (myColor === 'Red' ? 'Yellow' : 'Red')) as PlayerColor
+          currentTurn: nextTurnColor
       };
 
       if (bonusTurn) addLog("Rolled 6! Bonus Turn", "secure");
@@ -363,8 +365,8 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   };
 
   const passTurn = async (currentState: LudoGameState) => {
-       const nextColor = (currentState.currentTurn === 'Red' ? 'Yellow' : 'Red') as PlayerColor;
-       const newState = {
+       const nextColor: PlayerColor = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
+       const newState: LudoGameState = {
            ...currentState,
            diceRolled: false,
            currentTurn: nextColor
