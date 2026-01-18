@@ -11,9 +11,10 @@ interface MatchmakingScreenProps {
   stake: number;
   onMatchFound: (table: Table) => void;
   onCancel: () => void;
+  isSocketMode?: boolean; // New prop to toggle behavior
 }
 
-export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, gameType, stake, onMatchFound, onCancel }) => {
+export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, gameType, stake, onMatchFound, onCancel, isSocketMode = false }) => {
   const [status, setStatus] = useState<'connecting' | 'waiting' | 'found'>('connecting');
   const [gameId, setGameId] = useState<string | null>(null);
   const [opponent, setOpponent] = useState<PlayerProfile | null>(null);
@@ -22,6 +23,13 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
   // Initialize Matchmaking
   useEffect(() => {
     let mounted = true;
+
+    // If using Socket Mode, we don't use Firebase Matchmaking here.
+    // We just wait for the parent component (App.tsx) to tell us a match is found via props/view change.
+    if (isSocketMode) {
+        setStatus('waiting');
+        return;
+    }
 
     const initMatch = async () => {
         try {
@@ -75,7 +83,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         mounted = false;
         if (unsubscribeRef.current) unsubscribeRef.current();
     };
-  }, [user, gameType, stake, onMatchFound]);
+  }, [user, gameType, stake, onMatchFound, isSocketMode]);
 
   return (
     <div className="fixed inset-0 z-50 bg-royal-950 flex flex-col items-center justify-center p-6">
@@ -106,7 +114,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         >
             <h2 className="text-2xl font-display font-bold text-white mb-2">
                 {status === 'connecting' && "Accessing Vantage Network..."}
-                {status === 'waiting' && "Waiting for Opponent..."}
+                {status === 'waiting' && (isSocketMode ? "Connecting to Real-time Server..." : "Waiting for Opponent...")}
                 {status === 'found' && "MATCH SECURED"}
             </h2>
             
@@ -123,7 +131,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                 ) : (
                     <>
                         <p className="text-slate-400 font-mono text-sm">
-                            Searching Global Pool...
+                            {isSocketMode ? "Searching for players..." : "Searching Global Pool..."}
                         </p>
                         <div className="px-3 py-1 bg-royal-800 rounded-full border border-gold-500/30 text-gold-400 text-xs font-bold">
                             Stake: {stake.toLocaleString()} FCFA

@@ -27,6 +27,7 @@ const TURN_DURATION_MS = 20000;
 const activeGames = {}; // roomId -> GameState
 const waitingQueues = {}; // stake -> { userId, socketId }
 const userSessions = {}; // userId -> { socketId, roomId, timerId }
+const privateMatches = {}; // roomId -> { stake, players: [{userId, socketId}] }
 
 // Helper: Switch Turn
 const switchTurn = (roomId) => {
@@ -58,12 +59,12 @@ io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
   // 1. MATCHMAKING & RECONNECTION
-  socket.on('join_game', ({ stake, userProfile }) => {
+  socket.on('join_game', ({ stake, userProfile, privateRoomId }) => {
     if (!userProfile || !userProfile.id) return;
     const userId = userProfile.id;
     const numericStake = parseInt(stake);
 
-    console.log(`User ${userId} attempting to join/reconnect`);
+    console.log(`User ${userId} joining. Private: ${privateRoomId || 'No'}`);
 
     // A. CHECK FOR EXISTING ACTIVE GAME (Reconnection)
     const existingSession = userSessions[userId];
@@ -80,7 +81,77 @@ io.on('connection', (socket) => {
         return;
     }
 
-    // B. NEW MATCHMAKING
+    // B. PRIVATE MATCH (CHALLENGE)
+    if (privateRoomId) {
+        const roomId = privateRoomId;
+
+        // Check if waiting for opponent in private queue
+        if (privateMatches[roomId]) {
+             const match = privateMatches[roomId];
+             
+             // Check if this is the creator re-joining (rare but possible)
+             if (match.players.some(p => p.userId === userId)) {
+                 match.players.find(p => p.userId === userId).socketId = socket.id;
+                 socket.join(roomId);
+                 return;
+             }
+
+             // Match Found! (Second player joining)
+             const opponent = match.players[0];
+             delete privateMatches[roomId]; // Remove from waiting
+
+             // Init Game State
+             const gameState = {
+                roomId,
+                players: [opponent.userId, userId],
+                turn: opponent.userId, // Challenger starts
+                stake: numericStake,
+                positions: {
+                    [opponent.userId]: 0,
+                    [userId]: 0
+                },
+                diceValue: null,
+                status: 'active',
+                turnExpiresAt: Date.now() + TURN_DURATION_MS,
+                timerId: null
+             };
+
+             activeGames[roomId] = gameState;
+
+             // Register Sessions
+             userSessions[opponent.userId] = { socketId: opponent.socketId, roomId };
+             userSessions[userId] = { socketId: socket.id, roomId };
+
+             // Join Rooms
+             socket.join(roomId);
+             const oppSocket = io.sockets.sockets.get(opponent.socketId);
+             if (oppSocket) oppSocket.join(roomId);
+
+             // Start Timer
+             gameState.timerId = setTimeout(() => switchTurn(roomId), TURN_DURATION_MS);
+
+             // Broadcast
+             io.to(roomId).emit('match_found', gameState);
+             console.log(`Private Match started: ${roomId}`);
+
+        } else {
+             // First player creating the room
+             privateMatches[roomId] = {
+                 stake: numericStake,
+                 players: [{ userId, socketId: socket.id }]
+             };
+             
+             // Register session (no active room yet)
+             userSessions[userId] = { socketId: socket.id, roomId: null };
+             
+             socket.join(roomId);
+             socket.emit('waiting_for_opponent');
+             console.log(`User ${userId} waiting in private room ${roomId}`);
+        }
+        return;
+    }
+
+    // C. PUBLIC MATCHMAKING
     const waitingPlayer = waitingQueues[numericStake];
 
     if (waitingPlayer && waitingPlayer.userId !== userId) {
@@ -200,11 +271,17 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`Socket disconnected: ${socket.id}`);
-    // We do NOT delete the game session immediately to allow reconnect.
     // Cleanup for waiting queue only
     for (const [stake, waiter] of Object.entries(waitingQueues)) {
         if (waiter.socketId === socket.id) {
             delete waitingQueues[stake];
+        }
+    }
+    // Cleanup private waiting matches
+    for (const [roomId, match] of Object.entries(privateMatches)) {
+        if (match.players.some(p => p.socketId === socket.id)) {
+            // If the creator leaves before opponent joins, destroy the room
+            delete privateMatches[roomId];
         }
     }
   });

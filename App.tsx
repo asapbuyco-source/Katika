@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
@@ -93,11 +94,6 @@ export default function App() {
 
     // Handle Win/Loss based on User ID, not socket ID
     newSocket.on('game_over', ({ winner }) => {
-        // We need 'user' state here, but it might be stale in closure.
-        // However, 'winner' is the User ID.
-        // We will handle the check in the render or a useEffect, 
-        // but for now let's use a loose check or trust the update.
-        // Better pattern: Update game state to 'completed', then UI shows result.
         setSocketGame(null);
     });
 
@@ -196,8 +192,12 @@ export default function App() {
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user || !socket) return;
 
+      // Handle Private Matches via Socket
       if (specificGameId) {
-          // Fallback to Firebase for specific invites
+          setMatchmakingConfig({ stake, gameType });
+          setView('matchmaking');
+          // Emit with privateRoomId
+          socket.emit('join_game', { stake: stake, userProfile: user, privateRoomId: specificGameId });
           return;
       }
 
@@ -206,7 +206,7 @@ export default function App() {
           return;
       }
 
-      // Use Socket.io for Real-time Matchmaking
+      // Use Socket.io for Real-time Public Matchmaking
       setMatchmakingConfig({ stake, gameType });
       setView('matchmaking');
       
@@ -218,6 +218,19 @@ export default function App() {
       setMatchmakingConfig(null);
       setIsWaitingForSocketMatch(false);
       setView('lobby');
+  };
+
+  const handleAcceptChallenge = async () => {
+      if (!incomingChallenge || !user) return;
+      const gameId = incomingChallenge.id; // Use challenge ID as shared game ID
+      
+      // 1. Notify Sender via Firebase
+      await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
+      
+      // 2. Join the Private Socket Room
+      startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
+      
+      setIncomingChallenge(null);
   };
 
   const handleMatchFound = async (table: Table) => {
@@ -282,7 +295,7 @@ export default function App() {
           {incomingChallenge && (
               <ChallengeRequestModal 
                   challenge={incomingChallenge}
-                  onAccept={() => {/* Handle via Socket in future */}}
+                  onAccept={handleAcceptChallenge}
                   onDecline={() => setIncomingChallenge(null)}
               />
           )}
@@ -349,6 +362,7 @@ export default function App() {
                         stake={matchmakingConfig?.stake || 100}
                         onMatchFound={() => {}} // Handled by socket event
                         onCancel={cancelMatchmaking}
+                        isSocketMode={true} // ENABLE SOCKET MODE FOR MATCHMAKING
                     />
                 )}
 
