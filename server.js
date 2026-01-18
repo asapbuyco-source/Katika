@@ -1,3 +1,4 @@
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -6,9 +7,8 @@ import cors from 'cors';
 const app = express();
 app.use(cors());
 
-// Root route for health check
 app.get('/', (req, res) => {
-  res.send('Vantage Referee is Awake');
+  res.send('Vantage Referee is Ready');
 });
 
 const httpServer = createServer(app);
@@ -23,267 +23,212 @@ const PORT = process.env.PORT || 3001;
 const TURN_DURATION_MS = 20000; 
 
 // --- STATE MANAGEMENT ---
-// We map games by Room ID, and track user sessions to handle reconnections.
 const activeGames = {}; // roomId -> GameState
 const waitingQueues = {}; // stake -> { userId, socketId }
-const userSessions = {}; // userId -> { socketId, roomId, timerId }
-const privateMatches = {}; // roomId -> { stake, players: [{userId, socketId}] }
+const userSessions = {}; // userId -> { socketId, roomId }
+const privateMatches = {}; // roomId -> { stake, gameType, players: [] }
 
-// Helper: Switch Turn
-const switchTurn = (roomId) => {
-    const game = activeGames[roomId];
-    if (!game) return;
+// --- GAME LOGIC ENGINES ---
 
-    // Clear existing timer
-    if (game.timerId) clearTimeout(game.timerId);
+const createInitialState = (gameType, players, stake) => {
+    const base = {
+        players,
+        turn: players[0], // First player starts
+        stake,
+        gameType,
+        status: 'active',
+        turnExpiresAt: Date.now() + TURN_DURATION_MS,
+    };
 
-    // Determine Next Player
-    const currentIndex = game.players.indexOf(game.turn);
-    const nextIndex = (currentIndex + 1) % game.players.length;
-    game.turn = game.players[nextIndex];
+    if (gameType === 'Dice') {
+        return {
+            ...base,
+            scores: { [players[0]]: 0, [players[1]]: 0 },
+            currentRound: 1,
+            roundState: 'waiting', // waiting, rolled_1, scored
+            roundRolls: { [players[0]]: null, [players[1]]: null } // [d1, d2]
+        };
+    }
     
-    // Reset State
-    game.diceValue = null;
-    game.turnExpiresAt = Date.now() + TURN_DURATION_MS;
+    // Default generic state for others
+    return { ...base, board: null, lastMove: null };
+};
 
-    // Set Timeout
-    game.timerId = setTimeout(() => {
-        io.to(roomId).emit('turn_timeout', { message: "Time Expired! Turn Skipped." });
-        switchTurn(roomId);
-    }, TURN_DURATION_MS);
+const handleDiceAction = (game, action, userId) => {
+    // Action: { type: 'ROLL' }
+    if (action.type === 'ROLL') {
+        // Validate Turn
+        // In Dice, players roll simultaneously or sequentially depending on implementation.
+        // Here: Sequential.
+        if (game.turn !== userId) return null;
 
-    io.to(roomId).emit('game_update', game);
+        const d1 = Math.ceil(Math.random() * 6);
+        const d2 = Math.ceil(Math.random() * 6);
+        
+        game.roundRolls[userId] = [d1, d2];
+        
+        // Check if other player has rolled this round
+        const otherPlayer = game.players.find(p => p !== userId);
+        
+        if (game.roundRolls[otherPlayer]) {
+            // Both rolled, evaluate round
+            const p1Roll = game.roundRolls[userId];
+            const p2Roll = game.roundRolls[otherPlayer];
+            const p1Sum = p1Roll[0] + p1Roll[1];
+            const p2Sum = p2Roll[0] + p2Roll[1];
+
+            let roundWinner = null;
+            if (p1Sum > p2Sum) {
+                game.scores[userId]++;
+                roundWinner = userId;
+            } else if (p2Sum > p1Sum) {
+                game.scores[otherPlayer]++;
+                roundWinner = otherPlayer;
+            } else {
+                roundWinner = 'tie';
+            }
+
+            game.roundState = 'scored';
+            
+            // Check Match Win (First to 3)
+            if (game.scores[userId] >= 3) {
+                game.status = 'completed';
+                game.winner = userId;
+            } else if (game.scores[otherPlayer] >= 3) {
+                game.status = 'completed';
+                game.winner = otherPlayer;
+            } else {
+                // Next Round Prep
+                setTimeout(() => {
+                    game.currentRound++;
+                    game.roundRolls = { [userId]: null, [otherPlayer]: null };
+                    game.roundState = 'waiting';
+                    // Loser or alternating starts next? Let's alternate based on round
+                    game.turn = game.players[(game.currentRound - 1) % 2];
+                    io.to(game.roomId).emit('game_update', game);
+                }, 3000); // 3s delay to show results
+            }
+        } else {
+            // Wait for opponent
+            game.turn = otherPlayer;
+        }
+        
+        return game;
+    }
+    return null;
 };
 
 io.on('connection', (socket) => {
   console.log(`Socket connected: ${socket.id}`);
 
-  // 1. MATCHMAKING & RECONNECTION
-  socket.on('join_game', ({ stake, userProfile, privateRoomId }) => {
+  socket.on('join_game', ({ stake, userProfile, privateRoomId, gameType = 'Dice' }) => {
     if (!userProfile || !userProfile.id) return;
     const userId = userProfile.id;
     const numericStake = parseInt(stake);
 
-    console.log(`User ${userId} joining. Private: ${privateRoomId || 'No'}`);
-
-    // A. CHECK FOR EXISTING ACTIVE GAME (Reconnection)
-    const existingSession = userSessions[userId];
-    if (existingSession && existingSession.roomId && activeGames[existingSession.roomId]) {
-        const roomId = existingSession.roomId;
-        const game = activeGames[roomId];
-        
-        // Update Socket ID map
-        userSessions[userId].socketId = socket.id;
-        socket.join(roomId);
-        
-        console.log(`User ${userId} reconnected to ${roomId}`);
-        socket.emit('match_found', game); // Send current state immediately
+    // Reconnection check
+    const session = userSessions[userId];
+    if (session && session.roomId && activeGames[session.roomId]) {
+        const game = activeGames[session.roomId];
+        socket.join(session.roomId);
+        socket.emit('match_found', game);
         return;
     }
 
-    // B. PRIVATE MATCH (CHALLENGE)
+    // --- MATCHMAKING ---
+    const queueKey = `${gameType}_${numericStake}`;
+
     if (privateRoomId) {
+        // Private Match Logic
         const roomId = privateRoomId;
-
-        // Check if waiting for opponent in private queue
         if (privateMatches[roomId]) {
+             // Join existing private
              const match = privateMatches[roomId];
-             
-             // Check if this is the creator re-joining (rare but possible)
-             if (match.players.some(p => p.userId === userId)) {
-                 match.players.find(p => p.userId === userId).socketId = socket.id;
-                 socket.join(roomId);
-                 return;
-             }
-
-             // Match Found! (Second player joining)
              const opponent = match.players[0];
-             delete privateMatches[roomId]; // Remove from waiting
+             delete privateMatches[roomId];
 
-             // Init Game State
-             const gameState = {
-                roomId,
-                players: [opponent.userId, userId],
-                turn: opponent.userId, // Challenger starts
-                stake: numericStake,
-                positions: {
-                    [opponent.userId]: 0,
-                    [userId]: 0
-                },
-                diceValue: null,
-                status: 'active',
-                turnExpiresAt: Date.now() + TURN_DURATION_MS,
-                timerId: null
-             };
+             const roomIdReal = `private_${roomId}`; // internal room id
+             const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
+             gameState.roomId = roomIdReal;
+             
+             activeGames[roomIdReal] = gameState;
+             userSessions[opponent.userId] = { socketId: opponent.socketId, roomId: roomIdReal };
+             userSessions[userId] = { socketId: socket.id, roomId: roomIdReal };
 
-             activeGames[roomId] = gameState;
-
-             // Register Sessions
-             userSessions[opponent.userId] = { socketId: opponent.socketId, roomId };
-             userSessions[userId] = { socketId: socket.id, roomId };
-
-             // Join Rooms
-             socket.join(roomId);
+             socket.join(roomIdReal);
              const oppSocket = io.sockets.sockets.get(opponent.socketId);
-             if (oppSocket) oppSocket.join(roomId);
+             if (oppSocket) oppSocket.join(roomIdReal);
 
-             // Start Timer
-             gameState.timerId = setTimeout(() => switchTurn(roomId), TURN_DURATION_MS);
-
-             // Broadcast
-             io.to(roomId).emit('match_found', gameState);
-             console.log(`Private Match started: ${roomId}`);
+             io.to(roomIdReal).emit('match_found', gameState);
 
         } else {
-             // First player creating the room
-             privateMatches[roomId] = {
-                 stake: numericStake,
-                 players: [{ userId, socketId: socket.id }]
-             };
-             
-             // Register session (no active room yet)
+             // Create private
+             privateMatches[roomId] = { stake: numericStake, gameType, players: [{ userId, socketId: socket.id }] };
              userSessions[userId] = { socketId: socket.id, roomId: null };
-             
-             socket.join(roomId);
              socket.emit('waiting_for_opponent');
-             console.log(`User ${userId} waiting in private room ${roomId}`);
         }
         return;
     }
 
-    // C. PUBLIC MATCHMAKING
-    const waitingPlayer = waitingQueues[numericStake];
+    // Public Match
+    if (waitingQueues[queueKey]) {
+        const opponent = waitingQueues[queueKey];
+        if (opponent.userId === userId) return; // Prevent self-match
 
-    if (waitingPlayer && waitingPlayer.userId !== userId) {
-      // Match Found!
-      const opponentId = waitingPlayer.userId;
-      const opponentSocketId = waitingPlayer.socketId;
-      const roomId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Clear queue
-      delete waitingQueues[numericStake];
-
-      // Init State
-      const gameState = {
-        roomId,
-        players: [opponentId, userId],
-        turn: opponentId, // Opponent starts
-        stake: numericStake,
-        positions: {
-            [opponentId]: 0,
-            [userId]: 0
-        },
-        diceValue: null,
-        status: 'active',
-        turnExpiresAt: Date.now() + TURN_DURATION_MS,
-        timerId: null
-      };
-
-      activeGames[roomId] = gameState;
-
-      // Register Sessions
-      userSessions[opponentId] = { socketId: opponentSocketId, roomId };
-      userSessions[userId] = { socketId: socket.id, roomId };
-
-      // Join Rooms
-      socket.join(roomId);
-      const oppSocket = io.sockets.sockets.get(opponentSocketId);
-      if (oppSocket) oppSocket.join(roomId);
-
-      // Start Timer
-      gameState.timerId = setTimeout(() => switchTurn(roomId), TURN_DURATION_MS);
-
-      // Broadcast
-      io.to(roomId).emit('match_found', gameState);
-      console.log(`Match started: ${roomId}`);
-
-    } else {
-      // Add to Queue
-      waitingQueues[numericStake] = { userId, socketId: socket.id };
-      // Also register session (no room yet)
-      userSessions[userId] = { socketId: socket.id, roomId: null };
-      
-      socket.emit('waiting_for_opponent');
-      console.log(`User ${userId} queued for ${numericStake}`);
-    }
-  });
-
-  // 2. GAME ACTIONS
-  // Helper to find game by socket
-  const getGameFromSocket = () => {
-      // This is O(N) but safe for prototype. 
-      // Better: pass userId from client or map socket.id -> userId -> gameId
-      const entry = Object.entries(userSessions).find(([uid, sess]) => sess.socketId === socket.id);
-      if (!entry) return null;
-      const [userId, session] = entry;
-      if (!session.roomId) return null;
-      return { game: activeGames[session.roomId], userId };
-  };
-
-  socket.on('roll_dice', () => {
-    const data = getGameFromSocket();
-    if (!data) return;
-    const { game, userId } = data;
-
-    if (game.turn === userId && !game.diceValue) {
-        const roll = Math.floor(Math.random() * 6) + 1;
-        game.diceValue = roll;
-        io.to(game.roomId).emit('dice_rolled', { value: roll });
-        io.to(game.roomId).emit('game_update', game);
-    }
-  });
-
-  socket.on('move_piece', () => {
-    const data = getGameFromSocket();
-    if (!data) return;
-    const { game, userId } = data;
-
-    if (game.turn === userId && game.diceValue) {
-        // Move
-        game.positions[userId] += game.diceValue;
+        delete waitingQueues[queueKey];
+        const roomId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
         
-        // Win Condition
-        if (game.positions[userId] >= 15) {
-            game.status = 'completed';
-            if (game.timerId) clearTimeout(game.timerId);
-            io.to(game.roomId).emit('game_over', { winner: userId });
-            
-            // Cleanup
-            delete activeGames[game.roomId];
-            game.players.forEach(pid => {
-                if (userSessions[pid]) userSessions[pid].roomId = null;
-            });
-        } else {
-            // Bonus Turn or Switch
-            if (game.diceValue === 6) {
-                game.diceValue = null;
-                // Reset timer for bonus
-                game.turnExpiresAt = Date.now() + TURN_DURATION_MS;
-                if (game.timerId) clearTimeout(game.timerId);
-                game.timerId = setTimeout(() => switchTurn(game.roomId), TURN_DURATION_MS);
-                io.to(game.roomId).emit('game_update', game);
-            } else {
-                switchTurn(game.roomId);
-            }
-        }
+        const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
+        gameState.roomId = roomId;
+
+        activeGames[roomId] = gameState;
+        userSessions[opponent.userId] = { socketId: opponent.socketId, roomId };
+        userSessions[userId] = { socketId: socket.id, roomId };
+
+        socket.join(roomId);
+        const oppSocket = io.sockets.sockets.get(opponent.socketId);
+        if (oppSocket) oppSocket.join(roomId);
+
+        io.to(roomId).emit('match_found', gameState);
+    } else {
+        waitingQueues[queueKey] = { userId, socketId: socket.id };
+        userSessions[userId] = { socketId: socket.id, roomId: null };
+        socket.emit('waiting_for_opponent');
     }
+  });
+
+  socket.on('game_action', ({ action, roomId }) => {
+      const game = activeGames[roomId];
+      if (!game) return;
+      
+      // Identify user from socket
+      const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
+      if (!userId) return;
+
+      let updatedGame = null;
+
+      if (game.gameType === 'Dice') {
+          updatedGame = handleDiceAction(game, action, userId);
+      } else {
+          // Generic relay for other games (Client-side logic trust for MVP)
+          io.to(roomId).emit('game_event', { action, userId });
+          return;
+      }
+
+      if (updatedGame) {
+          io.to(roomId).emit('game_update', updatedGame);
+          if (updatedGame.status === 'completed') {
+              io.to(roomId).emit('game_over', { winner: updatedGame.winner });
+              delete activeGames[roomId];
+          }
+      }
   });
 
   socket.on('disconnect', () => {
-    console.log(`Socket disconnected: ${socket.id}`);
-    // Cleanup for waiting queue only
-    for (const [stake, waiter] of Object.entries(waitingQueues)) {
-        if (waiter.socketId === socket.id) {
-            delete waitingQueues[stake];
-        }
-    }
-    // Cleanup private waiting matches
-    for (const [roomId, match] of Object.entries(privateMatches)) {
-        if (match.players.some(p => p.socketId === socket.id)) {
-            // If the creator leaves before opponent joins, destroy the room
-            delete privateMatches[roomId];
-        }
-    }
+      // Cleanup queues
+      for (const key in waitingQueues) {
+          if (waitingQueues[key].socketId === socket.id) delete waitingQueues[key];
+      }
   });
 });
 

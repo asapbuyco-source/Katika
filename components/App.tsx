@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -55,7 +55,15 @@ export default function App() {
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(20); // Local countdown state
 
-  // 1. Initialize Socket Connection
+  // Ref to track user without triggering re-renders in socket listeners
+  const userRef = useRef<User | null>(null);
+
+  // Sync Ref
+  useEffect(() => {
+      userRef.current = user;
+  }, [user]);
+
+  // 1. Initialize Socket Connection (Run Once)
   useEffect(() => {
     // Connect to Render Backend
     const newSocket = io("https://katika-n8q5.onrender.com");
@@ -93,8 +101,16 @@ export default function App() {
         console.log("Dice rolled:", value);
     });
 
-    // Handle Win/Loss based on User ID, not socket ID
+    // Handle Win/Loss based on User ID
     newSocket.on('game_over', ({ winner }) => {
+        const currentUser = userRef.current;
+        if (currentUser) {
+            if (winner === currentUser.id) {
+                setGameResult({ result: 'win', amount: 0 }); // Amount comes from game state usually
+            } else {
+                setGameResult({ result: 'loss', amount: 0 });
+            }
+        }
         setSocketGame(null);
     });
 
@@ -103,26 +119,7 @@ export default function App() {
     return () => {
         newSocket.close();
     };
-  }, []);
-
-  // Handle Game Over Logic with access to 'user' state
-  useEffect(() => {
-      // Listen for explicit game over event with user context
-      if (!socket) return;
-      
-      const handleGameOver = ({ winner }: { winner: string }) => {
-          if (user && winner === user.id) {
-              setGameResult({ result: 'win', amount: 0 }); 
-          } else {
-              setGameResult({ result: 'loss', amount: 0 });
-          }
-          setSocketGame(null);
-      };
-
-      socket.on('game_over', handleGameOver);
-      return () => { socket.off('game_over', handleGameOver); };
-  }, [socket, user]);
-
+  }, []); // Empty dependency array ensures socket persists across renders
 
   // 2. Timer Logic
   useEffect(() => {
@@ -547,6 +544,8 @@ export default function App() {
                                     table={activeTable} 
                                     user={user} 
                                     onGameEnd={handleGameEnd} 
+                                    socket={socket} 
+                                    socketGame={socketGame}
                                 />
                             )}
                             {activeTable.gameType === 'Cards' && (

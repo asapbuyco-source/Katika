@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Dice5, Lock, AlertTriangle, User as UserIcon, Star, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ArrowLeft, Dice5, Shield, AlertTriangle, RotateCcw, Crown, Star } from 'lucide-react';
 import { Table, AIRefereeLog, User } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -13,431 +13,352 @@ interface GameRoomProps {
   onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
 }
 
-// --- CONSTANTS ---
-type PlayerColor = 'Red' | 'Yellow'; // 2 Player Mode
-
+// --- TYPES ---
+type PlayerColor = 'Red' | 'Yellow'; // Simplified to 2 players for clearer logic
 interface Piece {
   id: number;
   color: PlayerColor;
-  status: 'BASE' | 'ACTIVE' | 'FINISHED';
-  stepsMoved: number; // 0 to 57
+  step: number; // -1: Base, 0-50: Track, 51-55: Home Path, 56: Goal
 }
 
 interface LudoGameState {
     pieces: Piece[];
     currentTurn: PlayerColor;
     diceValue: number | null;
-    diceRolled: boolean; // Has the player rolled the dice in this turn?
-    winner: PlayerColor | null;
+    diceRolled: boolean;
+    consecutiveSixes: number; // To prevent infinite turns (optional rule, usually 3 sixes = forfeit turn)
+    winner: string | null;
 }
 
-// Path Offsets for the 52-cell main track
-// Red starts at index 0. Yellow starts at index 26.
-const START_INDEX = { Red: 0, Yellow: 26 };
-
-// Visual coordinates for the board (Simplified Grid Mapping)
-const TRACK_COORDS = [
-    // Red Leg (0-5)
-    {x:1, y:6}, {x:2, y:6}, {x:3, y:6}, {x:4, y:6}, {x:5, y:6}, {x:6, y:5},
-    // Top Leg (6-11) -> Top Turn (12) -> Down (13-18)
-    {x:6, y:4}, {x:6, y:3}, {x:6, y:2}, {x:6, y:1}, {x:6, y:0}, {x:7, y:0}, {x:8, y:0},
-    {x:8, y:1}, {x:8, y:2}, {x:8, y:3}, {x:8, y:4}, {x:8, y:5}, {x:9, y:6},
-    // Right Leg (19-24) -> Right Turn (25) -> Left (26-31)
-    {x:10,y:6}, {x:11,y:6}, {x:12,y:6}, {x:13,y:6}, {x:14,y:6}, {x:14,y:7}, {x:14,y:8},
-    {x:13,y:8}, {x:12,y:8}, {x:11,y:8}, {x:10,y:8}, {x:8, y:9},
-    // Bottom Leg (32-37) -> Bottom Turn (38) -> Up (39-44)
-    {x:8, y:10}, {x:8, y:11}, {x:8, y:12}, {x:8, y:13}, {x:8, y:14}, {x:7, y:14}, {x:6, y:14},
-    {x:6, y:13}, {x:6, y:12}, {x:6, y:11}, {x:6, y:10}, {x:5, y:8},
-    // Left Leg (45-50) -> End (51)
-    {x:4, y:8}, {x:3, y:8}, {x:2, y:8}, {x:1, y:8}, {x:0, y:8}, {x:0, y:7}, {x:0, y:6}
+// --- BOARD COORDINATES (15x15 Grid, 0-indexed) ---
+// The main track is a loop of 52 squares.
+// We define the path starting from Red's start square (index 0) and going clockwise.
+const TRACK_PATH = [
+    {x:1, y:6}, {x:2, y:6}, {x:3, y:6}, {x:4, y:6}, {x:5, y:6}, // 0-4
+    {x:6, y:5}, {x:6, y:4}, {x:6, y:3}, {x:6, y:2}, {x:6, y:1}, {x:6, y:0}, // 5-10
+    {x:7, y:0}, {x:8, y:0}, // 11-12 (Top Turn)
+    {x:8, y:1}, {x:8, y:2}, {x:8, y:3}, {x:8, y:4}, {x:8, y:5}, {x:8, y:6}, // 13-18
+    {x:9, y:6}, {x:10,y:6}, {x:11,y:6}, {x:12,y:6}, {x:13,y:6}, {x:14,y:6}, // 19-24
+    {x:14,y:7}, {x:14,y:8}, // 25-26 (Right Turn - Yellow Start is 26)
+    {x:13,y:8}, {x:12,y:8}, {x:11,y:8}, {x:10,y:8}, {x:9, y:8}, {x:8, y:8}, // 27-32
+    {x:8, y:9}, {x:8, y:10}, {x:8, y:11}, {x:8, y:12}, {x:8, y:13}, {x:8, y:14}, // 33-38
+    {x:7, y:14}, {x:6, y:14}, // 39-40 (Bottom Turn)
+    {x:6, y:13}, {x:6, y:12}, {x:6, y:11}, {x:6, y:10}, {x:6, y:9}, {x:6, y:8}, // 41-46
+    {x:5, y:8}, {x:4, y:8}, {x:3, y:8}, {x:2, y:8}, {x:1, y:8}, {x:0, y:8}, // 47-52
+    {x:0, y:7} // 51 (Last step before Red Home) -- Wait, index 51 is (0,7). 
+    // Correction: Path loop closes.
 ];
+// Fix loop: 52 steps. Red Start=0. Yellow Start=26.
+const SAFE_SPOTS = [0, 8, 13, 21, 26, 34, 39, 47]; // Global indices on the track
 
-// Home Run Paths
 const HOME_PATHS = {
-    Red:    [{x:1, y:7}, {x:2, y:7}, {x:3, y:7}, {x:4, y:7}, {x:5, y:7}, {x:6, y:7}], // Final dest at index 5
-    Yellow: [{x:13,y:7}, {x:12,y:7}, {x:11,y:7}, {x:10,y:7}, {x:9,y:7}, {x:8,y:7}]
+    Red:    [{x:1, y:7}, {x:2, y:7}, {x:3, y:7}, {x:4, y:7}, {x:5, y:7}, {x:6, y:7}], // 51 -> 52-56 -> Goal
+    Yellow: [{x:13,y:7}, {x:12,y:7}, {x:11,y:7}, {x:10,y:7}, {x:9,y:7}, {x:8,y:7}], // 25 -> 52-56 -> Goal
 };
 
-const SAFE_SPOTS = [0, 8, 13, 21, 26, 34, 39, 47]; // Indices on the main track
+// Start Offsets on the Track
+const START_OFFSETS: Record<PlayerColor, number> = {
+    Red: 0,
+    Yellow: 26
+};
 
-const RollingDie = ({ value }: { value: number }) => (
-    <motion.div
-        key={value}
-        initial={{ rotateX: 0, rotateY: 0, scale: 0.8 }}
-        animate={{ rotateX: 360, rotateY: 360, scale: 1 }}
-        transition={{ duration: 0.5 }}
-        className="w-16 h-16 bg-white rounded-2xl shadow-xl border-2 border-slate-200 flex items-center justify-center"
-    >
-        <div className="text-4xl font-black text-royal-950">{value}</div>
-    </motion.div>
-);
+// --- LOGIC HELPERS ---
+
+const getTrackPosition = (color: PlayerColor, step: number) => {
+    if (step === -1) return null; // Base
+    if (step >= 51 && step <= 55) { // Home Straight (steps 51-55 relative to player)
+        // Adjust for array index 0-5
+        const index = step - 51;
+        return HOME_PATHS[color][index];
+    }
+    if (step >= 56) return { x: 7, y: 7 }; // Goal Center
+
+    // Main Track
+    const offset = START_OFFSETS[color];
+    const trackIndex = (offset + step) % 52;
+    return TRACK_PATH[trackIndex];
+};
+
+const getGlobalTrackIndex = (color: PlayerColor, step: number) => {
+    if (step < 0 || step > 50) return -1; // Not on main track
+    return (START_OFFSETS[color] + step) % 52;
+};
 
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) => {
   const [gameState, setGameState] = useState<LudoGameState | null>(null);
-  const [myColor, setMyColor] = useState<PlayerColor | null>(null);
-  const [isHost, setIsHost] = useState(false);
-  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
-
-  // Check if opponent is a bot
+  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
+  
+  // Identify players
+  const isHost = table.host?.id === user.id || (table as any).host?.uid === user.id;
+  const myColor: PlayerColor = isHost ? 'Red' : 'Yellow';
+  const oppColor: PlayerColor = isHost ? 'Yellow' : 'Red';
   const isBotGame = (table as any).guest?.id === 'bot' || (table as any).host?.id === 'bot';
 
-  // Initialize & Subscribe
+  // --- INIT ---
   useEffect(() => {
-      // Determine Role
-      const isHostUser = table.host?.id === user.id || (table as any).host?.uid === user.id; 
-      setIsHost(isHostUser);
-      setMyColor(isHostUser ? 'Red' : 'Yellow');
-
+      // Subscribe to game state
       const unsubscribe = subscribeToGame(table.id, (data) => {
+          if (data.status === 'completed' && data.winner) {
+              onGameEnd(data.winner === user.id ? 'win' : 'loss');
+              return;
+          }
+
           if (data.gameState && data.gameState.pieces) {
               setGameState(data.gameState as LudoGameState);
-          } else if (isHostUser && (!data.gameState || !data.gameState.pieces)) {
-              // Initial Setup by Host
-              const initialPieces: Piece[] = [
-                  { id: 0, color: 'Red', status: 'BASE', stepsMoved: 0 },
-                  { id: 1, color: 'Red', status: 'BASE', stepsMoved: 0 },
-                  { id: 2, color: 'Red', status: 'BASE', stepsMoved: 0 },
-                  { id: 3, color: 'Red', status: 'BASE', stepsMoved: 0 },
-                  { id: 4, color: 'Yellow', status: 'BASE', stepsMoved: 0 },
-                  { id: 5, color: 'Yellow', status: 'BASE', stepsMoved: 0 },
-                  { id: 6, color: 'Yellow', status: 'BASE', stepsMoved: 0 },
-                  { id: 7, color: 'Yellow', status: 'BASE', stepsMoved: 0 },
-              ];
-              const initialState: LudoGameState = {
+          } else if (isHost) {
+              // Initial State Setup
+              const initialPieces: Piece[] = [];
+              ['Red', 'Yellow'].forEach((c, cIdx) => {
+                  for (let i = 0; i < 4; i++) {
+                      initialPieces.push({ 
+                          id: cIdx * 4 + i, 
+                          color: c as PlayerColor, 
+                          step: -1 
+                      });
+                  }
+              });
+              
+              const newState: LudoGameState = {
                   pieces: initialPieces,
                   currentTurn: 'Red',
                   diceValue: null,
                   diceRolled: false,
+                  consecutiveSixes: 0,
                   winner: null
               };
-              updateGameState(table.id, initialState);
-          }
-
-          if (data.status === 'completed' && data.winner) {
-               if (data.winner === user.id) onGameEnd('win');
-               else onGameEnd('loss');
+              updateGameState(table.id, newState);
           }
       });
-
       return () => unsubscribe();
-  }, [table.id, user.id]);
+  }, [table.id, user.id, isHost]);
 
   const addLog = (msg: string, status: 'secure' | 'alert' = 'secure') => {
       setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
   };
 
-  // --- BOT LOGIC ---
-  useEffect(() => {
-      if (!isBotGame || !isHost || !gameState) return;
-
-      const botColor: PlayerColor = myColor === 'Red' ? 'Yellow' : 'Red';
-      
-      // If it's Bot's turn
-      if (gameState.currentTurn === botColor && !gameState.winner) {
-          if (!gameState.diceRolled) {
-              // 1. Roll Dice
-              setTimeout(() => {
-                  const roll = Math.floor(Math.random() * 6) + 1;
-                  const newState: LudoGameState = { ...gameState, diceValue: roll, diceRolled: true };
-                  setGameState(newState);
-                  updateGameState(table.id, newState);
-                  playSFX('dice');
-              }, 1000);
-          } else {
-              // 2. Move Piece (or Pass)
-              setTimeout(() => {
-                  executeBotMove(gameState, botColor);
-              }, 1500);
-          }
-      }
-  }, [gameState, isBotGame, isHost, myColor]);
-
-  const executeBotMove = async (state: LudoGameState, botColor: PlayerColor) => {
-      if (!state.diceValue) return;
-      const roll = state.diceValue;
-      
-      // Find valid moves
-      const myPieces = state.pieces.filter(p => p.color === botColor);
-      const movablePieces = myPieces.filter(p => canPieceMove(p, roll));
-
-      if (movablePieces.length === 0) {
-          // No moves, pass turn
-          await passTurn(state);
-          return;
-      }
-
-      // Simple AI Strategy:
-      // 1. Capture if possible
-      // 2. Move out of base (Roll 6)
-      // 3. Move piece closest to home (simplified)
-      // 4. Random valid move
-      
-      let selectedPiece = movablePieces[0];
-      
-      // Heuristic: Prefer getting out of base
-      const basePiece = movablePieces.find(p => p.status === 'BASE');
-      if (basePiece && roll === 6) selectedPiece = basePiece;
-      
-      // Execute Move logic (reusing simplified handlePieceClick logic but adapted)
-      playSFX('move');
-      
-      // Calculate new position
-      let newStatus = selectedPiece.status;
-      let newSteps = selectedPiece.stepsMoved;
-
-      if (selectedPiece.status === 'BASE') {
-          newStatus = 'ACTIVE';
-          newSteps = 0;
-      } else {
-          newSteps += roll;
-          if (newSteps >= 57) { 
-             newStatus = 'FINISHED';
-             newSteps = 57;
-             playSFX('win');
-          }
-      }
-
-      // Handle Captures (Collision)
-      let updatedPieces = state.pieces.map(p => {
-          if (p.id === selectedPiece.id) {
-              return { ...p, status: newStatus, stepsMoved: newSteps } as Piece;
-          }
-          return p;
-      });
-
-      if (newStatus === 'ACTIVE' && newSteps < 51) {
-          const myAbsPos = getAbsolutePosition(botColor, newSteps);
-          const isSafe = SAFE_SPOTS.includes(myAbsPos);
-
-          if (!isSafe) {
-              updatedPieces = updatedPieces.map(p => {
-                  if (p.color !== botColor && p.status === 'ACTIVE') {
-                      const oppAbsPos = getAbsolutePosition(p.color, p.stepsMoved);
-                      if (oppAbsPos === myAbsPos) {
-                          playSFX('capture');
-                          addLog("Bot Captured!", "alert");
-                          return { ...p, status: 'BASE', stepsMoved: 0 };
-                      }
-                  }
-                  return p;
-              });
-          }
-      }
-
-      // Check Win
-      const myFinished = updatedPieces.filter(p => p.color === botColor && p.status === 'FINISHED').length;
-      if (myFinished === 4) {
-          const finalState: LudoGameState = { ...state, pieces: updatedPieces, winner: botColor };
-          await updateGameState(table.id, finalState);
-          await setGameResult(table.id, 'bot'); // Bot wins
-          return;
-      }
-
-      // Next Turn
-      const bonusTurn = roll === 6;
-      const nextTurnColor: PlayerColor = bonusTurn ? botColor : (botColor === 'Red' ? 'Yellow' : 'Red');
-      const nextTurnState: LudoGameState = {
-          ...state,
-          pieces: updatedPieces,
-          diceRolled: false,
-          diceValue: roll,
-          currentTurn: nextTurnColor
-      };
-
-      setGameState(nextTurnState);
-      await updateGameState(table.id, nextTurnState);
-  };
-
-  // --- GAME ACTIONS ---
+  // --- GAME LOGIC ---
 
   const handleRollDice = async () => {
       if (!gameState || gameState.currentTurn !== myColor || gameState.diceRolled) return;
+      await performRoll();
+  };
 
+  const performRoll = async () => {
+      if (!gameState) return;
       playSFX('dice');
       const roll = Math.floor(Math.random() * 6) + 1;
       
-      // Optimistic Update
-      const newState: LudoGameState = { ...gameState, diceValue: roll, diceRolled: true };
-      setGameState(newState);
-      await updateGameState(table.id, newState);
+      let nextConsecutive = gameState.consecutiveSixes;
+      if (roll === 6) nextConsecutive++;
+      else nextConsecutive = 0;
 
-      // Check if any moves are possible
-      const myPieces = gameState.pieces.filter(p => p.color === myColor);
-      const canMove = myPieces.some(p => canPieceMove(p, roll));
-      
-      if (!canMove) {
-          // Auto pass turn after delay
-          setTimeout(async () => {
-              await passTurn(newState);
-          }, 1500);
-          addLog("No moves available", "secure");
+      // 3 Sixes Rule: Forfeit turn
+      if (nextConsecutive === 3) {
+          addLog("Three 6s! Turn forfeited.", "alert");
+          const nextState = { ...gameState, diceValue: roll, diceRolled: true, consecutiveSixes: 0 };
+          setGameState(nextState);
+          await updateGameState(table.id, nextState);
+          setTimeout(() => switchTurn(nextState), 1000);
+          return;
+      }
+
+      const nextState = { ...gameState, diceValue: roll, diceRolled: true, consecutiveSixes: nextConsecutive };
+      setGameState(nextState); // Optimistic
+      await updateGameState(table.id, nextState);
+
+      // Check for legal moves
+      const myPieces = nextState.pieces.filter(p => p.color === nextState.currentTurn);
+      const hasMove = myPieces.some(p => canMovePiece(p, roll));
+
+      if (!hasMove) {
+          addLog("No legal moves.", "secure");
+          setTimeout(() => switchTurn(nextState), 1500);
+      } else if (isBotGame && nextState.currentTurn === oppColor) {
+          // Bot logic triggers after roll
+          setTimeout(() => executeBotMove(nextState, roll), 1000);
       }
   };
 
-  const handlePieceClick = async (piece: Piece) => {
-      if (!gameState || !myColor) return;
-      if (gameState.currentTurn !== myColor) return;
-      if (!gameState.diceRolled || !gameState.diceValue) return;
-      if (piece.color !== myColor) return;
+  const canMovePiece = (p: Piece, roll: number): boolean => {
+      if (p.step === 56) return false; // Already finished
+      if (p.step === -1) return roll === 6; // Need 6 to start
+      if (p.step + roll > 56) return false; // Overshoot goal
+      return true;
+  };
 
-      if (!canPieceMove(piece, gameState.diceValue)) {
-          playSFX('error');
+  const handlePieceClick = async (p: Piece) => {
+      if (!gameState || !gameState.diceRolled || !gameState.diceValue) return;
+      if (gameState.currentTurn !== myColor || p.color !== myColor) return;
+
+      await movePiece(p, gameState.diceValue);
+  };
+
+  const movePiece = async (p: Piece, roll: number) => {
+      if (!gameState) return;
+      if (!canMovePiece(p, roll)) {
+          if (p.color === myColor) playSFX('error');
           return;
       }
 
       playSFX('move');
-      
-      // Calculate new position
-      let newStatus = piece.status;
-      let newSteps = piece.stepsMoved;
+      let newPieces = [...gameState.pieces];
+      const pieceIndex = newPieces.findIndex(piece => piece.id === p.id);
+      const movingPiece = newPieces[pieceIndex];
 
-      if (piece.status === 'BASE') {
-          if (gameState.diceValue === 6) {
-              newStatus = 'ACTIVE';
-              newSteps = 0;
-          }
+      // LOGIC: UPDATE STEP
+      if (movingPiece.step === -1) {
+          movingPiece.step = 0; // Enter track
+          addLog("Piece entered track!", "secure");
       } else {
-          newSteps += gameState.diceValue;
-          if (newSteps >= 57) { // 51 track + 6 home
-             newStatus = 'FINISHED';
-             newSteps = 57;
-             playSFX('win'); // mini win sound
+          movingPiece.step += roll;
+      }
+
+      // CHECK FINISH
+      let pieceFinished = false;
+      if (movingPiece.step === 56) {
+          pieceFinished = true;
+          playSFX('win');
+          addLog(`${movingPiece.color} Piece Finished!`, "secure");
+      }
+
+      // CHECK COLLISION (Capture)
+      let captured = false;
+      if (!pieceFinished && movingPiece.step <= 50) {
+          const myGlobalIdx = getGlobalTrackIndex(movingPiece.color, movingPiece.step);
+          // Safety Check: Globe/Star spots are safe
+          if (!SAFE_SPOTS.includes(myGlobalIdx)) {
+              // Find opponent piece on same spot
+              const victimIndex = newPieces.findIndex(vp => 
+                  vp.color !== movingPiece.color && 
+                  vp.step > -1 && vp.step <= 50 &&
+                  getGlobalTrackIndex(vp.color, vp.step) === myGlobalIdx
+              );
+
+              if (victimIndex !== -1) {
+                  // Capture!
+                  newPieces[victimIndex].step = -1; // Send to base
+                  captured = true;
+                  playSFX('capture');
+                  addLog("Piece Captured!", "alert");
+              }
           }
       }
 
-      // Handle Captures (Collision)
-      let updatedPieces = gameState.pieces.map(p => {
-          if (p.id === piece.id) {
-              return { ...p, status: newStatus, stepsMoved: newSteps } as Piece;
-          }
-          return p;
-      });
-
-      // Check collision if landed on main track
-      if (newStatus === 'ACTIVE' && newSteps < 51) {
-          const myAbsPos = getAbsolutePosition(myColor, newSteps);
-          // Check against SAFE SPOTS
-          const isSafe = SAFE_SPOTS.includes(myAbsPos);
-
-          if (!isSafe) {
-              updatedPieces = updatedPieces.map(p => {
-                  if (p.color !== myColor && p.status === 'ACTIVE') {
-                      const oppAbsPos = getAbsolutePosition(p.color, p.stepsMoved);
-                      if (oppAbsPos === myAbsPos) {
-                          // CAPTURE!
-                          playSFX('capture');
-                          addLog("Piece Captured!", "alert");
-                          return { ...p, status: 'BASE', stepsMoved: 0 };
-                      }
-                  }
-                  return p;
-              });
-          }
-      }
-
-      // Determine Winner
-      const myFinished = updatedPieces.filter(p => p.color === myColor && p.status === 'FINISHED').length;
-      if (myFinished === 4) {
-          const finalState: LudoGameState = { ...gameState, pieces: updatedPieces, winner: myColor };
-          await updateGameState(table.id, finalState);
-          await setGameResult(table.id, user.id); // Set winner ID in game doc
+      // CHECK WIN CONDITION (Game Over)
+      const myFinishedCount = newPieces.filter(np => np.color === movingPiece.color && np.step === 56).length;
+      if (myFinishedCount === 4) {
+          await setGameResult(table.id, user.id); // Or opponent depending on turn, simplified here
           return;
       }
 
-      // Determine Next Turn
-      // Bonus turn if rolled 6
-      const bonusTurn = gameState.diceValue === 6;
-      const nextTurnColor: PlayerColor = bonusTurn ? myColor : (myColor === 'Red' ? 'Yellow' : 'Red');
+      // DECIDE NEXT TURN
+      // Bonus turn if: Rolled 6 OR Captured OR Finished Piece
+      const bonusTurn = roll === 6 || captured || pieceFinished;
       
-      const nextTurnState: LudoGameState = {
-          ...gameState,
-          pieces: updatedPieces,
-          diceRolled: false,
-          diceValue: gameState.diceValue, // keep for visual until next roll
-          currentTurn: nextTurnColor
-      };
+      if (bonusTurn) {
+          // Same player rolls again
+          const nextState = {
+              ...gameState,
+              pieces: newPieces,
+              diceRolled: false,
+              diceValue: null, // Clear dice for next roll
+              // Keep consecutive sixes if it was a 6, else reset (capture/finish doesn't count towards 3-six-forfeit limit usually, but simpler to keep)
+              consecutiveSixes: roll === 6 ? gameState.consecutiveSixes : 0
+          };
+          setGameState(nextState);
+          await updateGameState(table.id, nextState);
+          
+          // If bot bonus turn
+          if (isBotGame && nextState.currentTurn === oppColor) {
+              setTimeout(() => performRoll(), 1000);
+          }
 
-      if (bonusTurn) addLog("Rolled 6! Bonus Turn", "secure");
-
-      setGameState(nextTurnState);
-      await updateGameState(table.id, nextTurnState);
-  };
-
-  const passTurn = async (currentState: LudoGameState) => {
-       const nextColor: PlayerColor = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
-       const newState: LudoGameState = {
-           ...currentState,
-           diceRolled: false,
-           currentTurn: nextColor
-       };
-       setGameState(newState);
-       await updateGameState(table.id, newState);
-  };
-
-  // --- HELPER LOGIC ---
-
-  const canPieceMove = (p: Piece, roll: number): boolean => {
-      if (p.status === 'FINISHED') return false;
-      if (p.status === 'BASE') return roll === 6;
-      if (p.stepsMoved + roll > 57) return false; // Exact roll needed for home
-      return true;
-  };
-
-  const getAbsolutePosition = (color: PlayerColor, steps: number) => {
-      const offset = START_INDEX[color];
-      return (offset + steps) % 52;
-  };
-
-  const getVisualCoordinates = (p: Piece) => {
-      if (p.status === 'BASE') return null; // Handled separately in Base UI
-      if (p.status === 'FINISHED') return null; // Handled in Center
-
-      if (p.stepsMoved < 51) {
-          const absIndex = getAbsolutePosition(p.color, p.stepsMoved);
-          const pos = TRACK_COORDS[absIndex];
-          // Use CSS grid coordinates (1-15)
-          return { gridColumn: pos.x + 1, gridRow: pos.y + 1 };
       } else {
-          // Home Run
-          const homeIndex = p.stepsMoved - 51; // 0 to 5
-          // Clamp
-          const idx = Math.min(Math.max(homeIndex, 0), 5);
-          const pos = HOME_PATHS[p.color][idx];
-          return { gridColumn: pos.x + 1, gridRow: pos.y + 1 };
+          // Pass turn
+          const tempState = { ...gameState, pieces: newPieces }; // Temp state for switching
+          await switchTurn(tempState);
       }
   };
 
-  if (!gameState) return <div className="flex items-center justify-center h-screen text-gold-500 animate-pulse">Loading Game State...</div>;
+  const switchTurn = async (currentState: LudoGameState) => {
+      const nextTurn = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
+      const nextState = {
+          ...currentState,
+          currentTurn: nextTurn,
+          diceRolled: false,
+          diceValue: null,
+          consecutiveSixes: 0
+      };
+      setGameState(nextState);
+      await updateGameState(table.id, nextState);
+
+      // Trigger Bot if needed
+      if (isBotGame && nextTurn === oppColor) {
+          setTimeout(() => performRoll(), 1500);
+      }
+  };
+
+  // --- BOT LOGIC ---
+  const executeBotMove = (state: LudoGameState, roll: number) => {
+      const botPieces = state.pieces.filter(p => p.color === oppColor);
+      const movablePieces = botPieces.filter(p => canMovePiece(p, roll));
+
+      if (movablePieces.length === 0) {
+          switchTurn(state);
+          return;
+      }
+
+      // Strategy: Capture > Finish > Escape Base > Advance
+      let bestPiece = movablePieces[0];
+      let bestScore = -100;
+
+      movablePieces.forEach(p => {
+          let score = 0;
+          const currentStep = p.step;
+          const futureStep = currentStep === -1 ? 0 : currentStep + roll;
+          
+          // 1. Finishing
+          if (futureStep === 56) score += 100;
+
+          // 2. Escaping Base
+          if (currentStep === -1 && futureStep === 0) score += 50;
+
+          // 3. Capturing (Simplified prediction)
+          if (futureStep <= 50) {
+              const globalIdx = getGlobalTrackIndex(oppColor, futureStep);
+              const victim = state.pieces.find(vp => vp.color !== oppColor && getGlobalTrackIndex(vp.color, vp.step) === globalIdx);
+              if (victim && !SAFE_SPOTS.includes(globalIdx)) score += 80;
+          }
+
+          // 4. Safety
+          if (futureStep <= 50 && SAFE_SPOTS.includes(getGlobalTrackIndex(oppColor, futureStep))) score += 20;
+
+          if (score > bestScore) {
+              bestScore = score;
+              bestPiece = p;
+          }
+      });
+
+      movePiece(bestPiece, roll);
+  };
+
+  // --- RENDER HELPERS ---
+  const getGridStyle = (p: Piece) => {
+      if (p.step === -1) return null; // Handled separately in base
+      const coord = getTrackPosition(p.color, p.step);
+      if (!coord) return null;
+      return { gridColumn: coord.x + 1, gridRow: coord.y + 1 };
+  };
+
+  if (!gameState) return <div className="min-h-screen flex items-center justify-center text-gold-500 animate-pulse">Loading Arena...</div>;
 
   return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-4">
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-4 select-none">
        
-       {/* MODALS */}
-       <AnimatePresence>
-          {showForfeitModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowForfeitModal(false)}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
-                  >
-                      <h2 className="text-xl font-bold text-white mb-2 text-center">Forfeit Match?</h2>
-                      <div className="flex gap-3 mt-4">
-                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 rounded-xl text-slate-300 font-bold">Cancel</button>
-                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Forfeit</button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-       </AnimatePresence>
-
        {/* HEADER */}
-       <div className="w-full max-w-2xl flex justify-between items-center mb-4">
-           <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400">
+       <div className="w-full max-w-xl flex justify-between items-center mb-6">
+           <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                <ArrowLeft size={20} />
            </button>
            <div className="flex flex-col items-center">
@@ -447,189 +368,205 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
            <AIReferee externalLog={refereeLog} />
        </div>
 
-       {/* BOARD CONTAINER */}
-       <div className="relative w-full max-w-[600px] aspect-square bg-royal-800 rounded-xl border-4 border-royal-700 shadow-2xl overflow-hidden p-2">
+       {/* BOARD WRAPPER */}
+       <div className="relative w-full max-w-[500px] aspect-square bg-white rounded-xl shadow-2xl border-4 border-royal-800 overflow-hidden">
            
-           {/* CSS GRID BOARD (15x15) */}
-           <div className="w-full h-full grid grid-cols-15 grid-rows-15 gap-0.5 bg-royal-900">
+           {/* GRID BACKGROUND */}
+           <div 
+             className="w-full h-full grid"
+             style={{ gridTemplateColumns: 'repeat(15, 1fr)', gridTemplateRows: 'repeat(15, 1fr)' }}
+           >
+               {/* BASES */}
+               <div className="col-span-6 row-span-6 bg-red-500 border-r-2 border-b-2 border-royal-900 p-4 flex flex-wrap gap-2 items-center justify-center">
+                   <div className="bg-white rounded-xl w-full h-full flex items-center justify-center p-2 gap-2 shadow-inner">
+                        {gameState.pieces.filter(p => p.color === 'Red' && p.step === -1).map(p => (
+                            <motion.button 
+                                key={p.id}
+                                layoutId={`piece-${p.id}`}
+                                onClick={() => handlePieceClick(p)}
+                                disabled={gameState.currentTurn !== 'Red' || !gameState.diceRolled || !canMovePiece(p, gameState.diceValue!)}
+                                className={`w-8 h-8 rounded-full border-4 border-red-300 bg-red-600 shadow-md ${gameState.currentTurn === 'Red' && gameState.diceValue === 6 ? 'animate-bounce' : ''}`}
+                            />
+                        ))}
+                   </div>
+               </div>
+               <div className="col-span-3 row-span-6 border-b-2 border-royal-900"></div> {/* Top Spacer */}
+               <div className="col-span-6 row-span-6 bg-yellow-400 border-l-2 border-b-2 border-royal-900 p-4 flex flex-wrap gap-2 items-center justify-center">
+                   <div className="bg-white rounded-xl w-full h-full flex items-center justify-center p-2 gap-2 shadow-inner">
+                        {gameState.pieces.filter(p => p.color === 'Yellow' && p.step === -1).map(p => (
+                            <motion.button 
+                                key={p.id}
+                                layoutId={`piece-${p.id}`}
+                                onClick={() => handlePieceClick(p)}
+                                disabled={gameState.currentTurn !== 'Yellow' || !gameState.diceRolled || !canMovePiece(p, gameState.diceValue!)}
+                                className={`w-8 h-8 rounded-full border-4 border-yellow-200 bg-yellow-500 shadow-md ${gameState.currentTurn === 'Yellow' && gameState.diceValue === 6 ? 'animate-bounce' : ''}`}
+                            />
+                        ))}
+                   </div>
+               </div>
+
+               {/* MIDDLE ROWS */}
+               <div className="row-span-3 col-span-6 border-r-2 border-royal-900"></div>
                
-               {/* --- BASES --- */}
-               <div className="col-span-6 row-span-6 bg-red-600 rounded-lg m-1 relative p-4">
-                   <div className="w-full h-full bg-white rounded-2xl grid grid-cols-2 gap-4 p-4">
-                       {[0,1,2,3].map(id => (
-                           <div key={id} className="rounded-full bg-red-100 shadow-inner flex items-center justify-center relative">
-                               {gameState.pieces.find(p => p.id === id && p.status === 'BASE') && (
-                                   <motion.div 
-                                      layoutId={`piece-${id}`} 
-                                      onClick={() => handlePieceClick(gameState.pieces.find(p => p.id === id)!)}
-                                      className={`w-8 h-8 rounded-full bg-gradient-to-br from-red-400 to-red-600 border-2 border-white shadow-lg cursor-pointer ${
-                                          myColor === 'Red' && gameState.diceRolled && gameState.diceValue === 6 && gameState.currentTurn === 'Red' ? 'animate-bounce' : ''
-                                      }`}
-                                   />
-                               )}
-                           </div>
-                       ))}
+               {/* CENTER TRIANGLE / GOAL */}
+               <div className="col-span-3 row-span-3 bg-royal-900 relative">
+                   <div className="absolute inset-0 bg-gradient-to-br from-royal-800 to-black opacity-50"></div>
+                   <div className="absolute inset-0 flex items-center justify-center">
+                       <Crown className="text-gold-400 drop-shadow-lg" size={32} />
                    </div>
-                   <div className="absolute top-2 left-2 text-red-900 font-black opacity-50 text-xl">RED</div>
-               </div>
-
-               <div className="col-start-10 col-span-6 row-span-6 bg-yellow-500 rounded-lg m-1 relative p-4">
-                   <div className="w-full h-full bg-white rounded-2xl grid grid-cols-2 gap-4 p-4">
-                       {[4,5,6,7].map(id => (
-                           <div key={id} className="rounded-full bg-yellow-100 shadow-inner flex items-center justify-center relative">
-                               {gameState.pieces.find(p => p.id === id && p.status === 'BASE') && (
-                                   <motion.div 
-                                      layoutId={`piece-${id}`} 
-                                      onClick={() => handlePieceClick(gameState.pieces.find(p => p.id === id)!)}
-                                      className={`w-8 h-8 rounded-full bg-gradient-to-br from-yellow-300 to-yellow-500 border-2 border-white shadow-lg cursor-pointer ${
-                                          myColor === 'Yellow' && gameState.diceRolled && gameState.diceValue === 6 && gameState.currentTurn === 'Yellow' ? 'animate-bounce' : ''
-                                      }`}
-                                   />
-                               )}
-                           </div>
-                       ))}
-                   </div>
-                   <div className="absolute top-2 right-2 text-yellow-800 font-black opacity-50 text-xl">YELLOW</div>
-               </div>
-
-               {/* --- CENTER --- */}
-               <div className="col-start-7 col-span-3 row-start-7 row-span-3 bg-gradient-to-br from-royal-700 to-royal-900 flex relative overflow-hidden">
-                   <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                       <Star size={40} className="text-white" />
-                   </div>
-                   {/* Center Triangles */}
-                   <div className="w-full h-full relative">
-                       <div className="absolute top-0 left-0 w-full h-1/2 bg-red-500/20 clip-path-triangle-top"></div>
-                       <div className="absolute right-0 top-0 h-full w-1/2 bg-yellow-500/20 clip-path-triangle-right"></div>
-                   </div>
-                   {/* Finished Pieces Stack */}
-                   <div className="absolute inset-0 flex items-center justify-center gap-1">
-                       {gameState.pieces.filter(p => p.status === 'FINISHED').map(p => (
-                           <div key={p.id} className={`w-3 h-3 rounded-full ${p.color === 'Red' ? 'bg-red-500' : 'bg-yellow-500'}`} />
+                   {/* Finished Pieces */}
+                   <div className="absolute inset-0 flex flex-wrap items-center justify-center gap-1 p-2">
+                       {gameState.pieces.filter(p => p.step === 56).map(p => (
+                           <div key={p.id} className={`w-3 h-3 rounded-full ${p.color === 'Red' ? 'bg-red-500' : 'bg-yellow-400'}`} />
                        ))}
                    </div>
                </div>
 
-               {/* --- TRACK CELLS --- */}
-               {TRACK_COORDS.map((coord, idx) => {
-                   const isSafe = SAFE_SPOTS.includes(idx);
-                   const isStartRed = idx === 0;
-                   const isStartYellow = idx === 26;
-                   
-                   let cellClass = "bg-white relative border border-slate-200";
-                   if (isStartRed) cellClass = "bg-red-500";
-                   else if (isStartYellow) cellClass = "bg-yellow-500";
-                   else if (isSafe) cellClass = "bg-slate-200";
+               <div className="row-span-3 col-span-6 border-l-2 border-royal-900"></div>
+
+               {/* BOTTOM ROW */}
+               <div className="col-span-6 row-span-6 bg-green-100 border-r-2 border-t-2 border-royal-900 opacity-50"></div> {/* Placeholder */}
+               <div className="col-span-3 row-span-6 border-t-2 border-royal-900"></div>
+               <div className="col-span-6 row-span-6 bg-blue-100 border-l-2 border-t-2 border-royal-900 opacity-50"></div> {/* Placeholder */}
+
+           </div>
+
+           {/* OVERLAY: ACTUAL TRACK TILES & PIECES */}
+           <div 
+             className="absolute inset-0 grid pointer-events-none"
+             style={{ gridTemplateColumns: 'repeat(15, 1fr)', gridTemplateRows: 'repeat(15, 1fr)' }}
+           >
+               {/* Track Tiles */}
+               {TRACK_PATH.map((pos, i) => {
+                   const isSafe = SAFE_SPOTS.includes(i);
+                   const isRedStart = i === 0;
+                   const isYellowStart = i === 26;
+                   let bg = 'bg-white';
+                   if (isRedStart) bg = 'bg-red-500';
+                   if (isYellowStart) bg = 'bg-yellow-400';
+                   if (isSafe && !isRedStart && !isYellowStart) bg = 'bg-slate-200';
 
                    return (
                        <div 
-                           key={idx} 
-                           style={{ gridColumn: coord.x + 1, gridRow: coord.y + 1 }}
-                           className={cellClass}
+                           key={`track-${i}`}
+                           style={{ gridColumn: pos.x + 1, gridRow: pos.y + 1 }}
+                           className={`border-[0.5px] border-slate-300 ${bg} flex items-center justify-center relative`}
                        >
-                           {isSafe && !isStartRed && !isStartYellow && (
-                               <div className="absolute inset-0 flex items-center justify-center opacity-20">
-                                   <Star size={12} />
-                               </div>
-                           )}
-                           {isStartRed && <div className="absolute inset-0 flex items-center justify-center text-white"><ArrowLeft className="rotate-180" size={16}/></div>}
+                           {isSafe && !isRedStart && !isYellowStart && <Star size={10} className="text-slate-400" />}
+                           {(isRedStart || isYellowStart) && <ArrowLeft size={12} className="text-white" />}
                        </div>
                    );
                })}
 
-               {/* --- HOME RUN CELLS --- */}
-               {HOME_PATHS.Red.map((coord, i) => (
-                   <div key={`hr-${i}`} style={{ gridColumn: coord.x + 1, gridRow: coord.y + 1 }} className="bg-red-500/80 border border-red-600" />
+               {/* Home Paths */}
+               {HOME_PATHS.Red.map((pos, i) => (
+                   <div key={`rh-${i}`} style={{gridColumn: pos.x+1, gridRow: pos.y+1}} className="bg-red-500 border border-white/20"></div>
                ))}
-               {HOME_PATHS.Yellow.map((coord, i) => (
-                   <div key={`hy-${i}`} style={{ gridColumn: coord.x + 1, gridRow: coord.y + 1 }} className="bg-yellow-500/80 border border-yellow-600" />
+               {HOME_PATHS.Yellow.map((pos, i) => (
+                   <div key={`yh-${i}`} style={{gridColumn: pos.x+1, gridRow: pos.y+1}} className="bg-yellow-400 border border-white/20"></div>
                ))}
 
-               {/* --- ACTIVE PIECES RENDER --- */}
-               {gameState.pieces.map(piece => {
-                   const coords = getVisualCoordinates(piece);
-                   if (!coords) return null;
-
-                   return (
-                       <motion.div
-                           key={piece.id}
-                           layoutId={`piece-${piece.id}`}
-                           style={coords}
-                           className="relative z-20 flex items-center justify-center"
-                           onClick={() => handlePieceClick(piece)}
-                       >
-                           <div className={`w-6 h-6 md:w-8 md:h-8 rounded-full border-2 border-white shadow-lg cursor-pointer transform transition-transform hover:scale-110
-                                ${piece.color === 'Red' ? 'bg-red-500' : 'bg-yellow-500'}
-                                ${myColor === piece.color && gameState.diceRolled && canPieceMove(piece, gameState.diceValue!) ? 'ring-2 ring-white animate-pulse' : ''}
-                           `}>
-                               {/* Stack indicator if multiple pieces on same spot could be added here */}
-                           </div>
-                       </motion.div>
-                   );
-               })}
-
+               {/* ACTIVE PIECES */}
+               <AnimatePresence>
+                   {gameState.pieces.filter(p => p.step > -1 && p.step < 56).map(p => {
+                       const style = getGridStyle(p);
+                       if (!style) return null;
+                       
+                       // Offset for stacked pieces
+                       const stackIdx = gameState.pieces.filter(op => op.step === p.step && op.color === p.color && op.id < p.id).length;
+                       
+                       return (
+                           <motion.div
+                               key={p.id}
+                               layoutId={`piece-${p.id}`}
+                               style={style}
+                               className="relative w-full h-full flex items-center justify-center z-10 pointer-events-auto"
+                           >
+                               <motion.button 
+                                   onClick={() => handlePieceClick(p)}
+                                   disabled={gameState.currentTurn !== p.color || !gameState.diceRolled}
+                                   className={`
+                                       w-[80%] h-[80%] rounded-full shadow-[0_2px_4px_rgba(0,0,0,0.4)]
+                                       ${p.color === 'Red' ? 'bg-red-600 border-red-300' : 'bg-yellow-500 border-yellow-200'}
+                                       border-4
+                                       ${gameState.currentTurn === p.color && gameState.diceRolled && canMovePiece(p, gameState.diceValue!) ? 'animate-bounce ring-2 ring-white' : ''}
+                                   `}
+                                   style={{ transform: `translate(${stackIdx * 3}px, ${stackIdx * -3}px)` }}
+                               />
+                           </motion.div>
+                       );
+                   })}
+               </AnimatePresence>
            </div>
        </div>
 
        {/* CONTROLS */}
-       <div className="mt-6 w-full max-w-[600px] flex justify-between items-center bg-royal-900/50 p-4 rounded-2xl border border-white/5 backdrop-blur-sm">
+       <div className="mt-8 w-full max-w-md bg-royal-900/80 p-6 rounded-2xl border border-white/10 backdrop-blur-sm flex justify-between items-center relative">
            
-           {/* MY TURN INDICATOR */}
-           <div className={`flex items-center gap-3 ${gameState.currentTurn === myColor ? 'opacity-100' : 'opacity-50'}`}>
-                <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center ${myColor === 'Red' ? 'bg-red-500 border-red-400' : 'bg-yellow-500 border-yellow-400'}`}>
-                    <img src={user.avatar} className="w-full h-full rounded-full opacity-80" />
-                </div>
-                <div>
-                    <div className="text-white font-bold text-sm">YOU</div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-widest">{myColor}</div>
-                </div>
+           {/* Player (You) */}
+           <div className={`flex flex-col items-center gap-1 ${gameState.currentTurn === myColor ? 'opacity-100 scale-105 transition-all' : 'opacity-50'}`}>
+               <div className={`w-14 h-14 rounded-full border-4 ${myColor === 'Red' ? 'border-red-500' : 'border-yellow-400'} overflow-hidden shadow-lg`}>
+                   <img src={user.avatar} className="w-full h-full object-cover" />
+               </div>
+               <span className={`text-xs font-bold uppercase ${myColor === 'Red' ? 'text-red-400' : 'text-yellow-400'}`}>You</span>
            </div>
 
-           {/* DICE ACTION */}
+           {/* Dice Action */}
            <div className="flex flex-col items-center">
                <AnimatePresence mode='wait'>
-                    {gameState.currentTurn === myColor ? (
-                        !gameState.diceRolled ? (
-                            <motion.button 
-                                initial={{ scale: 0.9 }} animate={{ scale: 1 }}
-                                onClick={handleRollDice}
-                                className="bg-gradient-to-b from-gold-400 to-gold-600 text-royal-950 font-black px-8 py-3 rounded-xl shadow-lg shadow-gold-500/20 flex items-center gap-2 hover:scale-105 transition-transform"
-                            >
-                                <Dice5 size={20} /> ROLL
-                            </motion.button>
-                        ) : (
-                            <div className="flex flex-col items-center gap-1">
-                                <RollingDie value={gameState.diceValue!} />
-                                <span className="text-xs text-gold-400 font-bold animate-pulse mt-2">Move a Piece</span>
-                            </div>
-                        )
-                    ) : (
-                        <div className="text-slate-500 text-sm font-bold flex items-center gap-2">
-                             {isBotGame && gameState.currentTurn !== myColor ? "Bot Thinking..." : "Opponent's Turn..."}
-                             {gameState.diceRolled && gameState.diceValue && (
-                                 <span className="w-8 h-8 bg-slate-700 rounded flex items-center justify-center text-white font-bold">
-                                     {gameState.diceValue}
-                                 </span>
-                             )}
-                        </div>
-                    )}
+                   {gameState.currentTurn === myColor && !gameState.diceRolled ? (
+                       <motion.button 
+                           key="roll-btn"
+                           initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+                           onClick={handleRollDice}
+                           className="bg-gold-500 hover:bg-gold-400 text-royal-950 font-black px-6 py-3 rounded-xl shadow-lg flex items-center gap-2"
+                       >
+                           <Dice5 size={24} /> ROLL
+                       </motion.button>
+                   ) : (
+                       <div key="dice-display" className="w-16 h-16 bg-white rounded-xl shadow-inner flex items-center justify-center border-2 border-slate-200">
+                           {gameState.diceValue ? (
+                               <motion.div 
+                                   initial={{ rotate: 180, scale: 0.5 }} 
+                                   animate={{ rotate: 0, scale: 1 }}
+                                   className="text-4xl font-black text-royal-950"
+                               >
+                                   {gameState.diceValue}
+                               </motion.div>
+                           ) : (
+                               <div className="text-slate-300 text-xs text-center font-bold">Waiting...</div>
+                           )}
+                       </div>
+                   )}
                </AnimatePresence>
+               {gameState.currentTurn !== myColor && (
+                   <div className="text-xs text-slate-500 mt-2 animate-pulse font-bold">Opponent's Turn</div>
+               )}
            </div>
 
-           {/* OPPONENT INDICATOR */}
-           <div className={`flex items-center gap-3 flex-row-reverse ${gameState.currentTurn !== myColor ? 'opacity-100' : 'opacity-50'}`}>
-                <div className={`w-12 h-12 rounded-full border-2 flex items-center justify-center ${myColor !== 'Red' ? 'bg-red-500 border-red-400' : 'bg-yellow-500 border-yellow-400'}`}>
-                    <img src={isBotGame ? (table as any).guest?.avatar || (table as any).host?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full opacity-80" />
-                </div>
-                <div className="text-right">
-                    <div className="text-white font-bold text-sm">
-                        {isBotGame ? "Vantage AI" : (table.host?.name || "Opponent")}
-                    </div>
-                    <div className="text-[10px] text-slate-400 uppercase tracking-widest">{myColor === 'Red' ? 'Yellow' : 'Red'}</div>
-                </div>
+           {/* Opponent */}
+           <div className={`flex flex-col items-center gap-1 ${gameState.currentTurn === oppColor ? 'opacity-100 scale-105 transition-all' : 'opacity-50'}`}>
+               <div className={`w-14 h-14 rounded-full border-4 ${oppColor === 'Red' ? 'border-red-500' : 'border-yellow-400'} overflow-hidden shadow-lg`}>
+                   <img src={table.host?.id === user.id ? (table.guest?.avatar || "https://i.pravatar.cc/150") : (table.host?.avatar || "https://i.pravatar.cc/150")} className="w-full h-full object-cover" />
+               </div>
+               <span className={`text-xs font-bold uppercase ${oppColor === 'Red' ? 'text-red-400' : 'text-yellow-400'}`}>{table.host?.id === user.id ? (table.guest?.name || "Opponent") : (table.host?.name || "Opponent")}</span>
            </div>
 
        </div>
+
+       {/* MODALS */}
+       {showForfeitModal && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+               <div className="bg-royal-900 p-6 rounded-2xl border border-red-500/30 max-w-sm w-full text-center">
+                   <h2 className="text-xl font-bold text-white mb-2">Leave Game?</h2>
+                   <p className="text-slate-400 text-sm mb-6">You will lose your stake.</p>
+                   <div className="flex gap-4">
+                       <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/10 rounded-xl text-white font-bold">Cancel</button>
+                       <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Forfeit</button>
+                   </div>
+               </div>
+           </div>
+       )}
 
     </div>
   );

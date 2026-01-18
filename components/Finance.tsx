@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Transaction } from '../types';
 import { getUserTransactions, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment } from '../services/fapshi';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface FinanceProps {
@@ -18,6 +18,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
   
   // Real Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -48,12 +49,10 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
       
       if (response && response.link) {
           setPaymentLink(response.link);
-          // Auto open in new tab
           window.open(response.link, '_blank');
           
-          // --- SIMULATE PAYMENT CONFIRMATION WEBHOOK ---
-          // In a production app, the backend receives a webhook from Fapshi.
-          // Here we simulate the user completing payment after a delay.
+          // --- SIMULATE PAYMENT CONFIRMATION ---
+          // This is for demonstration to show the user the flow works without real money
           setTimeout(async () => {
               if (!user.id.startsWith('guest-')) {
                   await addUserTransaction(user.id, {
@@ -63,14 +62,18 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                       date: new Date().toISOString()
                   });
               }
-              onTopUp(); // Triggers simple refresh if needed
-              alert(`Payment of ${depositAmount} FCFA Detected! Balance updated.`);
+              onTopUp(); // Refresh balance in parent
+              setShowSuccess(true);
               setPaymentLink(null);
               setAmount('');
-              // Refresh transactions
+              
+              // Refresh local history
               const history = await getUserTransactions(user.id);
               setTransactions(history);
-          }, 8000); 
+              
+              // Hide success message after 3s
+              setTimeout(() => setShowSuccess(false), 3000);
+          }, 3000); 
       } else {
           alert("Failed to initiate payment. Please try again.");
       }
@@ -102,8 +105,23 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   };
 
   return (
-    <div className="p-6 max-w-5xl mx-auto min-h-screen pb-24 md:pb-6">
+    <div className="p-6 max-w-5xl mx-auto min-h-screen pb-24 md:pb-6 relative">
        
+       {/* SUCCESS TOAST */}
+       <AnimatePresence>
+           {showSuccess && (
+               <motion.div 
+                   initial={{ y: -50, opacity: 0 }}
+                   animate={{ y: 20, opacity: 1 }}
+                   exit={{ y: -50, opacity: 0 }}
+                   className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-royal-950 px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
+               >
+                   <CheckCircle size={20} />
+                   Deposit Successful! Balance Updated.
+               </motion.div>
+           )}
+       </AnimatePresence>
+
        <header className="mb-8">
            <h1 className="text-3xl font-display font-bold text-white mb-2">Finance</h1>
            <p className="text-slate-400">Manage your funds securely with Mobile Money.</p>
@@ -248,7 +266,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        </div>
                                        <h3 className="text-xl font-bold text-white mb-2">Payment Initiated</h3>
                                        <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
-                                           A payment page has been opened. Please complete the transaction.
+                                           Confirm the prompt on your phone. <br/>
+                                           <span className="text-xs text-slate-500">(Simulation: Wait 3 seconds)</span>
                                        </p>
                                        <div className="flex flex-col gap-3">
                                             <a 
@@ -257,7 +276,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                 rel="noreferrer"
                                                 className="w-full py-3 bg-gold-500 text-royal-900 font-bold rounded-xl hover:bg-gold-400 flex items-center justify-center gap-2"
                                             >
-                                                <ExternalLink size={18} /> Open Payment Page Again
+                                                <ExternalLink size={18} /> Open Payment Page
                                             </a>
                                             <button 
                                                 onClick={() => setPaymentLink(null)}

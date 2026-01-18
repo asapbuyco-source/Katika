@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot } from 'lucide-react';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
@@ -17,9 +17,9 @@ interface LobbyProps {
 }
 
 const AVAILABLE_GAMES = [
-    { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'bg-cam-green/10', border: 'border-cam-green/20' },
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
-    { id: 'Pool', name: '8 Ball Pool', players: 960, icon: CircleDot, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+    { id: 'TicTacToe', name: 'XO Clash', players: 2100, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20' },
+    { id: 'Cards', name: 'Kmer Card', players: 1850, icon: Layers, color: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20' },
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20' },
     { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
 ];
@@ -40,7 +40,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   const [isSearching, setIsSearching] = useState(false);
   const [selectedFriend, setSelectedFriend] = useState<PlayerProfile | null>(null);
   const [challengeStake, setChallengeStake] = useState<number>(1000);
-  const [challengeGame, setChallengeGame] = useState('Ludo');
+  const [challengeGame, setChallengeGame] = useState('Dice');
   
   // Active Challenge Monitoring
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
@@ -99,6 +99,13 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       setSelectedGame(gameId);
       setViewState('stakes');
       playSFX('click');
+      // Scroll to top to ensure visibility of stakes
+      const mainContainer = document.getElementById('main-scroll-container');
+      if (mainContainer) {
+          mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
   };
 
   const handleBackToGames = () => {

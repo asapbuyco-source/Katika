@@ -50,7 +50,7 @@ export interface GameTier {
 
 export interface Table {
   id: string;
-  gameType: 'Ludo' | 'Dice' | 'Chess' | 'Checkers' | 'Pool';
+  gameType: 'Dice' | 'Chess' | 'Checkers' | 'TicTacToe' | 'Cards';
   stake: number; // FCFA
   players: number;
   maxPlayers: number;

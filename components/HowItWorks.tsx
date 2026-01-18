@@ -24,7 +24,7 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
     },
     {
       title: "Choose Your Arena",
-      desc: "Select a game (Ludo, Checkers, Dice, Chess) and pick your stakes. From 100 FCFA casual matches to 50,000 FCFA High Roller tables.",
+      desc: "Select a game (Cards, Dice, Checkers, Chess) and pick your stakes. From 100 FCFA casual matches to 50,000 FCFA High Roller tables.",
       icon: Swords,
       color: "text-red-400"
     },

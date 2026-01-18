@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, CircleDot } from 'lucide-react';
+import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -16,10 +16,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
-  // Simulated Live Winners (In a real app, this would come from a 'global_activity' collection)
-  // We keep this random to show activity, but removed hardcoded specific names
+  // Simulated Live Winners
   const [winners, setWinners] = useState([
-      { name: "Player_992", amount: "5,000", game: "Ludo", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` }
+      { name: "Player_992", amount: "5,000", game: "Dice", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` }
   ]);
 
   useEffect(() => {
@@ -27,7 +26,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       const generateWinner = () => ({
           name: `Player_${Math.floor(Math.random() * 9000) + 1000}`,
           amount: (Math.floor(Math.random() * 50) * 100).toLocaleString(),
-          game: ['Ludo', 'Dice', 'Pool', 'Checkers'][Math.floor(Math.random() * 4)],
+          game: ['Dice', 'TicTacToe', 'Checkers', 'Cards', 'Chess'][Math.floor(Math.random() * 5)],
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`
       });
       
@@ -50,9 +49,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   }, [user.id]);
 
   const games = [
-    { id: 'Ludo', name: 'Ludo Club', players: 842, icon: LayoutGrid, color: 'text-cam-green', bg: 'hover:bg-cam-green/20 hover:border-cam-green/50', gradient: 'from-cam-green/20 to-transparent' },
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent' },
-    { id: 'Pool', name: '8 Ball Pool', players: 960, icon: CircleDot, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent' },
+    { id: 'TicTacToe', name: 'XO Clash', players: 2100, icon: X, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent' },
+    { id: 'Cards', name: 'Kmer Card', players: 1850, icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent' },
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent' },
     { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent' },
   ];

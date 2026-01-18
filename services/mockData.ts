@@ -1,5 +1,4 @@
 
-
 import { Table, User, PlayerProfile, Transaction, GameTier } from '../types';
 
 export const CURRENT_USER: User = {
@@ -28,7 +27,7 @@ export const GAME_TIERS: GameTier[] = [
 export const MOCK_TABLES: Table[] = [
   { 
     id: 't1', 
-    gameType: 'Ludo', 
+    gameType: 'Dice', 
     stake: 500, 
     players: 1, 
     maxPlayers: 2, 

@@ -263,7 +263,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         </div>
         
         <p className="text-center text-xs text-slate-600 mt-8">
-            By connecting, you agree to Vantage Ludo's <span className="text-slate-400 underline">Terms of Service</span>.
+            By connecting, you agree to Vantage Gaming's <span className="text-slate-400 underline">Terms of Service</span>.
         </p>
       </div>
     </div>

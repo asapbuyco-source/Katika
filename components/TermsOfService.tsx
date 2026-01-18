@@ -29,7 +29,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
 
                     <h3 className="text-white">1. Introduction</h3>
                     <p>
-                        Welcome to Vantage Ludo ("the Platform"), operated by Vantage Gaming Cameroon. By accessing or using our services, you agree to be bound by these Terms of Service and our Fair Play Policy. If you do not agree, please do not use the Platform.
+                        Welcome to Vantage Gaming ("the Platform"), operated by Vantage Gaming Cameroon. By accessing or using our services, you agree to be bound by these Terms of Service and our Fair Play Policy. If you do not agree, please do not use the Platform.
                     </p>
 
                     <h3 className="text-white">2. Eligibility</h3>
