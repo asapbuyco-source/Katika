@@ -30,7 +30,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Clock, AlertCircle } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -322,18 +322,9 @@ export default function App() {
       );
   }
 
-  // Socket Connection Loading Screen (Render Sleep Handler)
-  if (!isConnected && user) {
-      return (
-          <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
-              <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
-              <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Referee...</h2>
-              <p className="text-slate-400 max-w-md">
-                  We are waking up the realtime server (Render). This may take up to 30 seconds.
-              </p>
-          </div>
-      );
-  }
+  // --- REMOVED BLOCKING SCREEN FOR DISCONNECT ---
+  // Users (especially Admin) can now access the app even if socket is disconnected.
+  // Connection status is handled via UI indicators.
 
   const renderGameView = () => {
       // 1. Socket Game Mode (Priority)
@@ -360,7 +351,7 @@ export default function App() {
                       </div>
                   );
               case 'Checkers':
-                  return <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />; // Note: Pass socket props later for real sync
+                  return <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
               case 'TicTacToe':
                   return <TicTacToeGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
               case 'Chess':
@@ -429,6 +420,13 @@ export default function App() {
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
+            </div>
+        )}
+
+        {/* CONNECTION STATUS INDICATOR */}
+        {user && !isConnected && currentView !== 'landing' && currentView !== 'auth' && (
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 text-xs font-bold backdrop-blur-sm">
+                <WifiOff size={14} className="animate-pulse" /> Offline
             </div>
         )}
 

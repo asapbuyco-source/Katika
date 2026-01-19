@@ -18,7 +18,6 @@ interface DiceGameProps {
 const TURN_TIME_LIMIT = 15; // Seconds
 
 // --- 2D DIE COMPONENT ---
-// Highly optimized for performance vs the old 3D version
 const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ value, rolling, isMe }) => {
     const [displayVal, setDisplayVal] = useState(value);
 
@@ -34,10 +33,6 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
         }
     }, [rolling, value]);
 
-    // Pip mapping for 3x3 grid
-    // 0 1 2
-    // 3 4 5
-    // 6 7 8
     const getPips = (val: number) => {
         switch (val) {
             case 1: return [4];
@@ -123,7 +118,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           }
           if (socketGame.currentRound) setRound(socketGame.currentRound);
 
-          // Handle Rolls
+          // Handle Rolls safely
           if (socketGame.roundRolls) {
               if (socketGame.roundRolls[user.id]) setMyDice(socketGame.roundRolls[user.id]);
               if (socketGame.roundRolls[opponentId]) setOppDice(socketGame.roundRolls[opponentId]);
