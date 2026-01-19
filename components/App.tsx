@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useMemo, Component, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -34,7 +33,7 @@ import { Loader2, Wifi, WifiOff, Clock, AlertTriangle } from 'lucide-react';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   onReset: () => void;
 }
 
@@ -43,10 +42,7 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -99,7 +95,7 @@ export default function App() {
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(20); // Local countdown state
 
-  // 1. Initialize Socket Connection (UPDATED TO RAILWAY)
+  // 1. Initialize Socket Connection
   useEffect(() => {
     // Connect to Railway Backend
     const newSocket = io("https://katika-production.up.railway.app");
@@ -240,7 +236,7 @@ export default function App() {
           setMatchmakingConfig({ stake, gameType });
           setView('matchmaking');
           // Emit with privateRoomId
-          socket.emit('join_game', { stake: stake, userProfile: user, privateRoomId: specificGameId });
+          socket.emit('join_game', { stake: stake, userProfile: user, privateRoomId: specificGameId, gameType });
           return;
       }
 
@@ -274,7 +270,7 @@ export default function App() {
       setView('matchmaking');
       
       // Emit to backend with User Profile for ID tracking
-      socket.emit('join_game', { stake: stake, userProfile: user });
+      socket.emit('join_game', { stake: stake, userProfile: user, gameType });
   };
 
   const cancelMatchmaking = () => {
@@ -334,14 +330,14 @@ export default function App() {
       );
   }
 
-  // Socket Connection Loading Screen (UPDATED TEXT)
+  // Socket Connection Loading Screen
   if (!isConnected && user) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
               <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
               <p className="text-slate-400 max-w-md">
-                  Establishing secure connection to Railway server...
+                  Establishing secure connection...
               </p>
           </div>
       );

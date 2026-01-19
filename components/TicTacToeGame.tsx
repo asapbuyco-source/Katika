@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Shield, AlertTriangle, X, Circle, RotateCcw, Clock, Cpu, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Shield, AlertTriangle, X, Circle, RotateCcw, Clock, Cpu, RefreshCw, Settings, ChevronDown } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -14,6 +14,7 @@ interface TicTacToeGameProps {
 
 type CellValue = 'X' | 'O' | null;
 type WinningLine = number[] | null;
+type Difficulty = 'Easy' | 'Medium' | 'Hard';
 
 const TURN_DURATION = 15; // Seconds
 
@@ -26,6 +27,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   const [drawStreak, setDrawStreak] = useState(0); // Track consecutive draws
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
+  const [difficulty, setDifficulty] = useState<Difficulty>('Medium');
   
   // Timer State
   const [timeLeft, setTimeLeft] = useState(TURN_DURATION);
@@ -78,7 +80,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
           const timeout = setTimeout(() => makeBotMove(board), delay);
           return () => clearTimeout(timeout);
       }
-  }, [isBotGame, isMyTurn, board, winner, isDraw]);
+  }, [isBotGame, isMyTurn, board, winner, isDraw, difficulty]);
 
   const checkWinner = (squares: CellValue[]) => {
     const lines = [
@@ -154,54 +156,113 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
       }
   };
 
+  // --- AI IMPLEMENTATION ---
+
+  const getEmptyIndices = (squares: CellValue[]) => {
+      return squares.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
+  };
+
+  // Minimax Algorithm for Hard Mode
+  const minimax = (squares: CellValue[], depth: number, isMaximizing: boolean, aiSymbol: CellValue, playerSymbol: CellValue): number => {
+      const result = checkWinner(squares);
+      if (result?.winner === aiSymbol) return 10 - depth;
+      if (result?.winner === playerSymbol) return depth - 10;
+      if (!squares.includes(null)) return 0; // Draw
+
+      if (isMaximizing) {
+          let bestScore = -Infinity;
+          for (let i = 0; i < squares.length; i++) {
+              if (squares[i] === null) {
+                  squares[i] = aiSymbol;
+                  const score = minimax(squares, depth + 1, false, aiSymbol, playerSymbol);
+                  squares[i] = null; // Backtrack
+                  bestScore = Math.max(score, bestScore);
+              }
+          }
+          return bestScore;
+      } else {
+          let bestScore = Infinity;
+          for (let i = 0; i < squares.length; i++) {
+              if (squares[i] === null) {
+                  squares[i] = playerSymbol;
+                  const score = minimax(squares, depth + 1, true, aiSymbol, playerSymbol);
+                  squares[i] = null; // Backtrack
+                  bestScore = Math.min(score, bestScore);
+              }
+          }
+          return bestScore;
+      }
+  };
+
   const makeBotMove = (currentBoard: CellValue[]) => {
       const botSymbol = mySymbol === 'X' ? 'O' : 'X';
       const playerSymbol = mySymbol;
+      const emptyIndices = getEmptyIndices(currentBoard);
 
-      // Helper to find a move that results in a win/block for a specific symbol
-      const findCriticalMove = (symbol: CellValue): number => {
-          const lines = [
-              [0, 1, 2], [3, 4, 5], [6, 7, 8],
-              [0, 3, 6], [1, 4, 7], [2, 5, 8],
-              [0, 4, 8], [2, 4, 6]
-          ];
-          
-          for (let line of lines) {
-              const [a, b, c] = line;
-              const values = [currentBoard[a], currentBoard[b], currentBoard[c]];
-              const symbolCount = values.filter(v => v === symbol).length;
-              const emptyCount = values.filter(v => v === null).length;
-
-              if (symbolCount === 2 && emptyCount === 1) {
-                  return line[values.indexOf(null)]; // Return the index of the empty spot
-              }
-          }
-          return -1;
-      };
+      if (emptyIndices.length === 0) return;
 
       let targetIndex = -1;
 
-      // 1. Can AI win now?
-      targetIndex = findCriticalMove(botSymbol);
+      // --- EASY: PURE RANDOM ---
+      if (difficulty === 'Easy') {
+          targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+      } 
       
-      // 2. Must AI block player win?
-      if (targetIndex === -1) {
-          targetIndex = findCriticalMove(playerSymbol);
+      // --- MEDIUM: BLOCK/WIN/RANDOM ---
+      else if (difficulty === 'Medium') {
+          // Helper to find a move that results in a win/block for a specific symbol
+          const findCriticalMove = (symbol: CellValue): number => {
+              const lines = [
+                  [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                  [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                  [0, 4, 8], [2, 4, 6]
+              ];
+              for (let line of lines) {
+                  const [a, b, c] = line;
+                  const values = [currentBoard[a], currentBoard[b], currentBoard[c]];
+                  const symbolCount = values.filter(v => v === symbol).length;
+                  const emptyCount = values.filter(v => v === null).length;
+                  if (symbolCount === 2 && emptyCount === 1) {
+                      return line[values.indexOf(null)];
+                  }
+              }
+              return -1;
+          };
+
+          // 1. Can AI win now?
+          targetIndex = findCriticalMove(botSymbol);
+          // 2. Must AI block player win?
+          if (targetIndex === -1) targetIndex = findCriticalMove(playerSymbol);
+          // 3. Random
+          if (targetIndex === -1) targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
       }
 
-      // 3. Take Center if available
-      if (targetIndex === -1 && currentBoard[4] === null) {
-          targetIndex = 4;
-      }
+      // --- HARD: MINIMAX ---
+      else if (difficulty === 'Hard') {
+          let bestScore = -Infinity;
+          let bestMove = -1;
 
-      // 4. Random available move
-      if (targetIndex === -1) {
-          const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
-          if (emptyIndices.length > 0) {
-              targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+          // If first move and center is available, take it (optimization for minimax)
+          if (emptyIndices.length >= 8 && currentBoard[4] === null) {
+              bestMove = 4;
+          } else {
+              for (let i = 0; i < currentBoard.length; i++) {
+                  if (currentBoard[i] === null) {
+                      currentBoard[i] = botSymbol;
+                      const score = minimax(currentBoard, 0, false, botSymbol, playerSymbol);
+                      currentBoard[i] = null; // Backtrack
+                      
+                      if (score > bestScore) {
+                          bestScore = score;
+                          bestMove = i;
+                      }
+                  }
+              }
           }
+          targetIndex = bestMove !== -1 ? bestMove : emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
       }
 
+      // Execute
       if (targetIndex !== -1) {
           processMove(targetIndex, botSymbol);
       }
@@ -294,7 +355,37 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                         <Circle size={14} className="text-purple-400" strokeWidth={4} />
                     </div>
                 </div>
-                <span className="text-sm font-bold text-white">{!isHost ? "You" : (table.guest?.name || "Opponent")}</span>
+                
+                {/* Bot Difficulty Selector or Name */}
+                {isBotGame && !isHost ? (
+                    <div className="flex flex-col items-center">
+                        <span className="text-sm font-bold text-white mb-1">V-Bot</span>
+                        <div className="relative group">
+                            <button className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                                difficulty === 'Hard' ? 'bg-red-500/20 text-red-400 border-red-500/30' : 
+                                difficulty === 'Medium' ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 
+                                'bg-green-500/20 text-green-400 border-green-500/30'
+                            }`}>
+                                {difficulty} <ChevronDown size={10} />
+                            </button>
+                            {/* Dropdown */}
+                            <div className="absolute top-full mt-1 left-1/2 -translate-x-1/2 bg-royal-900 border border-white/10 rounded-lg overflow-hidden shadow-xl z-50 hidden group-hover:block w-24">
+                                {['Easy', 'Medium', 'Hard'].map((d) => (
+                                    <button 
+                                        key={d}
+                                        onClick={() => setDifficulty(d as Difficulty)}
+                                        className="w-full text-left px-3 py-2 text-xs text-slate-300 hover:bg-white/10 hover:text-white"
+                                    >
+                                        {d}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    <span className="text-sm font-bold text-white">{!isHost ? "You" : (table.guest?.name || "Opponent")}</span>
+                )}
+
                 {!isXNext && (
                     <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${timeLeft <= 5 ? 'bg-red-500 text-white animate-pulse' : 'bg-purple-500 text-white'}`}>
                         <Clock size={10} /> {timeLeft}s
