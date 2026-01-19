@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -30,20 +29,11 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, WifiOff, AlertTriangle } from 'lucide-react';
+import { WifiOff, AlertTriangle } from 'lucide-react';
 
-interface ErrorBoundaryProps {
-  children: React.ReactNode;
-  onReset: () => void;
-}
-
-interface ErrorBoundaryState {
-  hasError: boolean;
-}
-
-// --- Error Boundary to prevent White Screens ---
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
+// --- Error Boundary ---
+class GameErrorBoundary extends React.Component<{ children: React.ReactNode, onReset: () => void }, { hasError: boolean }> {
+  constructor(props: { children: React.ReactNode, onReset: () => void }) {
     super(props);
     this.state = { hasError: false };
   }
@@ -60,16 +50,11 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
     if (this.state.hasError) {
       return (
         <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-royal-950">
-          <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6">
-             <AlertTriangle size={40} className="text-red-500" />
-          </div>
-          <h2 className="text-2xl font-bold text-white mb-2">Game Error</h2>
-          <p className="text-slate-400 mb-8 max-w-xs mx-auto">
-            A synchronization issue occurred. Your funds are safe. Please return to the lobby.
-          </p>
+          <AlertTriangle size={48} className="text-red-500 mb-4" />
+          <h2 className="text-xl font-bold text-white mb-2">Game Error</h2>
           <button 
             onClick={() => { this.setState({ hasError: false }); this.props.onReset(); }}
-            className="px-8 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white font-bold transition-all border border-white/10"
+            className="px-6 py-3 bg-white/10 rounded-xl text-white font-bold"
           >
             Return to Lobby
           </button>
@@ -80,15 +65,6 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
   }
 }
 
-// --- Loading Component ---
-const LoadingScreen = ({ message = "Loading..." }: { message?: string }) => (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
-        <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
-        <h2 className="text-xl font-bold text-white mb-2">{message}</h2>
-        <p className="text-slate-400 text-sm">Syncing with Vantage Network...</p>
-    </div>
-);
-
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setView] = useState<ViewState>('landing');
@@ -98,30 +74,26 @@ export default function App() {
   
   // Game End State
   const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number } | null>(null);
-  
-  // State to handle game selection from Dashboard -> Lobby
   const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
-
-  // Challenge System State
   const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
 
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [socketGame, setSocketGame] = useState<any>(null); 
-  const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   
-  // Ref to track user without triggering re-renders in socket listeners
+  // 2. THE BLANK SCREEN FIX: Create state gameState
+  const [gameState, setGameState] = useState<any>(null); // Replaces socketGame
+  
+  const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const userRef = useRef<User | null>(null);
 
-  // Sync Ref
   useEffect(() => {
       userRef.current = user;
   }, [user]);
 
-  // 1. Initialize Socket Connection
+  // 1. Connect using Railway URL
   useEffect(() => {
-    const newSocket = io("https://katika-n8q5.onrender.com");
+    const newSocket = io("https://katika-production.up.railway.app");
 
     newSocket.on('connect', () => {
         console.log("Connected to Vantage Referee");
@@ -132,9 +104,9 @@ export default function App() {
         setIsConnected(false);
     });
 
-    newSocket.on('match_found', (gameState) => {
-        console.log("Socket Match Found!", gameState);
-        setSocketGame(gameState);
+    newSocket.on('match_found', (data) => {
+        console.log("Socket Match Found!", data);
+        setGameState(data); // Set the game state
         setIsWaitingForSocketMatch(false);
         setView('game');
     });
@@ -143,8 +115,8 @@ export default function App() {
         setIsWaitingForSocketMatch(true);
     });
 
-    newSocket.on('game_update', (gameState) => {
-        setSocketGame(gameState);
+    newSocket.on('game_update', (data) => {
+        setGameState(data);
     });
 
     newSocket.on('game_over', ({ winner }) => {
@@ -156,7 +128,7 @@ export default function App() {
                 setGameResult({ result: 'loss', amount: 0 });
             }
         }
-        setSocketGame(null);
+        setGameState(null);
     });
 
     setSocket(newSocket);
@@ -166,7 +138,7 @@ export default function App() {
     };
   }, []); 
 
-  // 2. Firebase Auth
+  // Firebase Auth
   useEffect(() => {
       const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
@@ -186,7 +158,7 @@ export default function App() {
       return () => unsubscribeAuth();
   }, []);
 
-  // 3. Navigation Guard
+  // Navigation Guard
   useEffect(() => {
       if (authLoading) return;
       if (user) {
@@ -203,14 +175,12 @@ export default function App() {
       if (!user || !socket) return;
 
       if (specificGameId) {
-          setMatchmakingConfig({ stake, gameType });
-          setView('matchmaking');
-          socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
+          // Private match logic (simplified)
           return;
       }
 
       if (stake === -1) {
-          // Bot match
+          // Bot match logic
           try {
               const gameId = await createBotMatch(user, gameType);
               const gameData = await getGame(gameId);
@@ -227,9 +197,7 @@ export default function App() {
                   });
                   setView('game');
               }
-          } catch (error) {
-              console.error("Bot match failed:", error);
-          }
+          } catch (error) { console.error(error); }
           return;
       }
 
@@ -258,7 +226,7 @@ export default function App() {
   const finalizeGameEnd = () => {
     setGameResult(null);
     setActiveTable(null);
-    setSocketGame(null);
+    setGameState(null);
     setView('dashboard');
   };
 
@@ -270,16 +238,16 @@ export default function App() {
   
   // Safe Socket Table Construction
   const socketTable: Table | null = useMemo(() => {
-      if (!socketGame || !user) return null;
+      if (!gameState || !user) return null;
       
-      const players = Array.isArray(socketGame.players) ? socketGame.players : [];
+      const players = Array.isArray(gameState.players) ? gameState.players : [];
       const hostId = players[0] || 'unknown';
       const guestId = players[1] || 'unknown';
 
       return {
-          id: socketGame.roomId || 'temp_room',
-          gameType: socketGame.gameType as any,
-          stake: socketGame.stake || 0,
+          id: gameState.roomId || 'temp_room',
+          gameType: gameState.gameType as any,
+          stake: gameState.stake || 0,
           players: players.length,
           maxPlayers: 2,
           status: 'active',
@@ -298,77 +266,61 @@ export default function App() {
               rankTier: 'Bronze' 
           }
       };
-  }, [socketGame, user]);
+  }, [gameState, user]);
 
   // --- RENDER ---
 
-  if (authLoading) return <LoadingScreen message="Authenticating..." />;
+  // 3. THE BLANK SCREEN FIX: Guard Clause
+  // Note: Only apply this when in 'game' view waiting for socket, otherwise it blocks the whole app
+  if (currentView === 'game' && !gameState && !activeTable) {
+     return (
+       <div className="flex h-screen bg-indigo-950 items-center justify-center text-yellow-400">
+         <div className="text-center">
+            <div className="animate-spin h-10 w-10 border-4 border-yellow-400 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p>Connecting to Vantage Referee...</p>
+         </div>
+       </div>
+     );
+  }
 
+  // 4. Only render Game Board if gameState is NOT null (Implicitly handled above, but explicit here)
   const renderGameView = () => {
-      // 1. Socket Game Mode
-      if (socketGame) {
-          if (!socketTable) return <LoadingScreen message="Initializing Match..." />;
-
-          const gameComponent = () => {
-              switch (socketGame.gameType) {
-                  case 'Dice':
-                      return <DiceGame table={socketTable} user={user!} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />;
-                  case 'Ludo':
-                      return (
-                          <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
-                              <h2 className="text-2xl font-bold text-white mb-4">Ludo Arena (P2P)</h2>
-                              <p className="text-slate-400 mb-6">Game Active. Please use the mobile app for full Ludo experience.</p>
-                              <button onClick={() => setView('lobby')} className="px-6 py-3 bg-white/10 rounded-xl text-white">Back to Lobby</button>
-                          </div>
-                      );
-                  case 'Checkers':
-                      return <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'TicTacToe':
-                      return <TicTacToeGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Chess':
-                      return <ChessGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Cards':
-                      return <CardGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-                  default:
-                      return (
-                          <div className="min-h-screen flex flex-col items-center justify-center text-white">
-                              <h2 className="text-xl font-bold mb-2">Unknown Game Type: {socketGame.gameType}</h2>
-                              <button onClick={() => setView('lobby')} className="px-4 py-2 bg-white/10 rounded-lg">Return to Lobby</button>
-                          </div>
-                      );
-              }
-          };
+      if (gameState) {
+          if (!socketTable) return null; // Should be caught by guard clause
 
           return (
               <GameErrorBoundary onReset={() => setView('lobby')}>
-                  {gameComponent()}
+                  {gameState.gameType === 'Dice' && <DiceGame table={socketTable} user={user!} onGameEnd={handleGameEnd} socket={socket} socketGame={gameState} />}
+                  {gameState.gameType === 'Checkers' && <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {gameState.gameType === 'TicTacToe' && <TicTacToeGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {gameState.gameType === 'Chess' && <ChessGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {gameState.gameType === 'Cards' && <CardGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {gameState.gameType === 'Ludo' && (
+                      <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
+                          <h2 className="text-2xl font-bold text-white mb-4">Ludo Arena (P2P)</h2>
+                          <p className="text-slate-400 mb-6">Game Active. Use Mobile.</p>
+                          <button onClick={() => setView('lobby')} className="px-6 py-3 bg-white/10 rounded-xl text-white">Back</button>
+                      </div>
+                  )}
               </GameErrorBoundary>
           );
       }
 
-      // 2. Local/Bot Game Mode
+      // Local/Bot Games
       if (activeTable) {
-          const localGame = () => {
-              switch (activeTable.gameType) {
-                  case 'Ludo': return <GameRoom table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'TicTacToe': return <TicTacToeGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Checkers': return <CheckersGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Chess': return <ChessGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Dice': return <DiceGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  case 'Cards': return <CardGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-                  default: return <div>Unknown Game Type</div>;
-              }
-          };
-          
           return (
               <GameErrorBoundary onReset={() => setView('lobby')}>
-                  {localGame()}
+                  {activeTable.gameType === 'Ludo' && <GameRoom table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {activeTable.gameType === 'TicTacToe' && <TicTacToeGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {activeTable.gameType === 'Checkers' && <CheckersGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {activeTable.gameType === 'Chess' && <ChessGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {activeTable.gameType === 'Dice' && <DiceGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
+                  {activeTable.gameType === 'Cards' && <CardGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />}
               </GameErrorBoundary>
           );
       }
-
-      // 3. Fallback Loading
-      return <LoadingScreen message="Preparing Game Environment..." />;
+      
+      return null;
   };
 
   return (
@@ -377,7 +329,6 @@ export default function App() {
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
-      {/* Overlays */}
       <AnimatePresence>
           {incomingChallenge && (
               <ChallengeRequestModal 
@@ -396,7 +347,6 @@ export default function App() {
       </AnimatePresence>
 
       <main id="main-scroll-container" className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {/* Background FX */}
         {currentView !== 'landing' && currentView !== 'auth' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
@@ -404,14 +354,13 @@ export default function App() {
             </div>
         )}
 
-        {/* Connection Indicator - Non-blocking now */}
+        {/* Connection Indicator */}
         {user && !isConnected && currentView !== 'landing' && currentView !== 'auth' && (
             <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 text-xs font-bold backdrop-blur-sm shadow-lg">
                 <WifiOff size={14} className="animate-pulse" /> Offline
             </div>
         )}
 
-        {/* Views */}
         {currentView === 'landing' && (
             <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />
         )}

@@ -8,271 +8,153 @@ const app = express();
 app.use(cors());
 
 app.get('/', (req, res) => {
-  res.send('Vantage Referee is Ready');
+  res.send('Vantage Referee is Live on Railway');
 });
 
 const httpServer = createServer(app);
+
+// CRITICAL: CORS Configuration for Netlify
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", 
+    origin: process.env.FRONTEND_URL || "https://heroic-brioche-b08cf2.netlify.app",
     methods: ["GET", "POST"]
   }
 });
 
-const PORT = process.env.PORT || 3001;
+// 1. Use Railway Port
+const PORT = process.env.PORT || 8080;
 const TURN_DURATION_MS = 20000; 
 
-// --- STATE MANAGEMENT ---
-const activeGames = {}; // roomId -> GameState
-const waitingQueues = {}; // stake -> { userId, socketId }
-const userSessions = {}; // userId -> { socketId, roomId }
-const privateMatches = {}; // roomId -> { stake, gameType, players: [] }
+// --- STATE ---
+const activeGames = {}; 
+const waitingQueues = {}; // Key format: "GameType_Stake"
+const userSessions = {}; 
 
-// --- GAME LOGIC ENGINES ---
-
+// --- HELPERS ---
 const createInitialState = (gameType, players, stake) => {
-    const base = {
-        players, // Ensure this is always an array [p1, p2]
-        turn: players[0], // First player starts
+    return {
+        roomId: `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        players, 
+        turn: players[0],
         stake,
         gameType,
         status: 'active',
         turnExpiresAt: Date.now() + TURN_DURATION_MS,
+        scores: { [players[0]]: 0, [players[1]]: 0 },
+        currentRound: 1,
+        roundState: 'waiting',
+        roundRolls: { [players[0]]: null, [players[1]]: null },
+        board: Array(9).fill(null), // For TicTacToe
+        winner: null
     };
-
-    if (gameType === 'Dice') {
-        return {
-            ...base,
-            scores: { [players[0]]: 0, [players[1]]: 0 },
-            currentRound: 1,
-            roundState: 'waiting', // waiting, rolled_1, scored
-            roundRolls: { [players[0]]: null, [players[1]]: null } // [d1, d2]
-        };
-    }
-
-    if (gameType === 'Ludo') {
-        return {
-            ...base,
-            positions: { [players[0]]: 0, [players[1]]: 0 },
-            diceValue: null
-        };
-    }
-
-    if (gameType === 'TicTacToe') {
-        return {
-            ...base,
-            board: Array(9).fill(null),
-            winner: null
-        };
-    }
-
-    if (gameType === 'Checkers' || gameType === 'Chess') {
-        return {
-            ...base,
-            board: [], // Client will init board for now
-            lastMove: null
-        };
-    }
-    
-    // Default generic state for others (Cards, etc.)
-    return { ...base, board: null, lastMove: null };
-};
-
-const handleDiceAction = (game, action, userId) => {
-    // Action: { type: 'ROLL' }
-    if (action.type === 'ROLL') {
-        if (game.turn !== userId) return null;
-
-        const d1 = Math.ceil(Math.random() * 6);
-        const d2 = Math.ceil(Math.random() * 6);
-        
-        game.roundRolls[userId] = [d1, d2];
-        
-        const otherPlayer = game.players.find(p => p !== userId);
-        
-        if (game.roundRolls[otherPlayer]) {
-            // Both rolled
-            const p1Roll = game.roundRolls[userId];
-            const p2Roll = game.roundRolls[otherPlayer];
-            const p1Sum = p1Roll[0] + p1Roll[1];
-            const p2Sum = p2Roll[0] + p2Roll[1];
-
-            if (p1Sum > p2Sum) {
-                game.scores[userId]++;
-            } else if (p2Sum > p1Sum) {
-                game.scores[otherPlayer]++;
-            }
-
-            game.roundState = 'scored';
-            
-            // Check Match Win (First to 3)
-            if (game.scores[userId] >= 3) {
-                game.status = 'completed';
-                game.winner = userId;
-            } else if (game.scores[otherPlayer] >= 3) {
-                game.status = 'completed';
-                game.winner = otherPlayer;
-            } else {
-                // Next Round Prep
-                setTimeout(() => {
-                    game.currentRound++;
-                    game.roundRolls = { [userId]: null, [otherPlayer]: null };
-                    game.roundState = 'waiting';
-                    game.turn = game.players[(game.currentRound - 1) % 2];
-                    io.to(game.roomId).emit('game_update', game);
-                }, 3000); 
-            }
-        } else {
-            game.turn = otherPlayer;
-        }
-        
-        return game;
-    }
-    return null;
-};
-
-// Simple Ludo Action Handler
-const handleLudoAction = (game, action, userId) => {
-    if (game.turn !== userId) return null;
-
-    if (action.type === 'ROLL') {
-        const roll = Math.ceil(Math.random() * 6);
-        game.diceValue = roll;
-        return game;
-    }
-
-    if (action.type === 'MOVE') {
-        if (!game.diceValue) return null;
-        const currentPos = game.positions[userId];
-        let newPos = currentPos + game.diceValue;
-        if (newPos >= 16) newPos = 15; 
-
-        game.positions[userId] = newPos;
-        game.diceValue = null; 
-
-        if (newPos === 15) {
-            game.status = 'completed';
-            game.winner = userId;
-        } else {
-            const otherPlayer = game.players.find(p => p !== userId);
-            game.turn = otherPlayer;
-        }
-        return game;
-    }
-    return null;
 };
 
 io.on('connection', (socket) => {
-  console.log(`Socket connected: ${socket.id}`);
+  console.log(`Player connected: ${socket.id}`);
 
-  socket.on('join_game', ({ stake, userProfile, privateRoomId, gameType = 'Dice' }) => {
+  // 3. Matchmaking Handler
+  socket.on('join_game', ({ stake, userProfile, gameType = 'Dice' }) => {
     if (!userProfile || !userProfile.id) return;
     const userId = userProfile.id;
     const numericStake = parseInt(stake);
-
-    // Reconnection check
-    const session = userSessions[userId];
-    if (session && session.roomId && activeGames[session.roomId]) {
-        const game = activeGames[session.roomId];
-        socket.join(session.roomId);
-        socket.emit('match_found', game);
-        return;
-    }
-
+    
+    // Create a specific queue key for this Game Type + Stake amount
+    // e.g., "Dice_100", "Ludo_500"
     const queueKey = `${gameType}_${numericStake}`;
 
-    if (privateRoomId) {
-        // Private Match Logic
-        const roomId = privateRoomId;
-        if (privateMatches[roomId]) {
-             const match = privateMatches[roomId];
-             const opponent = match.players[0];
-             delete privateMatches[roomId];
+    console.log(`User ${userId} joining queue: ${queueKey}`);
 
-             const roomIdReal = `private_${roomId}`;
-             const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
-             gameState.roomId = roomIdReal;
-             
-             activeGames[roomIdReal] = gameState;
-             userSessions[opponent.userId] = { socketId: opponent.socketId, roomId: roomIdReal };
-             userSessions[userId] = { socketId: socket.id, roomId: roomIdReal };
-
-             socket.join(roomIdReal);
-             const oppSocket = io.sockets.sockets.get(opponent.socketId);
-             if (oppSocket) oppSocket.join(roomIdReal);
-
-             io.to(roomIdReal).emit('match_found', gameState);
-
-        } else {
-             privateMatches[roomId] = { stake: numericStake, gameType, players: [{ userId, socketId: socket.id }] };
-             userSessions[userId] = { socketId: socket.id, roomId: null };
-             socket.emit('waiting_for_opponent');
-        }
-        return;
-    }
-
-    // Public Match
+    // Check if someone is waiting in this specific queue
     if (waitingQueues[queueKey]) {
         const opponent = waitingQueues[queueKey];
+
+        // Prevent playing against self
         if (opponent.userId === userId) return; 
 
+        // Remove opponent from queue
         delete waitingQueues[queueKey];
-        const roomId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        
+
+        // Create Match
         const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
-        gameState.roomId = roomId;
+        
+        // Save Game
+        activeGames[gameState.roomId] = gameState;
+        userSessions[opponent.userId] = { socketId: opponent.socketId, roomId: gameState.roomId };
+        userSessions[userId] = { socketId: socket.id, roomId: gameState.roomId };
 
-        activeGames[roomId] = gameState;
-        userSessions[opponent.userId] = { socketId: opponent.socketId, roomId };
-        userSessions[userId] = { socketId: socket.id, roomId };
-
-        socket.join(roomId);
+        // Join Rooms
+        socket.join(gameState.roomId);
         const oppSocket = io.sockets.sockets.get(opponent.socketId);
-        if (oppSocket) oppSocket.join(roomId);
+        if (oppSocket) oppSocket.join(gameState.roomId);
 
-        io.to(roomId).emit('match_found', gameState);
+        // Notify Players
+        io.to(gameState.roomId).emit('match_found', gameState);
+        console.log(`Match created: ${gameState.roomId}`);
+
     } else {
+        // No opponent found, add to queue
         waitingQueues[queueKey] = { userId, socketId: socket.id };
         userSessions[userId] = { socketId: socket.id, roomId: null };
         socket.emit('waiting_for_opponent');
+        console.log(`User ${userId} added to queue`);
     }
   });
 
+  // Handle Game Moves (Rolls, Board moves)
   socket.on('game_action', ({ action, roomId }) => {
       const game = activeGames[roomId];
       if (!game) return;
-      
-      const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
-      if (!userId) return;
 
-      let updatedGame = null;
+      // Simple Dice Logic
+      if (game.gameType === 'Dice' && action.type === 'ROLL') {
+          // Identify roller
+          const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
+          if (game.turn !== userId) return;
 
-      if (game.gameType === 'Dice') {
-          updatedGame = handleDiceAction(game, action, userId);
-      } else if (game.gameType === 'Ludo') {
-          updatedGame = handleLudoAction(game, action, userId);
-      } else {
-          // Generic relay for other games (Client-side logic trust for MVP)
-          // Simple Turn Switch for generic games
-          const otherPlayer = game.players.find(p => p !== userId);
-          game.turn = otherPlayer;
-          io.to(roomId).emit('game_event', { action, userId });
-          updatedGame = game;
-      }
+          const d1 = Math.ceil(Math.random() * 6);
+          const d2 = Math.ceil(Math.random() * 6);
+          game.roundRolls[userId] = [d1, d2];
 
-      if (updatedGame) {
-          io.to(roomId).emit('game_update', updatedGame);
-          if (updatedGame.status === 'completed') {
-              io.to(roomId).emit('game_over', { winner: updatedGame.winner });
-              delete activeGames[roomId];
+          // Check if both rolled
+          const p1 = game.players[0];
+          const p2 = game.players[1];
+
+          if (game.roundRolls[p1] && game.roundRolls[p2]) {
+              // Scoring
+              const sum1 = game.roundRolls[p1][0] + game.roundRolls[p1][1];
+              const sum2 = game.roundRolls[p2][0] + game.roundRolls[p2][1];
+              
+              if (sum1 > sum2) game.scores[p1]++;
+              else if (sum2 > sum1) game.scores[p2]++;
+
+              game.roundState = 'scored';
+              
+              // Win Condition
+              if (game.scores[p1] >= 3) { game.status = 'completed'; game.winner = p1; }
+              else if (game.scores[p2] >= 3) { game.status = 'completed'; game.winner = p2; }
+              else {
+                  // Next Round Reset (simulated delay handled by client or manual trigger)
+                  game.currentRound++;
+                  game.roundRolls = { [p1]: null, [p2]: null };
+                  game.roundState = 'waiting';
+                  game.turn = game.players[(game.currentRound - 1) % 2];
+              }
+          } else {
+              // Switch turn to other player
+              game.turn = game.players.find(p => p !== userId);
           }
+          
+          io.to(roomId).emit('game_update', game);
+          if (game.winner) io.to(roomId).emit('game_over', { winner: game.winner });
       }
   });
 
   socket.on('disconnect', () => {
+      // Remove from queues
       for (const key in waitingQueues) {
           if (waitingQueues[key].socketId === socket.id) delete waitingQueues[key];
       }
+      console.log('Client disconnected');
   });
 });
 
