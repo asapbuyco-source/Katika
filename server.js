@@ -49,6 +49,15 @@ const createInitialState = (gameType, players, stake) => {
             roundRolls: { [players[0]]: null, [players[1]]: null } // [d1, d2]
         };
     }
+
+    if (gameType === 'Ludo') {
+        // Initialize simple 1-piece Ludo positions
+        return {
+            ...base,
+            positions: { [players[0]]: 0, [players[1]]: 0 },
+            diceValue: null
+        };
+    }
     
     // Default generic state for others
     return { ...base, board: null, lastMove: null };
@@ -113,6 +122,43 @@ const handleDiceAction = (game, action, userId) => {
             game.turn = otherPlayer;
         }
         
+        return game;
+    }
+    return null;
+};
+
+// Simple Ludo Action Handler (Movement)
+const handleLudoAction = (game, action, userId) => {
+    if (game.turn !== userId) return null;
+
+    if (action.type === 'ROLL') {
+        const roll = Math.ceil(Math.random() * 6);
+        game.diceValue = roll;
+        return game;
+    }
+
+    if (action.type === 'MOVE') {
+        if (!game.diceValue) return null;
+        
+        // Simple move logic: advance piece by dice value
+        // Loop around track of size 16
+        const currentPos = game.positions[userId];
+        let newPos = currentPos + game.diceValue;
+        
+        if (newPos >= 16) newPos = 15; // Cap at finish for demo
+
+        game.positions[userId] = newPos;
+        game.diceValue = null; // Reset dice
+
+        // Check Win
+        if (newPos === 15) {
+            game.status = 'completed';
+            game.winner = userId;
+        } else {
+            // Switch turn
+            const otherPlayer = game.players.find(p => p !== userId);
+            game.turn = otherPlayer;
+        }
         return game;
     }
     return null;
@@ -209,6 +255,8 @@ io.on('connection', (socket) => {
 
       if (game.gameType === 'Dice') {
           updatedGame = handleDiceAction(game, action, userId);
+      } else if (game.gameType === 'Ludo') {
+          updatedGame = handleLudoAction(game, action, userId);
       } else {
           // Generic relay for other games (Client-side logic trust for MVP)
           io.to(roomId).emit('game_event', { action, userId });

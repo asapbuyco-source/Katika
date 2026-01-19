@@ -144,11 +144,11 @@ export default function App() {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
 
-                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser: User) => {
+                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
                       setUser(updatedUser);
                   });
 
-                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge: Challenge | null) => {
+                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
                       setIncomingChallenge(challenge);
                   });
 
@@ -422,11 +422,9 @@ export default function App() {
                         )}
                         {/* 
                            LUDO / SOCKET BOARD FALLBACK 
-                           Only render if it IS Ludo and we have positions, 
-                           OR if strictly debugging the layout.
-                           Currently only 'Dice' is fully supported on socket server logic provided.
+                           Only render if it IS Ludo. Safely handle missing positions.
                         */}
-                        {socketGame.gameType === 'Ludo' && socketGame.positions && (
+                        {socketGame.gameType === 'Ludo' && (
                              <div className="min-h-screen flex flex-col items-center justify-center p-4">
                                 <div className="max-w-3xl w-full glass-panel p-8 rounded-3xl border border-gold-500/30 bg-royal-900/80 shadow-2xl">
                                     {/* ... (Existing Socket Board UI) ... */}
@@ -453,11 +451,11 @@ export default function App() {
                                     <div className="relative mb-12">
                                         <div className="grid grid-cols-5 md:grid-cols-8 gap-3 md:gap-4">
                                             {[...Array(16)].map((_, i) => {
-                                                // UPDATED: Use user.id instead of socket.id for state check
-                                                const isMe = socketGame.positions[user.id] === i;
-                                                // Opponent is anyone in players array who is NOT me
+                                                // Safely access positions
+                                                const positions = socketGame.positions || { [user.id]: 0, [socketGame.players.find((id: string) => id !== user.id)]: 0 };
+                                                const isMe = positions[user.id] === i;
                                                 const opponentId = socketGame.players.find((id: string) => id !== user.id);
-                                                const isOpp = socketGame.positions[opponentId] === i;
+                                                const isOpp = positions[opponentId] === i;
                                                 const isFinish = i === 15;
 
                                                 return (
@@ -529,7 +527,7 @@ export default function App() {
 
                                         <div className="flex gap-4">
                                             <button 
-                                                onClick={() => socket!.emit('roll_dice', { roomId: socketGame.roomId })}
+                                                onClick={() => socket!.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } })}
                                                 disabled={socketGame.turn !== user.id || socketGame.diceValue !== null}
                                                 className="px-8 py-4 bg-gold-500 text-royal-950 font-black rounded-xl hover:scale-105 transition-transform disabled:opacity-30 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(251,191,36,0.3)]"
                                             >
@@ -537,7 +535,7 @@ export default function App() {
                                             </button>
                                             
                                             <button 
-                                                onClick={() => socket!.emit('move_piece', { roomId: socketGame.roomId })}
+                                                onClick={() => socket!.emit('game_action', { roomId: socketGame.roomId, action: { type: 'MOVE' } })}
                                                 disabled={socketGame.turn !== user.id || socketGame.diceValue === null}
                                                 className="px-8 py-4 bg-green-500 text-white font-black rounded-xl hover:scale-105 transition-transform disabled:opacity-30 disabled:hover:scale-100 disabled:cursor-not-allowed shadow-[0_0_20px_rgba(34,197,94,0.3)]"
                                             >
