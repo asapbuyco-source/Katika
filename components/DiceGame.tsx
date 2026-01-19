@@ -88,7 +88,10 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   // P2P or Local?
   const isP2P = !!socket && !!socketGame;
-  const opponentId = isP2P ? socketGame.players.find((id: string) => id !== user.id) : 'bot';
+  // SAFE ACCESS: Check if players array exists before finding
+  const opponentId = isP2P && Array.isArray(socketGame?.players) 
+      ? socketGame.players.find((id: string) => id !== user.id) 
+      : 'bot';
 
   // State
   const [scores, setScores] = useState({ me: 0, opp: 0 });

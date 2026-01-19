@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
-import { GameRoom } from './GameRoom'; // Keep for non-socket fallback or reference
+import { GameRoom } from './GameRoom'; 
 import { CheckersGame } from './CheckersGame';
 import { DiceGame } from './DiceGame';
 import { TicTacToeGame } from './TicTacToeGame';
@@ -24,13 +24,70 @@ import { Forum } from './Forum';
 import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
-    auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, 
-    createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame 
+    auth, syncUserProfile, logout, subscribeToUser, createBotMatch, 
+    subscribeToIncomingChallenges, respondToChallenge, getGame 
 } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock, AlertCircle } from 'lucide-react';
+import { Loader2, WifiOff, AlertTriangle } from 'lucide-react';
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+  onReset: () => void;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+}
+
+// --- Error Boundary to prevent White Screens ---
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: any, errorInfo: ErrorInfo) {
+    console.error("Game Critical Error:", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-royal-950">
+          <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mb-6">
+             <AlertTriangle size={40} className="text-red-500" />
+          </div>
+          <h2 className="text-2xl font-bold text-white mb-2">Game Error</h2>
+          <p className="text-slate-400 mb-8 max-w-xs mx-auto">
+            A synchronization issue occurred. Your funds are safe. Please return to the lobby.
+          </p>
+          <button 
+            onClick={() => { this.setState({ hasError: false }); this.props.onReset(); }}
+            className="px-8 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white font-bold transition-all border border-white/10"
+          >
+            Return to Lobby
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// --- Loading Component ---
+const LoadingScreen = ({ message = "Loading..." }: { message?: string }) => (
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
+        <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
+        <h2 className="text-xl font-bold text-white mb-2">{message}</h2>
+        <p className="text-slate-400 text-sm">Syncing with Vantage Network...</p>
+    </div>
+);
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -51,10 +108,9 @@ export default function App() {
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
+  const [socketGame, setSocketGame] = useState<any>(null); 
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<number>(20); // Local countdown state
-
+  
   // Ref to track user without triggering re-renders in socket listeners
   const userRef = useRef<User | null>(null);
 
@@ -63,9 +119,8 @@ export default function App() {
       userRef.current = user;
   }, [user]);
 
-  // 1. Initialize Socket Connection (Run Once)
+  // 1. Initialize Socket Connection
   useEffect(() => {
-    // Connect to Render Backend
     const newSocket = io("https://katika-n8q5.onrender.com");
 
     newSocket.on('connect', () => {
@@ -92,16 +147,6 @@ export default function App() {
         setSocketGame(gameState);
     });
 
-    newSocket.on('turn_timeout', (data) => {
-        // Optional: Show toast or feedback
-        console.log("Turn timed out");
-    });
-
-    newSocket.on('dice_rolled', ({ value }) => {
-        console.log("Dice rolled:", value);
-    });
-
-    // Handle Win/Loss based on User ID
     newSocket.on('game_over', ({ winner }) => {
         const currentUser = userRef.current;
         if (currentUser) {
@@ -121,91 +166,56 @@ export default function App() {
     };
   }, []); 
 
-  // 2. Timer Logic
+  // 2. Firebase Auth
   useEffect(() => {
-      if (!socketGame || !socketGame.turnExpiresAt) return;
-
-      const interval = setInterval(() => {
-          const delta = Math.max(0, Math.ceil((socketGame.turnExpiresAt - Date.now()) / 1000));
-          setTimeLeft(delta);
-      }, 1000);
-
-      return () => clearInterval(interval);
-  }, [socketGame]);
-
-  // 3. Firebase Auth & Real-time Database Listener
-  useEffect(() => {
-      let unsubscribeSnapshot: (() => void) | undefined;
-      let unsubscribeChallenges: (() => void) | undefined;
-
       const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
               try {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
-
-                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
-                      setUser(updatedUser);
-                  });
-
-                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
-                      setIncomingChallenge(challenge);
-                  });
-
+                  subscribeToUser(appUser.id, setUser);
+                  subscribeToIncomingChallenges(appUser.id, setIncomingChallenge);
               } catch (error) {
                   console.error("Profile sync failed:", error);
               }
           } else {
-              if (unsubscribeSnapshot) unsubscribeSnapshot();
-              if (unsubscribeChallenges) unsubscribeChallenges();
               setUser(null);
           }
           setAuthLoading(false);
       });
-
-      return () => {
-          unsubscribeAuth();
-          if (unsubscribeSnapshot) unsubscribeSnapshot();
-          if (unsubscribeChallenges) unsubscribeChallenges();
-      };
+      return () => unsubscribeAuth();
   }, []);
 
-  // 4. Navigation Guard
+  // 3. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
-
       if (user) {
-          if (currentView === 'landing' || currentView === 'auth') {
-              setView('dashboard');
-          }
+          if (currentView === 'landing' || currentView === 'auth') setView('dashboard');
       } else {
-          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum'];
-          if (protectedViews.includes(currentView)) {
+          if (['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance'].includes(currentView)) {
               setView('landing');
           }
       }
   }, [user, currentView, authLoading]);
 
-  // Modified Matchmaking to use Socket
+  // Matchmaking
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user || !socket) return;
 
-      // Handle Private Matches via Socket
       if (specificGameId) {
           setMatchmakingConfig({ stake, gameType });
           setView('matchmaking');
-          // Emit with privateRoomId
-          socket.emit('join_game', { stake: stake, userProfile: user, privateRoomId: specificGameId, gameType: gameType });
+          socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
           return;
       }
 
       if (stake === -1) {
-          // Bot match (Firebase)
+          // Bot match
           try {
               const gameId = await createBotMatch(user, gameType);
               const gameData = await getGame(gameId);
               if (gameData) {
-                  const table: Table = {
+                  setActiveTable({
                       id: gameData.id,
                       gameType: gameData.gameType as any,
                       stake: gameData.stake,
@@ -214,22 +224,18 @@ export default function App() {
                       status: 'active',
                       host: gameData.host,
                       guest: gameData.guest
-                  };
-                  setActiveTable(table);
+                  });
                   setView('game');
               }
           } catch (error) {
-              console.error("Failed to start bot match:", error);
+              console.error("Bot match failed:", error);
           }
           return;
       }
 
-      // Use Socket.io for Real-time Public Matchmaking
       setMatchmakingConfig({ stake, gameType });
       setView('matchmaking');
-      
-      // Emit to backend with User Profile for ID tracking
-      socket.emit('join_game', { stake: stake, userProfile: user, gameType: gameType });
+      socket.emit('join_game', { stake, userProfile: user, gameType });
   };
 
   const cancelMatchmaking = () => {
@@ -240,20 +246,9 @@ export default function App() {
 
   const handleAcceptChallenge = async () => {
       if (!incomingChallenge || !user) return;
-      const gameId = incomingChallenge.id; // Use challenge ID as shared game ID
-      
-      // 1. Notify Sender via Firebase
-      await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
-      
-      // 2. Join the Private Socket Room
-      startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
-      
+      await respondToChallenge(incomingChallenge.id, 'accepted', incomingChallenge.id);
+      startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, incomingChallenge.id);
       setIncomingChallenge(null);
-  };
-
-  const handleMatchFound = async (table: Table) => {
-      setActiveTable(table);
-      setView('game');
   };
 
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
@@ -273,18 +268,11 @@ export default function App() {
       setView('landing');
   };
   
-  const handleDashboardQuickMatch = (gameId?: string) => {
-      if (gameId) setPreSelectedGame(gameId);
-      else setPreSelectedGame(null);
-      setView('lobby');
-  };
-
-  // Robustly Construct socketTable using useMemo to avoid recalculations and null crashes
+  // Safe Socket Table Construction
   const socketTable: Table | null = useMemo(() => {
       if (!socketGame || !user) return null;
       
-      // Safe access to players array
-      const players = socketGame.players || [];
+      const players = Array.isArray(socketGame.players) ? socketGame.players : [];
       const hostId = players[0] || 'unknown';
       const guestId = players[1] || 'unknown';
 
@@ -314,79 +302,73 @@ export default function App() {
 
   // --- RENDER ---
 
-  if (authLoading) {
-      return (
-          <div className="min-h-screen bg-royal-950 flex items-center justify-center">
-              <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
-          </div>
-      );
-  }
-
-  // --- REMOVED BLOCKING SCREEN FOR DISCONNECT ---
-  // Users (especially Admin) can now access the app even if socket is disconnected.
-  // Connection status is handled via UI indicators.
+  if (authLoading) return <LoadingScreen message="Authenticating..." />;
 
   const renderGameView = () => {
-      // 1. Socket Game Mode (Priority)
+      // 1. Socket Game Mode
       if (socketGame) {
-          if (!socketTable) return <div className="min-h-screen flex items-center justify-center text-white">Loading Match Data...</div>;
+          if (!socketTable) return <LoadingScreen message="Initializing Match..." />;
 
-          switch (socketGame.gameType) {
-              case 'Dice':
-                  return <DiceGame table={socketTable} user={user!} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />;
-              case 'Ludo':
-                  // Ludo Fallback Render
-                  return (
-                      <div className="min-h-screen flex flex-col items-center justify-center p-4">
-                          <div className="max-w-3xl w-full glass-panel p-8 rounded-3xl border border-gold-500/30 bg-royal-900/80 shadow-2xl text-center">
-                              <h2 className="text-2xl font-bold text-white mb-4">Ludo Arena (P2P Beta)</h2>
-                              <div className="text-slate-400 mb-6">Game in progress...</div>
-                              <button 
-                                  onClick={() => socket!.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } })}
-                                  className="px-8 py-4 bg-gold-500 text-royal-950 font-black rounded-xl hover:scale-105 transition-transform"
-                              >
-                                  ROLL DICE ({socketGame.diceValue || '-'})
-                              </button>
+          const gameComponent = () => {
+              switch (socketGame.gameType) {
+                  case 'Dice':
+                      return <DiceGame table={socketTable} user={user!} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />;
+                  case 'Ludo':
+                      return (
+                          <div className="min-h-screen flex flex-col items-center justify-center p-4 text-center">
+                              <h2 className="text-2xl font-bold text-white mb-4">Ludo Arena (P2P)</h2>
+                              <p className="text-slate-400 mb-6">Game Active. Please use the mobile app for full Ludo experience.</p>
+                              <button onClick={() => setView('lobby')} className="px-6 py-3 bg-white/10 rounded-xl text-white">Back to Lobby</button>
                           </div>
-                      </div>
-                  );
-              case 'Checkers':
-                  return <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'TicTacToe':
-                  return <TicTacToeGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Chess':
-                  return <ChessGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Cards':
-                  return <CardGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
-              default:
-                  // Generic fallback for unmapped socket games
-                  return (
-                      <div className="min-h-screen flex items-center justify-center text-white">
-                          <div className="text-center">
-                              <h2 className="text-xl font-bold mb-2">Game Type: {socketGame.gameType}</h2>
-                              <p className="text-slate-400">P2P sync active. Using generic view.</p>
-                              <button onClick={() => setView('lobby')} className="mt-4 px-4 py-2 bg-white/10 rounded-lg">Return to Lobby</button>
+                      );
+                  case 'Checkers':
+                      return <CheckersGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'TicTacToe':
+                      return <TicTacToeGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Chess':
+                      return <ChessGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Cards':
+                      return <CardGame table={socketTable} user={user!} onGameEnd={handleGameEnd} />;
+                  default:
+                      return (
+                          <div className="min-h-screen flex flex-col items-center justify-center text-white">
+                              <h2 className="text-xl font-bold mb-2">Unknown Game Type: {socketGame.gameType}</h2>
+                              <button onClick={() => setView('lobby')} className="px-4 py-2 bg-white/10 rounded-lg">Return to Lobby</button>
                           </div>
-                      </div>
-                  );
-          }
+                      );
+              }
+          };
+
+          return (
+              <GameErrorBoundary onReset={() => setView('lobby')}>
+                  {gameComponent()}
+              </GameErrorBoundary>
+          );
       }
 
-      // 2. Firebase/Local Game Mode (Fallback)
+      // 2. Local/Bot Game Mode
       if (activeTable) {
-          switch (activeTable.gameType) {
-              case 'Ludo': return <GameRoom table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'TicTacToe': return <TicTacToeGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Checkers': return <CheckersGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Chess': return <ChessGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Dice': return <DiceGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              case 'Cards': return <CardGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
-              default: return <div>Unknown Game Type</div>;
-          }
+          const localGame = () => {
+              switch (activeTable.gameType) {
+                  case 'Ludo': return <GameRoom table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'TicTacToe': return <TicTacToeGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Checkers': return <CheckersGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Chess': return <ChessGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Dice': return <DiceGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  case 'Cards': return <CardGame table={activeTable} user={user!} onGameEnd={handleGameEnd} />;
+                  default: return <div>Unknown Game Type</div>;
+              }
+          };
+          
+          return (
+              <GameErrorBoundary onReset={() => setView('lobby')}>
+                  {localGame()}
+              </GameErrorBoundary>
+          );
       }
 
-      // 3. Error/Loading State if in 'game' view but no data
-      return <div className="min-h-screen flex items-center justify-center text-white">Initializing Game...</div>;
+      // 3. Fallback Loading
+      return <LoadingScreen message="Preparing Game Environment..." />;
   };
 
   return (
@@ -395,7 +377,7 @@ export default function App() {
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
-      {/* Challenge Request Modal */}
+      {/* Overlays */}
       <AnimatePresence>
           {incomingChallenge && (
               <ChallengeRequestModal 
@@ -404,18 +386,17 @@ export default function App() {
                   onDecline={() => setIncomingChallenge(null)}
               />
           )}
+          {gameResult && (
+              <GameResultOverlay 
+                 result={gameResult.result} 
+                 amount={gameResult.amount} 
+                 onContinue={finalizeGameEnd} 
+              />
+          )}
       </AnimatePresence>
 
-      {/* Game Result Overlay */}
-      {gameResult && (
-          <GameResultOverlay 
-             result={gameResult.result} 
-             amount={gameResult.amount} 
-             onContinue={finalizeGameEnd} 
-          />
-      )}
-
       <main id="main-scroll-container" className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
+        {/* Background FX */}
         {currentView !== 'landing' && currentView !== 'auth' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
@@ -423,27 +404,20 @@ export default function App() {
             </div>
         )}
 
-        {/* CONNECTION STATUS INDICATOR */}
+        {/* Connection Indicator - Non-blocking now */}
         {user && !isConnected && currentView !== 'landing' && currentView !== 'auth' && (
-            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 text-xs font-bold backdrop-blur-sm">
+            <div className="fixed top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 bg-red-500/10 border border-red-500/20 rounded-full text-red-400 text-xs font-bold backdrop-blur-sm shadow-lg">
                 <WifiOff size={14} className="animate-pulse" /> Offline
             </div>
         )}
 
+        {/* Views */}
         {currentView === 'landing' && (
-            <LandingPage 
-                onLogin={() => setView('auth')} 
-                onHowItWorks={() => setView('how-it-works')}
-            />
+            <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />
         )}
 
         {currentView === 'auth' && (
-            <AuthScreen onAuthenticated={(guestUser?: User) => {
-                if (guestUser) {
-                    setUser(guestUser);
-                    setView('dashboard');
-                }
-            }} />
+            <AuthScreen onAuthenticated={(u) => { if(u) { setUser(u); setView('dashboard'); } }} />
         )}
 
         {user && (
@@ -453,7 +427,7 @@ export default function App() {
                         user={user} 
                         setView={setView} 
                         onTopUp={() => setView('finance')} 
-                        onQuickMatch={handleDashboardQuickMatch}
+                        onQuickMatch={(id) => { if(id) setPreSelectedGame(id); else setPreSelectedGame(null); setView('lobby'); }}
                     />
                 )}
                 
@@ -472,16 +446,14 @@ export default function App() {
                         user={user} 
                         gameType={matchmakingConfig?.gameType || 'Ludo'}
                         stake={matchmakingConfig?.stake || 100}
-                        onMatchFound={() => {}} // Handled by socket event
+                        onMatchFound={() => {}} 
                         onCancel={cancelMatchmaking}
-                        isSocketMode={true} // ENABLE SOCKET MODE FOR MATCHMAKING
+                        isSocketMode={true} 
                     />
                 )}
 
-                {/* UNIFIED GAME RENDERER */}
                 {currentView === 'game' && renderGameView()}
 
-                {/* Other Views */}
                 {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
                 {currentView === 'profile' && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
                 {currentView === 'admin' && <AdminDashboard user={user} />}
