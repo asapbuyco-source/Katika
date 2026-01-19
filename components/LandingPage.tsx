@@ -13,7 +13,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
 
   // Simulated Live Winners Data
   const winners = [
-    { name: "Amara", amount: "5,000", game: "Ludo" },
+    { name: "Amara", amount: "5,000", game: "Dice" },
     { name: "Jean-Paul", amount: "12,500", game: "Chess" },
     { name: "Sarah", amount: "2,000", game: "Dice" },
     { name: "Franck", amount: "50,000", game: "Checkers" },
@@ -27,16 +27,6 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
   }, []);
 
   const games = [
-    { 
-        name: "Speed Ludo", 
-        desc: "Classic race to the finish. 4 Players, 1 Winner.", 
-        players: "842", 
-        pot: "1.2M", 
-        icon: LayoutGrid, 
-        color: "text-cam-green", 
-        bg: "bg-cam-green/10", 
-        border: "border-cam-green/20" 
-    },
     { 
         name: "Pro Chess", 
         desc: "Pure skill. High stakes strategy battles.", 
@@ -183,7 +173,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                 </div>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {games.map((game, idx) => (
                     <motion.div
                         key={idx}
