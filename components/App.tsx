@@ -1,32 +1,32 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ViewState, User, Table, Challenge } from './types';
-import { Dashboard } from './components/Dashboard';
-import { Lobby } from './components/Lobby';
-import { GameRoom } from './components/GameRoom'; // Keep for non-socket fallback or reference
-import { CheckersGame } from './components/CheckersGame';
-import { DiceGame } from './components/DiceGame';
-import { TicTacToeGame } from './components/TicTacToeGame';
-import { ChessGame } from './components/ChessGame';
-import { CardGame } from './components/CardGame';
-import { Finance } from './components/Finance';
-import { Navigation } from './components/Navigation';
-import { LandingPage } from './components/LandingPage';
-import { MatchmakingScreen } from './components/MatchmakingScreen';
-import { AuthScreen } from './components/AuthScreen';
-import { Profile } from './components/Profile';
-import { HowItWorks } from './components/HowItWorks';
-import { AdminDashboard } from './components/AdminDashboard';
-import { HelpCenter } from './components/HelpCenter';
-import { ReportBug } from './components/ReportBug';
-import { TermsOfService } from './components/TermsOfService';
-import { Forum } from './components/Forum';
-import { GameResultOverlay } from './components/GameResultOverlay';
-import { ChallengeRequestModal } from './components/ChallengeRequestModal';
+import { ViewState, User, Table, Challenge } from '../types';
+import { Dashboard } from './Dashboard';
+import { Lobby } from './Lobby';
+import { GameRoom } from './GameRoom'; // Keep for non-socket fallback or reference
+import { CheckersGame } from './CheckersGame';
+import { DiceGame } from './DiceGame';
+import { TicTacToeGame } from './TicTacToeGame';
+import { ChessGame } from './ChessGame';
+import { CardGame } from './CardGame';
+import { Finance } from './Finance';
+import { Navigation } from './Navigation';
+import { LandingPage } from './LandingPage';
+import { MatchmakingScreen } from './MatchmakingScreen';
+import { AuthScreen } from './AuthScreen';
+import { Profile } from './Profile';
+import { HowItWorks } from './HowItWorks';
+import { AdminDashboard } from './AdminDashboard';
+import { HelpCenter } from './HelpCenter';
+import { ReportBug } from './ReportBug';
+import { TermsOfService } from './TermsOfService';
+import { Forum } from './Forum';
+import { GameResultOverlay } from './GameResultOverlay';
+import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
     auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, 
     createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame 
-} from './services/firebase';
+} from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
@@ -144,11 +144,11 @@ export default function App() {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
 
-                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
+                  unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser: User) => {
                       setUser(updatedUser);
                   });
 
-                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
+                  unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge: Challenge | null) => {
                       setIncomingChallenge(challenge);
                   });
 

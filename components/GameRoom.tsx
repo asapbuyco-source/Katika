@@ -282,7 +282,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd }) =>
   };
 
   const switchTurn = async (currentState: LudoGameState) => {
-      const nextTurn = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
+      const nextTurn: PlayerColor = currentState.currentTurn === 'Red' ? 'Yellow' : 'Red';
       const nextState = {
           ...currentState,
           currentTurn: nextTurn,
