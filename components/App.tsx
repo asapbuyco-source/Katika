@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -15,7 +15,7 @@ import { MatchmakingScreen } from './MatchmakingScreen';
 import { AuthScreen } from './AuthScreen';
 import { Profile } from './Profile';
 import { HowItWorks } from './HowItWorks';
-import { AdminDashboard } from './components/AdminDashboard';
+import { AdminDashboard } from './AdminDashboard';
 import { HelpCenter } from './HelpCenter';
 import { ReportBug } from './ReportBug';
 import { TermsOfService } from './TermsOfService';
@@ -41,7 +41,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -116,16 +116,18 @@ export default function App() {
         setConnectionTime(prev => prev + 1);
     }, 1000);
 
+    console.log("Initializing Socket Connection to:", SOCKET_URL);
+
     const newSocket = io(SOCKET_URL, {
-        reconnectionAttempts: 5,
-        timeout: 10000, // 10s timeout
-        transports: ['websocket', 'polling'] // Try both
+        reconnectionAttempts: 10,
+        timeout: 20000, 
+        transports: ['websocket', 'polling'] // Try both transports
     });
 
     newSocket.on('connect', () => {
         console.log("Connected to Vantage Referee (Railway)");
         setIsConnected(true);
-        clearInterval(timerInterval);
+        // If we connected after entering bypass mode, that's great, user will just see offline badge disappear
     });
 
     newSocket.on('disconnect', () => {
@@ -172,6 +174,15 @@ export default function App() {
     };
   }, []);
 
+  // 2. Automatic Fallback Logic
+  useEffect(() => {
+      // If 7 seconds pass and not connected, auto-enable offline mode
+      if (connectionTime >= 7 && !isConnected && !bypassConnection) {
+          console.log("Connection timeout reached. Switching to Offline Mode.");
+          setBypassConnection(true);
+      }
+  }, [connectionTime, isConnected, bypassConnection]);
+
   // Handle Game Over Logic with access to 'user' state
   useEffect(() => {
       if (!socket) return;
@@ -190,7 +201,7 @@ export default function App() {
   }, [socket, user]);
 
 
-  // 2. Timer Logic
+  // 3. Timer Logic
   useEffect(() => {
       if (!socketGame || !socketGame.turnExpiresAt) return;
 
@@ -202,7 +213,7 @@ export default function App() {
       return () => clearInterval(interval);
   }, [socketGame]);
 
-  // 3. Firebase Auth & Real-time Database Listener
+  // 4. Firebase Auth & Real-time Database Listener
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
@@ -239,7 +250,7 @@ export default function App() {
       };
   }, []);
 
-  // 4. Navigation Guard
+  // 5. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 

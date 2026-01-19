@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -41,7 +41,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -159,6 +159,11 @@ export default function App() {
 
     newSocket.on('dice_rolled', ({ value }) => {
         console.log("Dice rolled:", value);
+    });
+
+    // Handle Win/Loss based on User ID
+    newSocket.on('game_over', ({ winner }) => {
+        // Handled by generic listener below
     });
 
     setSocket(newSocket);
