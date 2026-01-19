@@ -41,11 +41,8 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -127,6 +124,7 @@ export default function App() {
         console.log("Connected to Vantage Referee (Railway)");
         setIsConnected(true);
         setHasConnectedOnce(true);
+        setBypassConnection(false); // Auto-recover from offline mode
         clearInterval(timerInterval);
     });
 
@@ -142,6 +140,7 @@ export default function App() {
         console.log("Socket Match Found!", gameState);
         setSocketGame(gameState);
         setIsWaitingForSocketMatch(false);
+        setBypassConnection(false);
         setView('game');
     });
 
@@ -161,11 +160,6 @@ export default function App() {
         console.log("Dice rolled:", value);
     });
 
-    // Handle Win/Loss based on User ID
-    newSocket.on('game_over', ({ winner }) => {
-        // Handled by generic listener below
-    });
-
     setSocket(newSocket);
 
     return () => {
@@ -173,6 +167,22 @@ export default function App() {
         newSocket.close();
     };
   }, []);
+
+  // 2. Automatic Fallback Logic
+  useEffect(() => {
+      // If 15 seconds pass and not connected, auto-enable offline mode
+      if (connectionTime >= 15 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+          console.log("Connection timeout reached. Switching to Offline Mode.");
+          setBypassConnection(true);
+      }
+  }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
+
+  // 3. Safety: If game exists, ensure we aren't in offline mode
+  useEffect(() => {
+      if (socketGame && bypassConnection) {
+          setBypassConnection(false);
+      }
+  }, [socketGame, bypassConnection]);
 
   // Handle Game Over Logic with access to 'user' state
   useEffect(() => {
@@ -184,7 +194,6 @@ export default function App() {
           } else {
               setGameResult({ result: 'loss', amount: 0 });
           }
-          setSocketGame(null);
       };
 
       socket.on('game_over', handleGameOver);
@@ -192,7 +201,7 @@ export default function App() {
   }, [socket, user]);
 
 
-  // 2. Timer Logic
+  // 4. Timer Logic
   useEffect(() => {
       if (!socketGame || !socketGame.turnExpiresAt) return;
 
@@ -204,7 +213,7 @@ export default function App() {
       return () => clearInterval(interval);
   }, [socketGame]);
 
-  // 3. Firebase Auth & Real-time Database Listener
+  // 5. Firebase Auth & Real-time Database Listener
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
@@ -241,7 +250,7 @@ export default function App() {
       };
   }, []);
 
-  // 4. Navigation Guard
+  // 6. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 
@@ -387,7 +396,6 @@ export default function App() {
   }
 
   // Socket Connection Loading Screen with Auto-Fallback
-  // Only show this if we have NEVER connected and we haven't bypassed yet
   if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
@@ -397,7 +405,6 @@ export default function App() {
                   {connectionTime > 3 ? "Waking up server..." : "Establishing secure connection..."}
               </p>
               
-              {/* Progress Indicator */}
               <div className="w-64 h-2 bg-royal-800 rounded-full overflow-hidden mb-4">
                   <motion.div 
                     initial={{ width: 0 }}
@@ -406,7 +413,7 @@ export default function App() {
                     className="h-full bg-gold-500"
                   />
               </div>
-              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 7 - connectionTime)}s...</p>
+              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 15 - connectionTime)}s...</p>
               
               <button 
                 onClick={() => setBypassConnection(true)}
@@ -424,7 +431,7 @@ export default function App() {
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
-      {/* Connection Status Indicator - OFFLINE MODE (Only show if NOT in a socket game) */}
+      {/* Connection Status Indicators */}
       {user && (!isConnected && bypassConnection && !socketGame) && currentView !== 'landing' && currentView !== 'auth' && (
           <div className="fixed top-4 right-4 z-50 animate-pulse">
               <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
@@ -433,7 +440,6 @@ export default function App() {
           </div>
       )}
 
-      {/* Connection Status Indicator - RECONNECTING (For subsequent drops during gameplay) */}
       {user && (!isConnected && !bypassConnection && hasConnectedOnce) && (
           <div className="fixed top-4 right-4 z-50">
               <div className="bg-yellow-500/20 border border-yellow-500/50 backdrop-blur-md text-yellow-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
@@ -442,7 +448,6 @@ export default function App() {
           </div>
       )}
 
-      {/* Challenge Request Modal */}
       <AnimatePresence>
           {incomingChallenge && (
               <ChallengeRequestModal 
@@ -453,7 +458,6 @@ export default function App() {
           )}
       </AnimatePresence>
 
-      {/* Game Result Overlay */}
       {gameResult && (
           <GameResultOverlay 
              result={gameResult.result} 
@@ -470,113 +474,44 @@ export default function App() {
             </div>
         )}
 
-        {currentView === 'landing' && (
-            <LandingPage 
-                onLogin={() => setView('auth')} 
-                onHowItWorks={() => setView('how-it-works')}
-            />
-        )}
-
-        {currentView === 'auth' && (
-            <AuthScreen onAuthenticated={(guestUser?: User) => {
-                if (guestUser) {
-                    setUser(guestUser);
-                    setView('dashboard');
-                }
-            }} />
-        )}
+        {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />}
+        {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} />}
 
         {user && (
             <>
-                {currentView === 'dashboard' && (
-                    <Dashboard 
-                        user={user} 
-                        setView={setView} 
-                        onTopUp={() => setView('finance')} 
-                        onQuickMatch={handleDashboardQuickMatch}
-                    />
-                )}
-                
-                {currentView === 'lobby' && (
-                    <Lobby 
-                        user={user}
-                        setView={setView} 
-                        onQuickMatch={startMatchmaking}
-                        initialGameId={preSelectedGame}
-                        onClearInitialGame={() => setPreSelectedGame(null)}
-                    />
-                )}
-
+                {currentView === 'dashboard' && <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} />}
+                {currentView === 'lobby' && <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} />}
                 {currentView === 'matchmaking' && (
                     <MatchmakingScreen 
                         user={user} 
                         gameType={matchmakingConfig?.gameType || 'Ludo'}
                         stake={matchmakingConfig?.stake || 100}
-                        onMatchFound={() => {}} // Handled by socket event
+                        onMatchFound={() => {}} 
                         onCancel={cancelMatchmaking}
-                        isSocketMode={true} // ENABLE SOCKET MODE FOR MATCHMAKING
+                        isSocketMode={true} 
                     />
                 )}
 
-                {/* SOCKET GAME RENDERING */}
+                {/* SOCKET GAME RENDERING - UNIVERSAL */}
                 {currentView === 'game' && socketGame ? (
                      <GameErrorBoundary onReset={() => setView('lobby')}>
-                         {socketGame.gameType === 'Dice' && (
-                             <DiceGame 
-                                table={constructTableFromSocket(socketGame)}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                                socket={socket}
-                                socketGame={socketGame}
-                             />
-                         )}
-                         {socketGame.gameType === 'TicTacToe' && (
-                             <TicTacToeGame 
-                                table={constructTableFromSocket(socketGame)}
-                                user={user}
-                                onGameEnd={handleGameEnd}
-                                socket={socket}
-                                socketGame={socketGame}
-                             />
-                         )}
-                         {/* Fallback for other games: render as local for now, but prevent the 'Connecting...' hang */}
-                         {['Checkers', 'Chess', 'Cards', 'Ludo'].includes(socketGame.gameType) && (
-                             <div className="relative">
-                                 {/* Overlay to inform P2P limitation for unfinished games */}
-                                 <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-black/70 backdrop-blur-md px-4 py-2 rounded-full border border-white/10 text-xs text-white flex items-center gap-2">
-                                     <AlertTriangle size={14} className="text-yellow-500" />
-                                     <span>Full P2P not yet supported for {socketGame.gameType}. Playing Local Mode.</span>
-                                 </div>
-                                 
-                                 {socketGame.gameType === 'Checkers' && <CheckersGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} />}
-                                 {socketGame.gameType === 'Chess' && <ChessGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} />}
-                                 {socketGame.gameType === 'Cards' && <CardGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} />}
-                                 {socketGame.gameType === 'Ludo' && <GameRoom table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} />}
-                             </div>
-                         )}
+                         {socketGame.gameType === 'Dice' && <DiceGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
+                         {socketGame.gameType === 'TicTacToe' && <TicTacToeGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
+                         {socketGame.gameType === 'Checkers' && <CheckersGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
+                         {socketGame.gameType === 'Chess' && <ChessGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
+                         {socketGame.gameType === 'Cards' && <CardGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
+                         {socketGame.gameType === 'Ludo' && <GameRoom table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
                      </GameErrorBoundary>
                 ) : (
                     // Fallback to original Game Room (Local/Firebase Mode)
                     currentView === 'game' && activeTable && (
                         <GameErrorBoundary onReset={() => setView('lobby')}>
-                            {activeTable.gameType === 'Ludo' && (
-                                <GameRoom table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
-                            {activeTable.gameType === 'TicTacToe' && (
-                                <TicTacToeGame table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
-                            {activeTable.gameType === 'Checkers' && (
-                                <CheckersGame table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
-                            {activeTable.gameType === 'Chess' && (
-                                <ChessGame table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
-                            {activeTable.gameType === 'Dice' && (
-                                <DiceGame table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
-                            {activeTable.gameType === 'Cards' && (
-                                <CardGame table={activeTable} user={user} onGameEnd={handleGameEnd} />
-                            )}
+                            {activeTable.gameType === 'Ludo' && <GameRoom table={activeTable} user={user} onGameEnd={handleGameEnd} />}
+                            {activeTable.gameType === 'TicTacToe' && <TicTacToeGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
+                            {activeTable.gameType === 'Checkers' && <CheckersGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
+                            {activeTable.gameType === 'Chess' && <ChessGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
+                            {activeTable.gameType === 'Dice' && <DiceGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
+                            {activeTable.gameType === 'Cards' && <CardGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
                         </GameErrorBoundary>
                     )
                 )}
