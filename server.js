@@ -32,7 +32,7 @@ const privateMatches = {}; // roomId -> { stake, gameType, players: [] }
 
 const createInitialState = (gameType, players, stake) => {
     const base = {
-        players,
+        players, // Ensure this is always an array [p1, p2]
         turn: players[0], // First player starts
         stake,
         gameType,
@@ -51,24 +51,36 @@ const createInitialState = (gameType, players, stake) => {
     }
 
     if (gameType === 'Ludo') {
-        // Initialize simple 1-piece Ludo positions
         return {
             ...base,
             positions: { [players[0]]: 0, [players[1]]: 0 },
             diceValue: null
         };
     }
+
+    if (gameType === 'TicTacToe') {
+        return {
+            ...base,
+            board: Array(9).fill(null),
+            winner: null
+        };
+    }
+
+    if (gameType === 'Checkers' || gameType === 'Chess') {
+        return {
+            ...base,
+            board: [], // Client will init board for now
+            lastMove: null
+        };
+    }
     
-    // Default generic state for others
+    // Default generic state for others (Cards, etc.)
     return { ...base, board: null, lastMove: null };
 };
 
 const handleDiceAction = (game, action, userId) => {
     // Action: { type: 'ROLL' }
     if (action.type === 'ROLL') {
-        // Validate Turn
-        // In Dice, players roll simultaneously or sequentially depending on implementation.
-        // Here: Sequential.
         if (game.turn !== userId) return null;
 
         const d1 = Math.ceil(Math.random() * 6);
@@ -76,25 +88,19 @@ const handleDiceAction = (game, action, userId) => {
         
         game.roundRolls[userId] = [d1, d2];
         
-        // Check if other player has rolled this round
         const otherPlayer = game.players.find(p => p !== userId);
         
         if (game.roundRolls[otherPlayer]) {
-            // Both rolled, evaluate round
+            // Both rolled
             const p1Roll = game.roundRolls[userId];
             const p2Roll = game.roundRolls[otherPlayer];
             const p1Sum = p1Roll[0] + p1Roll[1];
             const p2Sum = p2Roll[0] + p2Roll[1];
 
-            let roundWinner = null;
             if (p1Sum > p2Sum) {
                 game.scores[userId]++;
-                roundWinner = userId;
             } else if (p2Sum > p1Sum) {
                 game.scores[otherPlayer]++;
-                roundWinner = otherPlayer;
-            } else {
-                roundWinner = 'tie';
             }
 
             game.roundState = 'scored';
@@ -112,13 +118,11 @@ const handleDiceAction = (game, action, userId) => {
                     game.currentRound++;
                     game.roundRolls = { [userId]: null, [otherPlayer]: null };
                     game.roundState = 'waiting';
-                    // Loser or alternating starts next? Let's alternate based on round
                     game.turn = game.players[(game.currentRound - 1) % 2];
                     io.to(game.roomId).emit('game_update', game);
-                }, 3000); // 3s delay to show results
+                }, 3000); 
             }
         } else {
-            // Wait for opponent
             game.turn = otherPlayer;
         }
         
@@ -127,7 +131,7 @@ const handleDiceAction = (game, action, userId) => {
     return null;
 };
 
-// Simple Ludo Action Handler (Movement)
+// Simple Ludo Action Handler
 const handleLudoAction = (game, action, userId) => {
     if (game.turn !== userId) return null;
 
@@ -139,23 +143,17 @@ const handleLudoAction = (game, action, userId) => {
 
     if (action.type === 'MOVE') {
         if (!game.diceValue) return null;
-        
-        // Simple move logic: advance piece by dice value
-        // Loop around track of size 16
         const currentPos = game.positions[userId];
         let newPos = currentPos + game.diceValue;
-        
-        if (newPos >= 16) newPos = 15; // Cap at finish for demo
+        if (newPos >= 16) newPos = 15; 
 
         game.positions[userId] = newPos;
-        game.diceValue = null; // Reset dice
+        game.diceValue = null; 
 
-        // Check Win
         if (newPos === 15) {
             game.status = 'completed';
             game.winner = userId;
         } else {
-            // Switch turn
             const otherPlayer = game.players.find(p => p !== userId);
             game.turn = otherPlayer;
         }
@@ -181,19 +179,17 @@ io.on('connection', (socket) => {
         return;
     }
 
-    // --- MATCHMAKING ---
     const queueKey = `${gameType}_${numericStake}`;
 
     if (privateRoomId) {
         // Private Match Logic
         const roomId = privateRoomId;
         if (privateMatches[roomId]) {
-             // Join existing private
              const match = privateMatches[roomId];
              const opponent = match.players[0];
              delete privateMatches[roomId];
 
-             const roomIdReal = `private_${roomId}`; // internal room id
+             const roomIdReal = `private_${roomId}`;
              const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
              gameState.roomId = roomIdReal;
              
@@ -208,7 +204,6 @@ io.on('connection', (socket) => {
              io.to(roomIdReal).emit('match_found', gameState);
 
         } else {
-             // Create private
              privateMatches[roomId] = { stake: numericStake, gameType, players: [{ userId, socketId: socket.id }] };
              userSessions[userId] = { socketId: socket.id, roomId: null };
              socket.emit('waiting_for_opponent');
@@ -219,7 +214,7 @@ io.on('connection', (socket) => {
     // Public Match
     if (waitingQueues[queueKey]) {
         const opponent = waitingQueues[queueKey];
-        if (opponent.userId === userId) return; // Prevent self-match
+        if (opponent.userId === userId) return; 
 
         delete waitingQueues[queueKey];
         const roomId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
@@ -247,7 +242,6 @@ io.on('connection', (socket) => {
       const game = activeGames[roomId];
       if (!game) return;
       
-      // Identify user from socket
       const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
       if (!userId) return;
 
@@ -259,8 +253,11 @@ io.on('connection', (socket) => {
           updatedGame = handleLudoAction(game, action, userId);
       } else {
           // Generic relay for other games (Client-side logic trust for MVP)
+          // Simple Turn Switch for generic games
+          const otherPlayer = game.players.find(p => p !== userId);
+          game.turn = otherPlayer;
           io.to(roomId).emit('game_event', { action, userId });
-          return;
+          updatedGame = game;
       }
 
       if (updatedGame) {
@@ -273,7 +270,6 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-      // Cleanup queues
       for (const key in waitingQueues) {
           if (waitingQueues[key].socketId === socket.id) delete waitingQueues[key];
       }
