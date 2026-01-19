@@ -29,7 +29,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff, RefreshCw } from 'lucide-react';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
@@ -42,7 +42,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -96,6 +99,7 @@ export default function App() {
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(20); 
@@ -122,6 +126,7 @@ export default function App() {
     newSocket.on('connect', () => {
         console.log("Connected to Vantage Referee (Railway)");
         setIsConnected(true);
+        setHasConnectedOnce(true);
         clearInterval(timerInterval);
     });
 
@@ -419,8 +424,8 @@ export default function App() {
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
-      {/* Connection Status Indicator - OFFLINE MODE */}
-      {user && (!isConnected && bypassConnection) && currentView !== 'landing' && currentView !== 'auth' && (
+      {/* Connection Status Indicator - OFFLINE MODE (Only show if NOT in a socket game) */}
+      {user && (!isConnected && bypassConnection && !socketGame) && currentView !== 'landing' && currentView !== 'auth' && (
           <div className="fixed top-4 right-4 z-50 animate-pulse">
               <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
                   <WifiOff size={12} /> Offline Mode
@@ -428,7 +433,7 @@ export default function App() {
           </div>
       )}
 
-      {/* Connection Status Indicator - RECONNECTING (For subsequent drops) */}
+      {/* Connection Status Indicator - RECONNECTING (For subsequent drops during gameplay) */}
       {user && (!isConnected && !bypassConnection && hasConnectedOnce) && (
           <div className="fixed top-4 right-4 z-50">
               <div className="bg-yellow-500/20 border border-yellow-500/50 backdrop-blur-md text-yellow-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">

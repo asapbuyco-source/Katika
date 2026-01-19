@@ -42,7 +42,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  public state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -118,6 +121,7 @@ export default function App() {
 
     const newSocket = io(SOCKET_URL, {
         reconnectionAttempts: 10,
+        reconnectionDelay: 2000,
         timeout: 20000, 
         transports: ['websocket', 'polling'] // Try both transports
     });
@@ -132,6 +136,7 @@ export default function App() {
 
     newSocket.on('disconnect', () => {
         setIsConnected(false);
+        // Do NOT reset hasConnectedOnce here, to prevent offline mode screen from flashing
     });
 
     newSocket.on('connect_error', (err) => {
@@ -142,6 +147,8 @@ export default function App() {
         console.log("Socket Match Found!", gameState);
         setSocketGame(gameState);
         setIsWaitingForSocketMatch(false);
+        // Ensure we exit offline mode if a match is found (even if socket flaked)
+        setBypassConnection(false); 
         setView('game');
     });
 
@@ -161,11 +168,6 @@ export default function App() {
         console.log("Dice rolled:", value);
     });
 
-    // Handle Win/Loss based on User ID
-    newSocket.on('game_over', ({ winner }) => {
-        // Handled by generic listener below
-    });
-
     setSocket(newSocket);
 
     return () => {
@@ -177,12 +179,19 @@ export default function App() {
   // 2. Automatic Fallback Logic
   useEffect(() => {
       // If 15 seconds pass and not connected, auto-enable offline mode
-      // Only do this if we haven't connected successfully yet
-      if (connectionTime >= 15 && !isConnected && !bypassConnection && !hasConnectedOnce) {
+      // CRITICAL FIX: Do NOT switch to offline mode if we have ever connected OR if a game is currently loaded
+      if (connectionTime >= 15 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
           console.log("Connection timeout reached. Switching to Offline Mode.");
           setBypassConnection(true);
       }
-  }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce]);
+  }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
+
+  // 3. Safety: If game exists, ensure we aren't in offline mode
+  useEffect(() => {
+      if (socketGame && bypassConnection) {
+          setBypassConnection(false);
+      }
+  }, [socketGame, bypassConnection]);
 
   // Handle Game Over Logic with access to 'user' state
   useEffect(() => {
@@ -194,7 +203,7 @@ export default function App() {
           } else {
               setGameResult({ result: 'loss', amount: 0 });
           }
-          setSocketGame(null);
+          // Do not immediately nullify socketGame to prevent UI flash, handled by finalize
       };
 
       socket.on('game_over', handleGameOver);
@@ -202,7 +211,7 @@ export default function App() {
   }, [socket, user]);
 
 
-  // 3. Timer Logic
+  // 4. Timer Logic
   useEffect(() => {
       if (!socketGame || !socketGame.turnExpiresAt) return;
 
@@ -214,7 +223,7 @@ export default function App() {
       return () => clearInterval(interval);
   }, [socketGame]);
 
-  // 4. Firebase Auth & Real-time Database Listener
+  // 5. Firebase Auth & Real-time Database Listener
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
@@ -251,7 +260,7 @@ export default function App() {
       };
   }, []);
 
-  // 5. Navigation Guard
+  // 6. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 
@@ -434,8 +443,8 @@ export default function App() {
         <Navigation currentView={currentView} setView={setView} user={user} />
       )}
 
-      {/* Connection Status Indicator - OFFLINE MODE */}
-      {user && (!isConnected && bypassConnection) && currentView !== 'landing' && currentView !== 'auth' && (
+      {/* Connection Status Indicator - OFFLINE MODE (Only show if NOT in a socket game) */}
+      {user && (!isConnected && bypassConnection && !socketGame) && currentView !== 'landing' && currentView !== 'auth' && (
           <div className="fixed top-4 right-4 z-50 animate-pulse">
               <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
                   <WifiOff size={12} /> Offline Mode
@@ -443,7 +452,7 @@ export default function App() {
           </div>
       )}
 
-      {/* Connection Status Indicator - RECONNECTING (For subsequent drops) */}
+      {/* Connection Status Indicator - RECONNECTING (For subsequent drops during gameplay) */}
       {user && (!isConnected && !bypassConnection && hasConnectedOnce) && (
           <div className="fixed top-4 right-4 z-50">
               <div className="bg-yellow-500/20 border border-yellow-500/50 backdrop-blur-md text-yellow-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
