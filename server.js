@@ -14,14 +14,10 @@ app.get('/', (req, res) => {
 const httpServer = createServer(app);
 
 // CRITICAL: CORS Configuration for Netlify & Localhost
+// Updated to accept ALL origins during debugging to fix connection issues
 const io = new Server(httpServer, {
   cors: {
-    origin: [
-        process.env.FRONTEND_URL || "https://heroic-brioche-b08cf2.netlify.app",
-        "http://localhost:5173", 
-        "http://localhost:3000",
-        "http://127.0.0.1:5173"
-    ],
+    origin: "*", 
     methods: ["GET", "POST"]
   }
 });

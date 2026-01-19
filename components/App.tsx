@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -15,7 +15,7 @@ import { MatchmakingScreen } from './MatchmakingScreen';
 import { AuthScreen } from './AuthScreen';
 import { Profile } from './Profile';
 import { HowItWorks } from './HowItWorks';
-import { AdminDashboard } from './AdminDashboard';
+import { AdminDashboard } from './components/AdminDashboard';
 import { HelpCenter } from './HelpCenter';
 import { ReportBug } from './ReportBug';
 import { TermsOfService } from './TermsOfService';
@@ -29,7 +29,7 @@ import {
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff } from 'lucide-react';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
@@ -42,7 +42,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -50,6 +53,11 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
 
   componentDidCatch(error: any, errorInfo: ErrorInfo) {
     console.error("Game Critical Error:", error, errorInfo);
+  }
+
+  handleReset = () => {
+    this.setState({ hasError: false });
+    this.props.onReset();
   }
 
   render() {
@@ -60,7 +68,7 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
           <h2 className="text-xl font-bold text-white mb-2">Game Error</h2>
           <p className="text-slate-400 mb-6">We apologize for the interruption.</p>
           <button 
-            onClick={() => { this.setState({ hasError: false }); this.props.onReset(); }}
+            onClick={this.handleReset}
             className="px-6 py-3 bg-white/10 rounded-xl text-white font-bold hover:bg-white/20"
           >
             Return to Lobby
@@ -91,43 +99,41 @@ export default function App() {
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [socketGame, setSocketGame] = useState<any>(null); 
+  const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number>(20); 
   
   // Connection Handling
   const [bypassConnection, setBypassConnection] = useState(false);
-  const [showSlowConnectionWarning, setShowSlowConnectionWarning] = useState(false);
+  const [connectionTime, setConnectionTime] = useState(0);
 
-  // 1. Initialize Socket Connection
+  // 1. Initialize Socket Connection with Fallback Logic
   useEffect(() => {
-    // Determine URL based on environment
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const SOCKET_URL = isLocal ? "http://localhost:8080" : "https://katika-production.up.railway.app";
-
-    console.log("Attempting socket connection to:", SOCKET_URL);
+    const SOCKET_URL = "https://katika-production.up.railway.app";
     
+    // Timer to track connection duration
+    const timerInterval = setInterval(() => {
+        setConnectionTime(prev => prev + 1);
+    }, 1000);
+
     const newSocket = io(SOCKET_URL, {
-        reconnectionAttempts: 3,
-        timeout: 5000
+        reconnectionAttempts: 5,
+        timeout: 10000, // 10s timeout
+        transports: ['websocket', 'polling'] // Try both
     });
 
-    const connectionTimer = setTimeout(() => {
-        if (!newSocket.connected) {
-            setShowSlowConnectionWarning(true);
-        }
-    }, 3000); // Show warning after 3 seconds
-
     newSocket.on('connect', () => {
-        console.log("Connected to Vantage Referee");
+        console.log("Connected to Vantage Referee (Railway)");
         setIsConnected(true);
-        setShowSlowConnectionWarning(false);
-        clearTimeout(connectionTimer);
+        clearInterval(timerInterval);
     });
 
     newSocket.on('disconnect', () => {
-        console.log("Disconnected from Referee");
         setIsConnected(false);
+    });
+
+    newSocket.on('connect_error', (err) => {
+        console.warn("Socket Connection Error:", err.message);
     });
 
     newSocket.on('match_found', (gameState) => {
@@ -155,13 +161,13 @@ export default function App() {
 
     // Handle Win/Loss based on User ID
     newSocket.on('game_over', ({ winner }) => {
-        // Game over logic handled in specific game components or generic listener
+        // Handled by generic listener below
     });
 
     setSocket(newSocket);
 
     return () => {
-        clearTimeout(connectionTimer);
+        clearInterval(timerInterval);
         newSocket.close();
     };
   }, []);
@@ -252,15 +258,15 @@ export default function App() {
   // Modified Matchmaking to use Socket
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user) return;
-      
-      // If we are in offline mode (bypassed connection), we can only play bots
-      if (bypassConnection && stake !== -1) {
-          alert("You are in Offline Mode. Only bot matches are available.");
+
+      // OFFLINE MODE CHECK
+      if ((!isConnected || bypassConnection) && stake !== -1) {
+          alert("You are currently in Offline Mode. Please check your internet or wait for the server to reconnect to play P2P matches. Bot matches are available.");
           return;
       }
 
+      // Bot match (Firebase/Local)
       if (stake === -1) {
-          // Bot match (Firebase/Local)
           try {
               const gameId = await createBotMatch(user, gameType);
               const gameData = await getGame(gameId);
@@ -284,10 +290,7 @@ export default function App() {
           return;
       }
 
-      if (!socket || !isConnected) {
-          alert("Cannot connect to matchmaking server. Please check your internet.");
-          return;
-      }
+      if (!socket) return;
 
       // Handle Private Matches via Socket
       if (specificGameId) {
@@ -362,36 +365,33 @@ export default function App() {
       );
   }
 
-  // Socket Connection Loading Screen (with fallback)
+  // Socket Connection Loading Screen with Auto-Fallback
   if (!isConnected && user && !bypassConnection) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
               <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
               <p className="text-slate-400 max-w-md mb-8">
-                  Establishing secure connection to game servers.
+                  {connectionTime > 3 ? "Waking up server..." : "Establishing secure connection..."}
               </p>
               
-              {showSlowConnectionWarning && (
+              {/* Progress Indicator */}
+              <div className="w-64 h-2 bg-royal-800 rounded-full overflow-hidden mb-4">
                   <motion.div 
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex flex-col items-center gap-4"
-                  >
-                      <div className="text-yellow-500 text-sm flex items-center gap-2">
-                          <AlertTriangle size={16} /> Connection is taking longer than expected.
-                      </div>
-                      <button 
-                        onClick={() => setBypassConnection(true)}
-                        className="px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/10 rounded-xl text-white font-bold transition-all flex items-center gap-2"
-                      >
-                          <Play size={16} className="fill-current" /> Continue Offline
-                      </button>
-                      <p className="text-xs text-slate-500">
-                          (Offline mode allows Bot matches & local features)
-                      </p>
-                  </motion.div>
-              )}
+                    initial={{ width: 0 }}
+                    animate={{ width: '100%' }}
+                    transition={{ duration: 7, ease: "linear" }}
+                    className="h-full bg-gold-500"
+                  />
+              </div>
+              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 7 - connectionTime)}s...</p>
+              
+              <button 
+                onClick={() => setBypassConnection(true)}
+                className="mt-8 text-white/50 hover:text-white text-sm underline"
+              >
+                  Skip & Play Offline Now
+              </button>
           </div>
       );
   }
@@ -400,6 +400,15 @@ export default function App() {
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum'].includes(currentView) && (
         <Navigation currentView={currentView} setView={setView} user={user} />
+      )}
+
+      {/* Connection Status Indicator (if offline/bypassed) */}
+      {user && (!isConnected || bypassConnection) && currentView !== 'landing' && currentView !== 'auth' && (
+          <div className="fixed top-4 right-4 z-50 animate-pulse">
+              <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
+                  <WifiOff size={12} /> Offline Mode
+              </div>
+          </div>
       )}
 
       {/* Challenge Request Modal */}
@@ -427,13 +436,6 @@ export default function App() {
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
-            </div>
-        )}
-
-        {/* Offline Indicator */}
-        {user && (!isConnected || bypassConnection) && currentView !== 'landing' && currentView !== 'auth' && (
-            <div className="absolute top-4 right-4 z-50 bg-red-500/20 border border-red-500/50 text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2">
-                <WifiOff size={12} /> Offline Mode
             </div>
         )}
 
