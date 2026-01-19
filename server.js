@@ -13,8 +13,7 @@ app.get('/', (req, res) => {
 
 const httpServer = createServer(app);
 
-// CRITICAL: CORS Configuration for Netlify & Localhost
-// Updated to accept ALL origins during debugging to fix connection issues
+// CRITICAL: CORS Configuration
 const io = new Server(httpServer, {
   cors: {
     origin: "*", 
@@ -22,7 +21,6 @@ const io = new Server(httpServer, {
   }
 });
 
-// 1. Use Railway Port or default 8080
 const PORT = process.env.PORT || 8080;
 const TURN_DURATION_MS = 20000; 
 
@@ -32,100 +30,112 @@ const waitingQueues = {}; // Key format: "GameType_Stake"
 const userSessions = {}; 
 
 // --- HELPERS ---
-const createInitialState = (gameType, players, stake) => {
+const createInitialState = (gameType, players, stake, profiles) => {
     return {
         roomId: `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
-        players, 
+        players, // [uid1, uid2]
+        profiles, // { uid1: profile, uid2: profile }
         turn: players[0],
         stake,
         gameType,
         status: 'active',
         turnExpiresAt: Date.now() + TURN_DURATION_MS,
         scores: { [players[0]]: 0, [players[1]]: 0 },
+        
+        // Dice Specific
         currentRound: 1,
         roundState: 'waiting',
         roundRolls: { [players[0]]: null, [players[1]]: null },
-        board: Array(9).fill(null), // For TicTacToe
+        
+        // TicTacToe Specific
+        board: Array(9).fill(null),
+        
         winner: null
     };
+};
+
+const checkTicTacToeWin = (board) => {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8], 
+      [0, 3, 6], [1, 4, 7], [2, 5, 8], 
+      [0, 4, 8], [2, 4, 6]             
+    ];
+    for (let i = 0; i < lines.length; i++) {
+      const [a, b, c] = lines[i];
+      if (board[a] && board[a] === board[b] && board[a] === board[c]) {
+        return board[a];
+      }
+    }
+    return null;
 };
 
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
-  // 3. Matchmaking Handler
+  // Matchmaking Handler
   socket.on('join_game', ({ stake, userProfile, gameType = 'Dice' }) => {
     if (!userProfile || !userProfile.id) return;
     const userId = userProfile.id;
     const numericStake = parseInt(stake);
-    
-    // Create a specific queue key for this Game Type + Stake amount
     const queueKey = `${gameType}_${numericStake}`;
 
     console.log(`User ${userId} joining queue: ${queueKey}`);
 
-    // Check if someone is waiting in this specific queue
     if (waitingQueues[queueKey]) {
         const opponent = waitingQueues[queueKey];
 
-        // Prevent playing against self (unless testing locally with different sockets but same user ID - simple check)
+        // Prevent self-play (optional check)
         if (opponent.userId === userId) {
-             // In local dev, sometimes we want to play self, but usually this is a bug.
-             // For now, allow overwrite if same user re-joins
-             waitingQueues[queueKey] = { userId, socketId: socket.id };
+             waitingQueues[queueKey] = { userId, socketId: socket.id, profile: userProfile };
              return;
         }
 
-        // Remove opponent from queue
         delete waitingQueues[queueKey];
 
+        const profiles = {
+            [opponent.userId]: opponent.profile,
+            [userId]: userProfile
+        };
+
         // Create Match
-        const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake);
+        const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake, profiles);
         
-        // Save Game
         activeGames[gameState.roomId] = gameState;
         userSessions[opponent.userId] = { socketId: opponent.socketId, roomId: gameState.roomId };
         userSessions[userId] = { socketId: socket.id, roomId: gameState.roomId };
 
-        // Join Rooms
         socket.join(gameState.roomId);
         const oppSocket = io.sockets.sockets.get(opponent.socketId);
         if (oppSocket) oppSocket.join(gameState.roomId);
 
-        // Notify Players
         io.to(gameState.roomId).emit('match_found', gameState);
         console.log(`Match created: ${gameState.roomId}`);
 
     } else {
-        // No opponent found, add to queue
-        waitingQueues[queueKey] = { userId, socketId: socket.id };
+        waitingQueues[queueKey] = { userId, socketId: socket.id, profile: userProfile };
         userSessions[userId] = { socketId: socket.id, roomId: null };
         socket.emit('waiting_for_opponent');
-        console.log(`User ${userId} added to queue`);
     }
   });
 
-  // Handle Game Moves (Rolls, Board moves)
+  // Handle Game Moves
   socket.on('game_action', ({ action, roomId }) => {
       const game = activeGames[roomId];
       if (!game) return;
 
-      // Simple Dice Logic
-      if (game.gameType === 'Dice' && action.type === 'ROLL') {
-          // Identify roller
-          const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
-          if (game.turn !== userId) return;
+      const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
+      if (game.turn !== userId) return; // Not your turn
 
+      // --- DICE LOGIC ---
+      if (game.gameType === 'Dice' && action.type === 'ROLL') {
           const d1 = Math.ceil(Math.random() * 6);
           const d2 = Math.ceil(Math.random() * 6);
           game.roundRolls[userId] = [d1, d2];
 
-          // Check if both rolled
           const p1 = game.players[0];
           const p2 = game.players[1];
 
           if (game.roundRolls[p1] && game.roundRolls[p2]) {
-              // Scoring
               const sum1 = game.roundRolls[p1][0] + game.roundRolls[p1][1];
               const sum2 = game.roundRolls[p2][0] + game.roundRolls[p2][1];
               
@@ -134,32 +144,55 @@ io.on('connection', (socket) => {
 
               game.roundState = 'scored';
               
-              // Win Condition
               if (game.scores[p1] >= 3) { game.status = 'completed'; game.winner = p1; }
               else if (game.scores[p2] >= 3) { game.status = 'completed'; game.winner = p2; }
               else {
-                  // Next Round Reset (simulated delay handled by client or manual trigger)
                   game.currentRound++;
                   game.roundRolls = { [p1]: null, [p2]: null };
                   game.roundState = 'waiting';
                   game.turn = game.players[(game.currentRound - 1) % 2];
               }
           } else {
-              // Switch turn to other player
               game.turn = game.players.find(p => p !== userId);
           }
           
           io.to(roomId).emit('game_update', game);
           if (game.winner) io.to(roomId).emit('game_over', { winner: game.winner });
       }
+
+      // --- TIC TAC TOE LOGIC ---
+      if (game.gameType === 'TicTacToe' && action.type === 'MOVE') {
+          const index = action.index;
+          if (game.board[index] === null) {
+              // Assign Symbol (P1 = X, P2 = O)
+              const symbol = game.players[0] === userId ? 'X' : 'O';
+              game.board[index] = symbol;
+
+              // Check Win
+              const winSymbol = checkTicTacToeWin(game.board);
+              if (winSymbol) {
+                  game.winner = userId;
+                  game.status = 'completed';
+              } else if (!game.board.includes(null)) {
+                  // Draw
+                  game.status = 'draw'; 
+                  // Reset board for next round (simplified for now, usually ends game)
+                  game.board = Array(9).fill(null);
+              } else {
+                  // Switch Turn
+                  game.turn = game.players.find(p => p !== userId);
+              }
+
+              io.to(roomId).emit('game_update', game);
+              if (game.winner) io.to(roomId).emit('game_over', { winner: game.winner });
+          }
+      }
   });
 
   socket.on('disconnect', () => {
-      // Remove from queues
       for (const key in waitingQueues) {
           if (waitingQueues[key].socketId === socket.id) delete waitingQueues[key];
       }
-      console.log('Client disconnected');
   });
 });
 
