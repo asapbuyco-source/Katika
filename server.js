@@ -8,20 +8,25 @@ const app = express();
 app.use(cors());
 
 app.get('/', (req, res) => {
-  res.send('Vantage Referee is Live on Railway');
+  res.send('Vantage Referee is Live');
 });
 
 const httpServer = createServer(app);
 
-// CRITICAL: CORS Configuration for Netlify
+// CRITICAL: CORS Configuration for Netlify & Localhost
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.FRONTEND_URL || "https://heroic-brioche-b08cf2.netlify.app",
+    origin: [
+        process.env.FRONTEND_URL || "https://heroic-brioche-b08cf2.netlify.app",
+        "http://localhost:5173", 
+        "http://localhost:3000",
+        "http://127.0.0.1:5173"
+    ],
     methods: ["GET", "POST"]
   }
 });
 
-// 1. Use Railway Port
+// 1. Use Railway Port or default 8080
 const PORT = process.env.PORT || 8080;
 const TURN_DURATION_MS = 20000; 
 
@@ -59,7 +64,6 @@ io.on('connection', (socket) => {
     const numericStake = parseInt(stake);
     
     // Create a specific queue key for this Game Type + Stake amount
-    // e.g., "Dice_100", "Ludo_500"
     const queueKey = `${gameType}_${numericStake}`;
 
     console.log(`User ${userId} joining queue: ${queueKey}`);
@@ -68,8 +72,13 @@ io.on('connection', (socket) => {
     if (waitingQueues[queueKey]) {
         const opponent = waitingQueues[queueKey];
 
-        // Prevent playing against self
-        if (opponent.userId === userId) return; 
+        // Prevent playing against self (unless testing locally with different sockets but same user ID - simple check)
+        if (opponent.userId === userId) {
+             // In local dev, sometimes we want to play self, but usually this is a bug.
+             // For now, allow overwrite if same user re-joins
+             waitingQueues[queueKey] = { userId, socketId: socket.id };
+             return;
+        }
 
         // Remove opponent from queue
         delete waitingQueues[queueKey];
