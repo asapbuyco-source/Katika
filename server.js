@@ -22,7 +22,7 @@ const io = new Server(httpServer, {
 });
 
 const PORT = process.env.PORT || 8080;
-const TURN_DURATION_MS = 60000; // Increased for complex games
+const TURN_DURATION_MS = 60000; 
 
 // --- STATE ---
 const activeGames = {}; 
@@ -50,7 +50,7 @@ const createDeck = () => {
     return shuffle(deck);
 };
 
-// --- HELPERS ---
+// --- GAME LOGIC HELPERS ---
 const createInitialState = (gameType, players, stake, profiles) => {
     const base = {
         roomId: `room_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
@@ -60,9 +60,10 @@ const createInitialState = (gameType, players, stake, profiles) => {
         stake,
         gameType,
         status: 'active',
-        turnExpiresAt: Date.now() + TURN_DURATION_MS,
+        lastActionAt: Date.now(),
         scores: { [players[0]]: 0, [players[1]]: 0 },
-        winner: null
+        winner: null,
+        chat: [] 
     };
 
     if (gameType === 'Dice') {
@@ -85,10 +86,7 @@ const createInitialState = (gameType, players, stake, profiles) => {
         return { ...base, pieces };
     }
     if (gameType === 'Chess') {
-        // Simplified board representation for relay. 
-        // We'll trust client init or send standard fen/grid if we wanted full validation.
-        // For this P2P relay, we let clients init default board, server just tracks moves/board state updates.
-        return { ...base, board: null }; // Client handles initial layout, server relays updates.
+        return { ...base, board: null }; // Client state relay
     }
     if (gameType === 'Ludo') {
         const pieces = [];
@@ -130,44 +128,37 @@ const checkTicTacToeWin = (board) => {
     return null;
 };
 
+// --- CLEANUP JOB ---
+setInterval(() => {
+    const now = Date.now();
+    for (const roomId in activeGames) {
+        // Remove games inactive for 1 hour
+        if (now - activeGames[roomId].lastActionAt > 3600000) {
+            delete activeGames[roomId];
+            console.log(`Cleaned up inactive room: ${roomId}`);
+        }
+    }
+}, 60000 * 5); // Run every 5 mins
+
 io.on('connection', (socket) => {
   console.log(`Player connected: ${socket.id}`);
 
-  // Matchmaking Handler
+  // Matchmaking
   socket.on('join_game', ({ stake, userProfile, privateRoomId, gameType = 'Dice' }) => {
     if (!userProfile || !userProfile.id) return;
     const userId = userProfile.id;
-    
-    // Private Room Logic
-    if (privateRoomId) {
-        console.log(`User ${userId} joining private room: ${privateRoomId}`);
-        // Check if room exists/pending
-        // Simplification for prototype: If activeGames has it, join. If waitingQueues has it, join. Else create wait.
-        // For now, reuse the standard queue logic but keyed by ID.
-    }
-
     const numericStake = parseInt(stake);
-    const queueKey = `${gameType}_${numericStake}`; // Simple public queue
-
-    console.log(`User ${userId} joining queue: ${queueKey}`);
+    const queueKey = `${gameType}_${numericStake}`;
 
     if (waitingQueues[queueKey]) {
         const opponent = waitingQueues[queueKey];
-
-        // Prevent self-play (optional check)
         if (opponent.userId === userId) {
              waitingQueues[queueKey] = { userId, socketId: socket.id, profile: userProfile };
              return;
         }
-
         delete waitingQueues[queueKey];
 
-        const profiles = {
-            [opponent.userId]: opponent.profile,
-            [userId]: userProfile
-        };
-
-        // Create Match
+        const profiles = { [opponent.userId]: opponent.profile, [userId]: userProfile };
         const gameState = createInitialState(gameType, [opponent.userId, userId], numericStake, profiles);
         
         activeGames[gameState.roomId] = gameState;
@@ -179,8 +170,6 @@ io.on('connection', (socket) => {
         if (oppSocket) oppSocket.join(gameState.roomId);
 
         io.to(gameState.roomId).emit('match_found', gameState);
-        console.log(`Match created: ${gameState.roomId}`);
-
     } else {
         waitingQueues[queueKey] = { userId, socketId: socket.id, profile: userProfile };
         userSessions[userId] = { socketId: socket.id, roomId: null };
@@ -188,21 +177,28 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Handle Game Moves
+  // Game Actions
   socket.on('game_action', ({ action, roomId }) => {
       const game = activeGames[roomId];
       if (!game) return;
 
       const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
-      
-      // Basic turn validation (can be stricter)
-      if (game.gameType !== 'Cards' && game.turn !== userId && action.type !== 'ROLL') {
-          // Allow Cards 'J' selection or out of turn logic if needed, but mostly block
-          // return; 
+      game.lastActionAt = Date.now();
+
+      // --- CHAT ---
+      if (action.type === 'CHAT') {
+          if (!game.chat) game.chat = [];
+          game.chat.push({
+              id: Date.now().toString(),
+              senderId: userId,
+              message: action.message,
+              timestamp: Date.now()
+          });
       }
 
       // --- DICE ---
-      if (game.gameType === 'Dice' && action.type === 'ROLL') {
+      else if (game.gameType === 'Dice' && action.type === 'ROLL') {
+          if (game.turn !== userId) return;
           const d1 = Math.ceil(Math.random() * 6);
           const d2 = Math.ceil(Math.random() * 6);
           game.roundRolls[userId] = [d1, d2];
@@ -218,14 +214,13 @@ io.on('connection', (socket) => {
               else if (sum2 > sum1) game.scores[p2]++;
 
               game.roundState = 'scored';
-              
               if (game.scores[p1] >= 3) { game.status = 'completed'; game.winner = p1; }
               else if (game.scores[p2] >= 3) { game.status = 'completed'; game.winner = p2; }
               else {
                   game.currentRound++;
                   game.roundRolls = { [p1]: null, [p2]: null };
                   game.roundState = 'waiting';
-                  game.turn = game.players[(game.currentRound - 1) % 2];
+                  game.turn = game.players[(game.currentRound - 1) % 2]; // Alternate starter
               }
           } else {
               game.turn = game.players.find(p => p !== userId);
@@ -234,6 +229,7 @@ io.on('connection', (socket) => {
 
       // --- TIC TAC TOE ---
       else if (game.gameType === 'TicTacToe' && action.type === 'MOVE') {
+          if (game.turn !== userId) return;
           const index = action.index;
           if (game.board[index] === null) {
               const symbol = game.players[0] === userId ? 'X' : 'O';
@@ -254,13 +250,11 @@ io.on('connection', (socket) => {
 
       // --- CHECKERS & CHESS (STATE RELAY) ---
       else if ((game.gameType === 'Checkers' || game.gameType === 'Chess') && action.type === 'MOVE') {
-          // Trust client move calculation for prototype
-          // Client sends { pieces: [], turn: nextUserId }
+          if (game.turn !== userId) return;
           if (action.newState) {
               if (action.newState.pieces) game.pieces = action.newState.pieces;
               if (action.newState.board) game.board = action.newState.board;
               game.turn = action.newState.turn;
-              
               if (action.newState.winner) {
                   game.winner = action.newState.winner;
                   game.status = 'completed';
@@ -271,28 +265,24 @@ io.on('connection', (socket) => {
       // --- LUDO ---
       else if (game.gameType === 'Ludo') {
           if (action.type === 'ROLL') {
+              if (game.turn !== userId) return;
               game.diceValue = Math.ceil(Math.random() * 6);
               game.diceRolled = true;
               if (game.diceValue === 6) game.consecutiveSixes++;
               else game.consecutiveSixes = 0;
               
               if (game.consecutiveSixes >= 3) {
-                  // Forfeit turn
                   game.turn = game.players.find(p => p !== userId);
                   game.diceRolled = false;
                   game.consecutiveSixes = 0;
               }
           } else if (action.type === 'MOVE_PIECE') {
-              // Client calculates new position and sends updated pieces
               game.pieces = action.pieces;
-              
-              // Check Win
               const myPieces = game.pieces.filter(p => p.owner === userId);
               if (myPieces.every(p => p.step === 56)) {
                   game.winner = userId;
                   game.status = 'completed';
               } else {
-                  // Decide next turn based on rules (6 gets another turn)
                   if (!action.bonusTurn) {
                       game.turn = game.players.find(p => p !== userId);
                   }
@@ -303,35 +293,35 @@ io.on('connection', (socket) => {
 
       // --- CARDS ---
       else if (game.gameType === 'Cards') {
+          if (game.turn !== userId) return;
+          
           if (action.type === 'PLAY') {
-              // Move card from hand to pile
               const card = action.card;
               const hand = game.hands[userId];
-              game.hands[userId] = hand.filter(c => c.id !== card.id);
-              game.discardPile.push(card);
-              game.activeSuit = action.suit || card.suit; // Allow override for 'J'
+              
+              // Validate Card presence
+              if (hand.some(c => c.id === card.id)) {
+                  game.hands[userId] = hand.filter(c => c.id !== card.id);
+                  game.discardPile.push(card);
+                  // Allow Jack to change suit
+                  game.activeSuit = (card.rank === 'J' && action.suit) ? action.suit : card.suit;
 
-              // Win Check
-              if (game.hands[userId].length === 0) {
-                  game.winner = userId;
-                  game.status = 'completed';
-              } else {
-                  // Next turn logic (handle skips/pick2)
-                  if (action.nextTurn) game.turn = action.nextTurn;
-                  else game.turn = game.players.find(p => p !== userId);
+                  if (game.hands[userId].length === 0) {
+                      game.winner = userId;
+                      game.status = 'completed';
+                  } else {
+                      game.turn = game.players.find(p => p !== userId);
+                  }
               }
           } else if (action.type === 'DRAW') {
-              const count = action.count || 1;
               const drawn = [];
-              for(let i=0; i<count; i++) {
-                  if (game.deck.length === 0) {
-                      // Reshuffle discard (keeping top)
-                      const top = game.discardPile.pop();
-                      game.deck = shuffle(game.discardPile);
-                      game.discardPile = [top];
-                  }
-                  if (game.deck.length > 0) drawn.push(game.deck.pop());
+              if (game.deck.length === 0) {
+                  const top = game.discardPile.pop();
+                  game.deck = shuffle(game.discardPile);
+                  game.discardPile = [top];
               }
+              if (game.deck.length > 0) drawn.push(game.deck.pop());
+              
               game.hands[userId] = [...game.hands[userId], ...drawn];
               if (action.passTurn) {
                   game.turn = game.players.find(p => p !== userId);
@@ -345,6 +335,7 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+      // Remove from queues if waiting
       for (const key in waitingQueues) {
           if (waitingQueues[key].socketId === socket.id) delete waitingQueues[key];
       }

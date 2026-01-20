@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
 import { ViewState, User as AppUser } from '../types';
@@ -7,13 +6,14 @@ interface NavigationProps {
   currentView: ViewState;
   setView: (view: ViewState) => void;
   user: AppUser;
+  hasUnreadMessages?: boolean;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user }) => {
+export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user, hasUnreadMessages }) => {
   const navItems = [
     { id: 'dashboard', icon: Home, label: 'Home' },
     { id: 'lobby', icon: LayoutGrid, label: 'Lobby' },
-    { id: 'forum', icon: MessageSquare, label: 'Forum' },
+    { id: 'forum', icon: MessageSquare, label: 'Forum', hasBadge: hasUnreadMessages },
     { id: 'finance', icon: Wallet, label: 'Wallet' },
   ];
 
@@ -32,8 +32,13 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
               currentView === item.id ? 'text-gold-400' : 'text-slate-400 hover:text-white'
             }`}
           >
-            <div className={`p-2 rounded-xl transition-all ${currentView === item.id ? 'bg-royal-800' : 'group-hover:bg-royal-800/50'}`}>
+            <div className={`p-2 rounded-xl transition-all relative ${currentView === item.id ? 'bg-royal-800' : 'group-hover:bg-royal-800/50'}`}>
                 <item.icon size={24} className={currentView === item.id ? 'drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : ''} />
+                
+                {/* Notification Badge */}
+                {item.hasBadge && (
+                    <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full border-2 border-royal-900 animate-pulse shadow-sm shadow-red-500/50"></div>
+                )}
             </div>
             <span className="text-[10px] font-medium tracking-wide">{item.label}</span>
             {currentView === item.id && (

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
@@ -66,6 +65,21 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     }
   }, [initialGameId]);
 
+  // Scroll to top when switching to stakes view to ensure "Play vs AI" is visible
+  useEffect(() => {
+    if (viewState === 'stakes') {
+        const mainContainer = document.getElementById('main-scroll-container');
+        // Small timeout to allow AnimatePresence to switch components
+        setTimeout(() => {
+            if (mainContainer) {
+                mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+            } else {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }, 100);
+    }
+  }, [viewState]);
+
   // Real-time Search Effect
   useEffect(() => {
       const delayDebounceFn = setTimeout(async () => {
@@ -99,13 +113,6 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       setSelectedGame(gameId);
       setViewState('stakes');
       playSFX('click');
-      // Scroll to top to ensure visibility of stakes
-      const mainContainer = document.getElementById('main-scroll-container');
-      if (mainContainer) {
-          mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
-      } else {
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-      }
   };
 
   const handleBackToGames = () => {

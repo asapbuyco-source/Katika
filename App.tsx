@@ -24,8 +24,9 @@ import { GameResultOverlay } from './components/GameResultOverlay';
 import { ChallengeRequestModal } from './components/ChallengeRequestModal';
 import { 
     auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, 
-    createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame 
+    createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame, subscribeToForum
 } from './services/firebase';
+import { playSFX } from './services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
@@ -93,6 +94,11 @@ export default function App() {
   // Challenge System State
   const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
 
+  // Notification State
+  const [unreadForum, setUnreadForum] = useState(false);
+  const lastForumMsgId = useRef<string | null>(null);
+  const viewRef = useRef<ViewState>('landing'); // Ref to track view inside listeners
+
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -104,6 +110,14 @@ export default function App() {
   // Connection Handling
   const [bypassConnection, setBypassConnection] = useState(false);
   const [connectionTime, setConnectionTime] = useState(0);
+
+  // Update view ref whenever view changes (for the forum listener)
+  useEffect(() => {
+      viewRef.current = currentView;
+      if (currentView === 'forum') {
+          setUnreadForum(false);
+      }
+  }, [currentView]);
 
   // 1. Initialize Socket Connection with Fallback Logic
   useEffect(() => {
@@ -213,10 +227,11 @@ export default function App() {
       return () => clearInterval(interval);
   }, [socketGame]);
 
-  // 5. Firebase Auth & Real-time Database Listener
+  // 5. Firebase Auth & Global Listeners
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
+      let unsubscribeForum: (() => void) | undefined;
 
       const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
           if (firebaseUser) {
@@ -224,12 +239,30 @@ export default function App() {
                   const appUser = await syncUserProfile(firebaseUser);
                   setUser(appUser);
 
+                  // User Data Listener
                   unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
                       setUser(updatedUser);
                   });
 
+                  // Challenge Listener
                   unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
                       setIncomingChallenge(challenge);
+                  });
+
+                  // Forum Notification Listener
+                  unsubscribeForum = subscribeToForum((posts) => {
+                      if (posts.length > 0) {
+                          const latestId = posts[0].id;
+                          // If we have a stored last ID, and it's different from new latest
+                          if (lastForumMsgId.current && lastForumMsgId.current !== latestId) {
+                              // And we are NOT currently looking at the forum
+                              if (viewRef.current !== 'forum') {
+                                  setUnreadForum(true);
+                                  playSFX('notification');
+                              }
+                          }
+                          lastForumMsgId.current = latestId;
+                      }
                   });
 
               } catch (error) {
@@ -238,6 +271,7 @@ export default function App() {
           } else {
               if (unsubscribeSnapshot) unsubscribeSnapshot();
               if (unsubscribeChallenges) unsubscribeChallenges();
+              if (unsubscribeForum) unsubscribeForum();
               setUser(null);
           }
           setAuthLoading(false);
@@ -247,6 +281,7 @@ export default function App() {
           unsubscribeAuth();
           if (unsubscribeSnapshot) unsubscribeSnapshot();
           if (unsubscribeChallenges) unsubscribeChallenges();
+          if (unsubscribeForum) unsubscribeForum();
       };
   }, []);
 
@@ -428,7 +463,12 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum'].includes(currentView) && (
-        <Navigation currentView={currentView} setView={setView} user={user} />
+        <Navigation 
+            currentView={currentView} 
+            setView={setView} 
+            user={user} 
+            hasUnreadMessages={unreadForum} 
+        />
       )}
 
       {/* Connection Status Indicators */}

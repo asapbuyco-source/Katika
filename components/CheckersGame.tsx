@@ -5,6 +5,7 @@ import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
+import { GameChat } from './GameChat';
 
 interface CheckersGameProps {
   table: Table;
@@ -46,7 +47,7 @@ const TimerDisplay = ({ time, isActive }: { time: number, isActive: boolean }) =
     </div>
 );
 
-const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, isHintSource, isHintDest, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn }: any) => {
+const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn, rotate }: any) => {
   const isMe = piece?.player === 'me';
   const isClickable = (isMeTurn && isMe) || !!validMove;
 
@@ -54,6 +55,7 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, i
     <div 
        onClick={(e) => { e.stopPropagation(); if (piece && isMe) onPieceClick(piece); if (validMove) onMoveClick(validMove); }}
        className={`relative w-full h-full flex items-center justify-center ${isDark ? 'bg-royal-900/60' : 'bg-white/5'} ${isClickable ? 'cursor-pointer' : ''}`}
+       style={{ transform: rotate ? 'rotate(180deg)' : 'none' }} // Rotate cell content back upright if board is rotated
     >
         {isDark && <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />}
         {(isLastFrom || isLastTo) && <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />}
@@ -90,13 +92,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [lastMove, setLastMove] = useState<{from: string, to: string} | null>(null);
   
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
-  const [capturedMe, setCapturedMe] = useState(0);
-  const [capturedOpp, setCapturedOpp] = useState(0);
   const [mustJumpFrom, setMustJumpFrom] = useState<string | null>(null);
-  const [hintMoves, setHintMoves] = useState<Move[]>([]);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
   const [isGameOver, setIsGameOver] = useState(false);
+  
+  // -1 = Up (Standard for P1/Local), 1 = Down (P2)
+  const [forwardDir, setForwardDir] = useState(-1);
 
   const isP2P = !!socket && !!socketGame;
 
@@ -118,8 +120,18 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (socketGame.winner === user.id) onGameEnd('win');
             else onGameEnd('loss');
         }
+
+        // Determine Direction:
+        // Server initializes Player 1 (index 0) at bottom (rows 5-7).
+        // Server initializes Player 2 (index 1) at top (rows 0-2).
+        if (socketGame.players && socketGame.players.length > 0) {
+            const isPlayer1 = socketGame.players[0] === user.id;
+            setForwardDir(isPlayer1 ? -1 : 1);
+        }
+
     } else {
         // Local Init
+        setForwardDir(-1); // Default to moving up
         const initialPieces: Piece[] = [];
         let idCounter = 0;
         for (let r = 0; r < 8; r++) {
@@ -156,14 +168,17 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             playSFX('click');
         }
     }
-  }, [turn, pieces, mustJumpFrom, selectedPieceId, isGameOver]);
+  }, [turn, pieces, mustJumpFrom, selectedPieceId, isGameOver, forwardDir]);
 
   const handleMoveClick = useCallback((move: Move) => {
       if (!selectedPieceId || isGameOver) return;
       
       const nextPieces = pieces.filter(p => p.id !== move.jumpId).map(p => {
           if (p.id === selectedPieceId) {
-              const isKing = p.isKing || (p.player === 'me' && move.r === 0) || (p.player === 'opponent' && move.r === 7);
+              // King Promotion: If I am moving, king row is based on my dir.
+              // If dir is -1 (Up), King row is 0. If dir is 1 (Down), King row is 7.
+              const kingRow = p.player === 'me' ? (forwardDir === -1 ? 0 : 7) : (forwardDir === -1 ? 7 : 0);
+              const isKing = p.isKing || move.r === kingRow;
               return { ...p, r: move.r, c: move.c, isKing };
           }
           return p;
@@ -224,7 +239,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           setTurn(nextTurn);
       }
 
-  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id]);
+  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir]);
 
   // --- LOGIC HELPERS ---
   const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
@@ -234,12 +249,17 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
 
       toCheck.forEach(p => {
-          const dirs = p.isKing ? [-1, 1] : (p.player === 'me' ? [-1] : [1]);
+          // Direction Logic:
+          // If 'me', use forwardDir. If 'opponent', use -forwardDir.
+          // Example: P2 (forwardDir=1). 'me' moves +1 (Down). Opponent (P1) moves -1 (Up).
+          const moveDir = p.player === 'me' ? forwardDir : -forwardDir;
+          const dirs = p.isKing ? [-1, 1] : [moveDir];
+          
           const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
           
           // Jumps
           [-1, 1].forEach(dr => [-1, 1].forEach(dc => { // Check all dirs for jumps if King
-             if (!p.isKing && ((player === 'me' && dr === 1) || (player === 'opponent' && dr === -1))) return;
+             if (!p.isKing && dr !== moveDir) return; // Only check move direction if not king
              
              const mr = p.r + dr, mc = p.c + dc, jr = p.r + dr*2, jc = p.c + dc*2;
              if (isValidPos(jr, jc) && !pieceMap.has(`${jr},${jc}`)) {
@@ -251,7 +271,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           }));
           
           // Simple Moves
-          if (!specificId) { // Can't move simply if mid-jump sequence
+          if (!specificId) { 
              dirs.forEach(dr => [-1, 1].forEach(dc => {
                  const tr = p.r + dr, tc = p.c + dc;
                  if (isValidPos(tr, tc) && !pieceMap.has(`${tr},${tc}`)) {
@@ -294,10 +314,24 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
            </div>
 
            {/* Board */}
-           <div className="order-2 w-full max-w-[500px] aspect-square relative bg-[#1a103c] rounded-xl shadow-2xl border-4 border-royal-800 grid grid-cols-8 grid-rows-8 overflow-hidden">
+           <div className={`order-2 w-full max-w-[500px] aspect-square relative bg-[#1a103c] rounded-xl shadow-2xl border-4 border-royal-800 grid grid-cols-8 grid-rows-8 overflow-hidden transition-transform duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
                {Array.from({length: 8}).map((_, r) => Array.from({length: 8}).map((_, c) => {
                    const key = `${r},${c}`;
-                   return <CheckersCell key={key} r={r} c={c} isDark={(r+c)%2===1} piece={pieceMap.get(key)} isSelected={selectedPieceId === pieceMap.get(key)?.id} validMove={validMoveMap.get(key)} isLastFrom={lastMove?.from === key} isLastTo={lastMove?.to === key} onPieceClick={handlePieceClick} onMoveClick={handleMoveClick} isMeTurn={turn === 'me'} />;
+                   return <CheckersCell 
+                            key={key} 
+                            r={r} 
+                            c={c} 
+                            isDark={(r+c)%2===1} 
+                            piece={pieceMap.get(key)} 
+                            isSelected={selectedPieceId === pieceMap.get(key)?.id} 
+                            validMove={validMoveMap.get(key)} 
+                            isLastFrom={lastMove?.from === key} 
+                            isLastTo={lastMove?.to === key} 
+                            onPieceClick={handlePieceClick} 
+                            onMoveClick={handleMoveClick} 
+                            isMeTurn={turn === 'me'}
+                            rotate={forwardDir === 1} // Pass rotation prop to counter-rotate cell content
+                          />;
                }))}
            </div>
 
@@ -310,6 +344,16 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                <TimerDisplay time={timeRemaining.me} isActive={turn === 'me'} />
            </div>
        </div>
+
+        {/* P2P Chat */}
+        {isP2P && socketGame && (
+            <GameChat 
+                messages={socketGame.chat || []}
+                onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
+                currentUserId={user.id}
+                profiles={socketGame.profiles || {}}
+            />
+        )}
     </div>
   );
 };
