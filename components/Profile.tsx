@@ -13,6 +13,7 @@ interface ProfileProps {
   onNavigate: (view: ViewState) => void;
 }
 
+// Explicitly define the allowed tab values
 type ProfileTab = 'overview' | 'history' | 'settings';
 
 const PRESET_AVATARS = [
@@ -29,6 +30,7 @@ const PRESET_AVATARS = [
 
 export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const { t, language, setLanguage } = useLanguage();
+  // Ensure the state uses the ProfileTab union type
   const [activeTab, setActiveTab] = useState<ProfileTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -58,7 +60,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmailInput, setNewEmailInput] = useState('');
 
-  // Tabs Configuration
+  // Tabs Configuration - strictly typed
   const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
 
   // Load Preferences from LocalStorage on Mount
