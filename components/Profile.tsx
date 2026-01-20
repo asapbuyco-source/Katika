@@ -13,6 +13,8 @@ interface ProfileProps {
   onNavigate: (view: ViewState) => void;
 }
 
+type ProfileTab = 'overview' | 'history' | 'settings';
+
 const PRESET_AVATARS = [
     'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
     'https://api.dicebear.com/7.x/avataaars/svg?seed=Aneka',
@@ -27,7 +29,7 @@ const PRESET_AVATARS = [
 
 export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const { t, language, setLanguage } = useLanguage();
-  const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'settings'>('overview');
+  const [activeTab, setActiveTab] = useState<ProfileTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   
@@ -55,6 +57,9 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [currentEmail, setCurrentEmail] = useState(auth.currentUser?.email || '');
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmailInput, setNewEmailInput] = useState('');
+
+  // Tabs Configuration
+  const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
 
   // Load Preferences from LocalStorage on Mount
   useEffect(() => {
@@ -383,10 +388,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
        {/* Navigation Tabs */}
        <div className="flex items-center gap-8 border-b border-white/10 mb-8 overflow-x-auto">
-           {['overview', 'history', 'settings'].map((tab) => (
+           {tabs.map((tab) => (
                <button 
                   key={tab}
-                  onClick={() => { setActiveTab(tab as any); playSFX('click'); }}
+                  onClick={() => { setActiveTab(tab); playSFX('click'); }}
                   className={`pb-4 text-sm font-bold capitalize transition-colors relative whitespace-nowrap px-2 ${
                       activeTab === tab ? 'text-white' : 'text-slate-500 hover:text-slate-300'
                   }`}
