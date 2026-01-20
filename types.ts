@@ -1,5 +1,5 @@
 
-export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'forum';
+export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'forum' | 'settings';
 
 export interface User {
   id: string;

@@ -43,7 +43,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -325,7 +325,7 @@ export default function App() {
           // If viewing How It Works, don't redirect to landing
           if (currentView === 'how-it-works') return;
 
-          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum'];
+          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum', 'settings'];
           if (protectedViews.includes(currentView)) {
               setView('landing');
           }
@@ -494,7 +494,7 @@ export default function App() {
   return (
     <LanguageProvider>
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
-      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum'].includes(currentView) && (
+      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum', 'settings'].includes(currentView) && (
         <Navigation 
             currentView={currentView} 
             setView={setView} 
