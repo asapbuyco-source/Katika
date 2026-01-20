@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, Transaction } from '../types';
 import { getUserTransactions, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '../services/i18n';
 
 interface FinanceProps {
   user: User;
@@ -12,6 +12,7 @@ interface FinanceProps {
 }
 
 export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
+  const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
   const [amount, setAmount] = useState('');
   const [provider, setProvider] = useState<'mtn' | 'orange'>('mtn');
@@ -123,8 +124,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
        </AnimatePresence>
 
        <header className="mb-8">
-           <h1 className="text-3xl font-display font-bold text-white mb-2">Finance</h1>
-           <p className="text-slate-400">Manage your funds securely with Mobile Money.</p>
+           <h1 className="text-3xl font-display font-bold text-white mb-2">{t('nav_wallet')}</h1>
+           <p className="text-slate-400">{t('manage_funds')}</p>
        </header>
 
        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -143,7 +144,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                        <div className="flex justify-between items-start">
                            <div>
                                <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
-                                   <Wallet size={14} /> Vantage Wallet
+                                   <Wallet size={14} /> {t('vantage_vault')}
                                </div>
                                <div className="text-slate-400 text-sm font-mono tracking-wider">**** **** **** 8842</div>
                            </div>
@@ -154,7 +155,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                        </div>
 
                        <div>
-                           <div className="text-slate-400 text-xs mb-1">Total Balance</div>
+                           <div className="text-slate-400 text-xs mb-1">{t('balance_label')}</div>
                            <div className="text-4xl font-display font-bold text-white tracking-tight">
                                {user.balance.toLocaleString()} <span className="text-lg text-gold-500 font-sans">FCFA</span>
                            </div>
@@ -174,7 +175,9 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                : 'text-slate-500 hover:text-slate-300'
                            }`}
                        >
-                           {tab}
+                           {tab === 'deposit' && t('deposit')}
+                           {tab === 'withdraw' && t('withdraw')}
+                           {tab === 'history' && t('history')}
                        </button>
                    ))}
                </div>
@@ -195,7 +198,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        <ArrowDownLeft size={24} />
                                    </div>
                                    <div>
-                                       <h3 className="text-lg font-bold text-white">Deposit Funds</h3>
+                                       <h3 className="text-lg font-bold text-white">{t('deposit_funds')}</h3>
                                        <p className="text-sm text-slate-400">Secured by Fapshi Payment Gateway</p>
                                    </div>
                                </div>
@@ -225,7 +228,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
                                        <div className="space-y-4">
                                            <div>
-                                               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
+                                               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('amount')} (FCFA)</label>
                                                <div className="relative">
                                                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
                                                    <input 
@@ -255,7 +258,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                            >
                                                {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
-                                               {isLoading ? 'Processing...' : 'Proceed to Payment'}
+                                               {isLoading ? t('processing') : t('proceed_payment')}
                                            </button>
                                        </div>
                                    </>
@@ -264,7 +267,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        <div className="w-16 h-16 bg-gold-500/20 text-gold-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
                                            <Smartphone size={32} />
                                        </div>
-                                       <h3 className="text-xl font-bold text-white mb-2">Payment Initiated</h3>
+                                       <h3 className="text-xl font-bold text-white mb-2">{t('payment_initiated')}</h3>
                                        <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
                                            Confirm the prompt on your phone. <br/>
                                            <span className="text-xs text-slate-500">(Simulation: Wait 3 seconds)</span>
@@ -276,13 +279,13 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                 rel="noreferrer"
                                                 className="w-full py-3 bg-gold-500 text-royal-900 font-bold rounded-xl hover:bg-gold-400 flex items-center justify-center gap-2"
                                             >
-                                                <ExternalLink size={18} /> Open Payment Page
+                                                <ExternalLink size={18} /> {t('open_payment')}
                                             </a>
                                             <button 
                                                 onClick={() => setPaymentLink(null)}
                                                 className="text-slate-400 text-sm hover:text-white"
                                             >
-                                                Cancel
+                                                {t('cancel_pay')}
                                             </button>
                                        </div>
                                    </div>
@@ -302,7 +305,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        <ArrowUpRight size={24} />
                                    </div>
                                    <div>
-                                       <h3 className="text-lg font-bold text-white">Withdraw Funds</h3>
+                                       <h3 className="text-lg font-bold text-white">{t('withdraw_funds')}</h3>
                                        <p className="text-sm text-slate-400">Cash out to your mobile wallet</p>
                                    </div>
                                </div>
@@ -316,7 +319,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
                                <div className="space-y-4">
                                    <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Amount (FCFA)</label>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('amount')} (FCFA)</label>
                                        <div className="relative">
                                            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
                                            <input 
@@ -334,7 +337,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                    </div>
 
                                    <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Send To (Phone)</label>
+                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('send_to')}</label>
                                        <div className="relative">
                                            <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                                            <input 
@@ -353,7 +356,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        className="w-full py-4 bg-white text-royal-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                    >
                                        {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowUpRight />}
-                                       {isLoading ? 'Processing...' : 'Withdraw Cash'}
+                                       {isLoading ? t('processing') : t('withdraw_cash')}
                                    </button>
                                </div>
                            </motion.div>
@@ -365,7 +368,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                key="history"
                                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                            >
-                               <h3 className="text-lg font-bold text-white mb-4">Recent Transactions</h3>
+                               <h3 className="text-lg font-bold text-white mb-4">{t('recent_transactions')}</h3>
                                {transactions.length > 0 ? (
                                    <div className="space-y-3">
                                        {transactions.map((tx) => (
@@ -410,23 +413,23 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
            <div className="space-y-6">
                 <div className="p-6 rounded-2xl bg-gradient-to-b from-royal-800 to-royal-900 border border-white/5">
                     <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                        <History size={18} className="text-gold-400" /> Quick Stats
+                        <History size={18} className="text-gold-400" /> {t('quick_stats')}
                     </h3>
                     <div className="space-y-4">
                         <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                            <span className="text-sm text-slate-400">Total Deposited</span>
+                            <span className="text-sm text-slate-400">{t('total_deposited')}</span>
                             <span className="font-mono text-white">
                                 {transactions.filter(t => t.type === 'deposit').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
                             </span>
                         </div>
                         <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                            <span className="text-sm text-slate-400">Total Withdrawn</span>
+                            <span className="text-sm text-slate-400">{t('total_withdrawn')}</span>
                             <span className="font-mono text-white">
                                 {Math.abs(transactions.filter(t => t.type === 'withdrawal').reduce((acc, curr) => acc + curr.amount, 0)).toLocaleString()} FCFA
                             </span>
                         </div>
                         <div className="flex justify-between items-center">
-                            <span className="text-sm text-slate-400">Net Profit</span>
+                            <span className="text-sm text-slate-400">{t('net_profit')}</span>
                             <span className="font-mono text-green-400">
                                 {transactions.filter(t => t.type === 'winnings').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
                             </span>
@@ -435,13 +438,13 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                 </div>
 
                 <div className="p-6 rounded-2xl bg-royal-950/50 border border-dashed border-slate-700">
-                    <h4 className="font-bold text-slate-300 text-sm mb-2">Need Help?</h4>
+                    <h4 className="font-bold text-slate-300 text-sm mb-2">{t('need_help')}</h4>
                     <p className="text-xs text-slate-500 mb-4">Issues with a deposit or withdrawal? Our support team is available 24/7.</p>
                     <button 
                         onClick={() => window.open('https://wa.me/237657960690', '_blank')}
                         className="w-full py-2 bg-royal-800 hover:bg-royal-700 text-white text-xs font-bold rounded-lg transition-colors"
                     >
-                        Contact Support
+                        {t('contact_support')}
                     </button>
                 </div>
            </div>

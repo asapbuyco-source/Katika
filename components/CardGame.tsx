@@ -146,6 +146,35 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       playSFX('move');
   };
 
+  // --- ACCESS CONTROL CHECK ---
+  if (!user.isAdmin) {
+      return (
+          <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
+              <div className="bg-royal-900 border border-gold-500/30 p-8 rounded-3xl shadow-2xl max-w-md relative overflow-hidden">
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                  <div className="absolute inset-0 bg-gold-500/5 pointer-events-none"></div>
+                  
+                  <div className="relative z-10 flex flex-col items-center">
+                      <div className="w-20 h-20 bg-gold-500/20 rounded-full flex items-center justify-center mb-6 border border-gold-500/30">
+                          <Layers size={40} className="text-gold-500" />
+                      </div>
+                      <h2 className="text-3xl font-display font-bold text-white mb-3">Coming Soon</h2>
+                      <p className="text-slate-400 mb-8 leading-relaxed">
+                          The <span className="text-white font-bold">Kmer Card Arena</span> is currently in <span className="text-gold-400 font-bold">Closed Beta</span>. 
+                          Access is restricted to Admins and Verified Testers while we finalize the rules engine.
+                      </p>
+                      <button 
+                          onClick={() => onGameEnd('quit')}
+                          className="px-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-bold transition-all flex items-center gap-2 group"
+                      >
+                          <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" /> Return to Lobby
+                      </button>
+                  </div>
+              </div>
+          </div>
+      );
+  }
+
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
         

@@ -6,6 +6,7 @@ import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
 import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '../services/i18n';
 
 interface LobbyProps {
   user: User;
@@ -24,6 +25,7 @@ const AVAILABLE_GAMES = [
 ];
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
+  const { t } = useLanguage();
   const [viewState, setViewState] = useState<'games' | 'stakes'>('games');
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const [isMaintenance, setIsMaintenance] = useState(false);
@@ -401,7 +403,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                       </div>
 
                                       <div>
-                                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Stake (FCFA)</label>
+                                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('entry_stake')} (FCFA)</label>
                                           <input 
                                               type="number" 
                                               value={challengeStake}
@@ -458,17 +460,17 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
             <h1 className="text-3xl font-display font-bold text-white mb-2">
-                {viewState === 'games' ? 'Game Selection' : activeGameData?.name || 'Select Stake'}
+                {viewState === 'games' ? t('game_selection') : activeGameData?.name || t('select_stake')}
             </h1>
             <p className="text-slate-400">
-                {viewState === 'games' ? 'Choose your arena and prove your skill.' : 'Select your entry stake level.'}
+                {viewState === 'games' ? t('choose_arena') : t('select_entry')}
             </p>
         </div>
         <button 
             onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); playSFX('click'); }}
             className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
         >
-            <Swords size={18} /> Challenge Friend
+            <Swords size={18} /> {t('challenge_friend')}
         </button>
       </div>
 
@@ -550,7 +552,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                           onClick={handleBotPlay}
                           className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
                       >
-                          <Bot size={16} /> Practice vs AI
+                          <Bot size={16} /> {t('practice_ai')}
                       </button>
                   </div>
 
@@ -598,13 +600,13 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
                                 <div className="space-y-4 relative z-10">
                                     <div>
-                                        <p className="text-xs text-slate-500 mb-1">Entry Stake</p>
+                                        <p className="text-xs text-slate-500 mb-1">{t('entry_stake')}</p>
                                         <h2 className="text-3xl font-display font-bold text-white">
                                             {tier.stake} <span className="text-sm text-gold-500">FCFA</span>
                                         </h2>
                                     </div>
                                     <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
-                                        <span className="text-xs text-slate-400">Potential Win</span>
+                                        <span className="text-xs text-slate-400">{t('potential_win')}</span>
                                         <span className="font-mono font-bold text-green-400 text-lg">
                                             {tier.potentialWin} <span className="text-xs">FCFA</span>
                                         </span>
@@ -614,7 +616,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                 <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center relative z-10">
                                     <div className="flex items-center gap-2 text-xs text-slate-500">
                                         <Users size={14} className={isPopular ? 'text-gold-400' : ''} />
-                                        <span className={isPopular ? 'text-slate-300 font-bold' : ''}>{tier.playersOnline} Online</span>
+                                        <span className={isPopular ? 'text-slate-300 font-bold' : ''}>{tier.playersOnline} {t('online')}</span>
                                     </div>
                                     <ChevronRight size={18} className="text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-transform" />
                                 </div>

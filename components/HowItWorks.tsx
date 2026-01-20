@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ShieldCheck, Cpu, Lock, Smartphone, UserPlus, Swords, Trophy, Wallet } from 'lucide-react';
+import { ArrowLeft, ShieldCheck, Cpu, Lock, Smartphone, UserPlus, Swords, Trophy, Wallet, Hash, Server, CheckCircle, Fingerprint } from 'lucide-react';
 
 interface HowItWorksProps {
   onBack: () => void;
@@ -11,179 +11,242 @@ interface HowItWorksProps {
 export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
   const steps = [
     {
-      title: "Create & Verify Account",
-      desc: "Sign up instantly. We use biometric verification (FaceID/Fingerprint) to ensure every player is a real person. No bots allowed.",
+      title: "1. Create Account",
+      desc: "Sign up instantly using your Google account or email. We verify identity to ensure a bot-free environment.",
       icon: UserPlus,
-      color: "text-blue-400"
+      color: "bg-blue-500",
+      textColor: "text-blue-400"
     },
     {
-      title: "Deposit Funds Securely",
-      desc: "Link your MTN Mobile Money or Orange Money account. Deposits are instant and kept in your secure Vantage Wallet.",
+      title: "2. Deposit Funds",
+      desc: "Load your wallet via MTN Mobile Money or Orange Money. Your funds are kept in a secure, personal vault.",
       icon: Smartphone,
-      color: "text-yellow-400"
+      color: "bg-yellow-500",
+      textColor: "text-yellow-400"
     },
     {
-      title: "Choose Your Arena",
-      desc: "Select a game (Cards, Dice, Checkers, Chess) and pick your stakes. From 100 FCFA casual matches to 50,000 FCFA High Roller tables.",
+      title: "3. Choose Your Arena",
+      desc: "Select a game (Ludo, Dice, Checkers, Chess) and a stake level. From 500 FCFA casual games to 50,000 FCFA pro tables.",
       icon: Swords,
-      color: "text-red-400"
+      color: "bg-red-500",
+      textColor: "text-red-400"
     },
     {
-      title: "Win & Withdraw Instantly",
-      desc: "When you win, the pot is instantly transferred to your wallet. Cash out to Mobile Money in seconds. No waiting periods.",
+      title: "4. Win & Withdraw",
+      desc: "Defeat your opponent. The escrow automatically releases the pot to your wallet. Withdraw to MoMo instantly.",
       icon: Trophy,
-      color: "text-gold-400"
-    }
-  ];
-
-  const features = [
-    {
-      title: "Escrow Technology",
-      desc: "Before a match starts, both players' stakes are locked in a neutral digital vault. This guarantees the winner always gets paid.",
-      icon: Lock,
-      color: "text-cam-green"
-    },
-    {
-      title: "AI Referee",
-      desc: "Our V-Guard AI monitors every move for suspicious patterns. If an opponent disconnects or cheats, you automatically win.",
-      icon: Cpu,
-      color: "text-purple-400"
-    },
-    {
-      title: "Provably Fair",
-      desc: "We use cryptographic hashing (SHA-256) for dice rolls and shuffles. You can verify the fairness of every game outcome yourself.",
-      icon: ShieldCheck,
-      color: "text-gold-400"
+      color: "bg-gold-500",
+      textColor: "text-gold-400"
     }
   ];
 
   return (
-    <div className="min-h-screen bg-royal-950 text-white p-6 relative overflow-x-hidden">
+    <div className="min-h-screen bg-royal-950 text-white relative overflow-x-hidden">
       {/* Background Elements */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
          <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-blue-900/10 rounded-full blur-[120px]"></div>
          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
+         <div className="absolute top-[20%] right-[20%] w-[20%] h-[20%] bg-purple-600/10 rounded-full blur-[80px]"></div>
       </div>
 
-      <div className="max-w-5xl mx-auto relative z-10">
-        <header className="mb-12 flex items-center justify-between">
+      <div className="max-w-6xl mx-auto relative z-10 px-6 py-8">
+        
+        {/* Navigation */}
+        <header className="mb-16 flex items-center justify-between">
             <button 
                 onClick={onBack}
-                className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors group"
+                className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors group px-4 py-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10"
             >
-                <div className="p-2 rounded-xl bg-white/5 group-hover:bg-white/10 border border-white/5">
-                    <ArrowLeft size={20} />
-                </div>
-                <span className="font-medium">Back to Home</span>
+                <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
+                <span className="font-bold">Back</span>
             </button>
             <div className="flex items-center gap-2">
-                <div className="w-8 h-8 bg-gold-500 rounded-lg flex items-center justify-center text-black font-bold text-sm">V</div>
-                <span className="font-display font-bold tracking-wide">VANTAGE</span>
+                <div className="w-8 h-8 bg-gold-500 rounded-lg flex items-center justify-center text-black font-bold text-sm shadow-[0_0_15px_rgba(251,191,36,0.3)]">V</div>
+                <span className="font-display font-bold tracking-wide text-lg">VANTAGE</span>
             </div>
         </header>
 
+        {/* Hero Section */}
         <motion.div 
-            initial={{ opacity: 0, y: 20 }}
+            initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center mb-20"
+            className="text-center mb-24 max-w-3xl mx-auto"
         >
-            <h1 className="text-4xl md:text-6xl font-display font-bold mb-6">
-                Fair Play. <span className="text-gold-400">Instant Pay.</span>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold-500/10 border border-gold-500/20 text-gold-400 text-xs font-bold uppercase tracking-wider mb-6">
+                <ShieldCheck size={14} /> The Fair Play Guarantee
+            </div>
+            <h1 className="text-5xl md:text-7xl font-display font-bold mb-6 leading-tight">
+                Skill Based.<br/>
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-400 via-white to-gold-500">
+                    Trust Secured.
+                </span>
             </h1>
-            <p className="text-slate-400 text-lg max-w-2xl mx-auto">
-                Vantage is built on a simple promise: If you have the skill, you keep the money. Here is how our technology guarantees a fair game every time.
+            <p className="text-slate-400 text-lg md:text-xl leading-relaxed">
+                Vantage eliminates luck and fraud from online gaming. We provide the arena, you bring the skill. Our technology handles the rest.
             </p>
         </motion.div>
 
-        {/* Steps Section */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-12 mb-24">
+        {/* The Process (Timeline) */}
+        <div className="mb-32">
+            <h2 className="text-2xl font-display font-bold text-white mb-12 text-center">How to Start Earning</h2>
             <div className="relative">
-                <div className="absolute left-6 top-6 bottom-6 w-0.5 bg-gradient-to-b from-gold-500 via-white/10 to-transparent"></div>
-                <div className="space-y-12 relative z-10">
+                {/* Connecting Line (Desktop) */}
+                <div className="hidden md:block absolute top-12 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-red-500 to-gold-500 opacity-20"></div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
                     {steps.map((step, idx) => (
                         <motion.div 
                             key={idx}
-                            initial={{ opacity: 0, x: -20 }}
-                            whileInView={{ opacity: 1, x: 0 }}
+                            initial={{ opacity: 0, y: 20 }}
+                            whileInView={{ opacity: 1, y: 0 }}
                             viewport={{ once: true }}
-                            transition={{ delay: idx * 0.1 }}
-                            className="flex gap-6"
+                            transition={{ delay: idx * 0.15 }}
+                            className="relative flex flex-col items-center text-center group"
                         >
-                            <div className={`w-12 h-12 rounded-full bg-royal-900 border border-white/10 flex items-center justify-center flex-shrink-0 z-10 ${step.color} shadow-xl`}>
-                                <step.icon size={20} />
+                            <div className={`w-24 h-24 rounded-3xl ${step.color} bg-opacity-10 border border-white/10 flex items-center justify-center mb-6 relative z-10 backdrop-blur-sm group-hover:scale-110 transition-transform duration-300 shadow-xl`}>
+                                <step.icon size={32} className={step.textColor} />
+                                <div className={`absolute inset-0 ${step.color} opacity-20 blur-xl rounded-full`}></div>
                             </div>
-                            <div className="pt-2">
-                                <h3 className="text-xl font-bold text-white mb-2">{step.title}</h3>
-                                <p className="text-slate-400 leading-relaxed text-sm">{step.desc}</p>
-                            </div>
+                            <h3 className="text-lg font-bold text-white mb-2">{step.title}</h3>
+                            <p className="text-slate-400 text-sm leading-relaxed">{step.desc}</p>
                         </motion.div>
                     ))}
                 </div>
             </div>
-            
-            <div className="flex items-center justify-center">
-                {/* Visual Representation Card */}
-                <motion.div 
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    whileInView={{ scale: 1, opacity: 1 }}
-                    className="w-full max-w-sm bg-gradient-to-br from-royal-800 to-black p-8 rounded-3xl border border-gold-500/30 relative overflow-hidden shadow-2xl"
-                >
-                    <div className="absolute top-0 right-0 p-12 bg-gold-500/10 blur-3xl rounded-full"></div>
-                    <div className="relative z-10 text-center space-y-6">
-                        <Wallet size={64} className="text-gold-400 mx-auto mb-4" />
-                        <h3 className="text-2xl font-bold text-white">Your Money is Safe</h3>
-                        <p className="text-slate-400 text-sm">
-                            Vantage operates as a secure P2P escrow service. We never touch your winnings—they go directly from the loser's escrow to your wallet.
-                        </p>
-                        <div className="p-4 bg-green-500/10 rounded-xl border border-green-500/20 text-green-400 font-mono text-sm">
-                            <ShieldCheck size={16} className="inline mr-2" />
-                            100% Payout Guarantee
-                        </div>
-                    </div>
-                </motion.div>
-            </div>
         </div>
 
-        {/* Tech Features */}
-        <div className="mb-24">
-            <h2 className="text-3xl font-display font-bold text-white mb-10 text-center">The Technology Core</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {features.map((feat, idx) => (
-                    <motion.div 
-                        key={idx}
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        viewport={{ once: true }}
-                        transition={{ delay: idx * 0.1 }}
-                        className="bg-royal-900/40 p-8 rounded-3xl border border-white/5 hover:border-gold-500/30 transition-colors group"
-                    >
-                        <div className={`mb-6 p-4 rounded-2xl bg-white/5 inline-block group-hover:scale-110 transition-transform ${feat.color}`}>
-                            <feat.icon size={32} />
-                        </div>
-                        <h3 className="text-xl font-bold text-white mb-3">{feat.title}</h3>
-                        <p className="text-slate-400 leading-relaxed text-sm">{feat.desc}</p>
-                    </motion.div>
+        {/* Deep Dive: Technology Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-32">
+            
+            {/* Provably Fair Card */}
+            <motion.div 
+                initial={{ opacity: 0, x: -30 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                className="bg-gradient-to-br from-royal-900 to-black p-8 rounded-3xl border border-white/5 relative overflow-hidden"
+            >
+                <div className="absolute top-0 right-0 p-12 bg-purple-500/10 blur-3xl rounded-full"></div>
+                
+                <div className="flex items-center gap-4 mb-6">
+                    <div className="p-3 bg-purple-500/20 rounded-xl text-purple-400">
+                        <Server size={24} />
+                    </div>
+                    <h3 className="text-2xl font-bold text-white">Provably Fair System</h3>
+                </div>
+                
+                <p className="text-slate-400 mb-8 leading-relaxed">
+                    We use cryptographic hashing to ensure the game outcome is determined before the turn starts and cannot be altered.
+                </p>
+
+                {/* Technical Visualization */}
+                <div className="bg-black/40 rounded-xl p-4 font-mono text-xs border border-white/5 space-y-3">
+                    <div>
+                        <div className="text-slate-500 mb-1">Server Seed (Hashed)</div>
+                        <div className="text-green-400 truncate">9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08</div>
+                    </div>
+                    <div className="flex justify-center text-slate-600">
+                        +
+                    </div>
+                    <div>
+                        <div className="text-slate-500 mb-1">Client Seed (Your Input)</div>
+                        <div className="text-blue-400">client-seed-12345</div>
+                    </div>
+                    <div className="h-px bg-white/10 my-2"></div>
+                    <div className="flex items-center justify-between">
+                        <div className="text-slate-500">Result</div>
+                        <div className="text-gold-400 font-bold">Dice Roll: 6</div>
+                    </div>
+                </div>
+            </motion.div>
+
+            {/* Escrow System Card */}
+            <motion.div 
+                initial={{ opacity: 0, x: 30 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                className="bg-gradient-to-br from-royal-900 to-black p-8 rounded-3xl border border-white/5 relative overflow-hidden"
+            >
+                <div className="absolute top-0 right-0 p-12 bg-green-500/10 blur-3xl rounded-full"></div>
+
+                <div className="flex items-center gap-4 mb-6">
+                    <div className="p-3 bg-green-500/20 rounded-xl text-green-400">
+                        <Lock size={24} />
+                    </div>
+                    <h3 className="text-2xl font-bold text-white">Escrow Protection</h3>
+                </div>
+
+                <p className="text-slate-400 mb-8 leading-relaxed">
+                    Stakes are locked in a neutral vault before the game begins. The loser cannot "run away" with the money—the code automatically pays the winner.
+                </p>
+
+                {/* Visual Flow */}
+                <div className="flex items-center justify-between bg-black/40 p-6 rounded-xl border border-white/5">
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="w-10 h-10 rounded-full bg-blue-500/20 border border-blue-500 flex items-center justify-center text-blue-400 font-bold text-xs">YOU</div>
+                        <div className="text-[10px] text-slate-500">500 FCFA</div>
+                    </div>
+                    
+                    <div className="h-0.5 flex-1 bg-white/10 mx-2 relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-green-500 to-transparent w-1/2 mx-auto"></div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-2 bg-royal-800 p-3 rounded-lg border border-gold-500/30 shadow-[0_0_15px_rgba(34,197,94,0.2)]">
+                        <Lock size={16} className="text-green-400" />
+                        <div className="text-[10px] font-bold text-white">VAULT</div>
+                    </div>
+
+                    <div className="h-0.5 flex-1 bg-white/10 mx-2 relative">
+                         <div className="absolute inset-0 bg-gradient-to-r from-transparent via-green-500 to-transparent w-1/2 mx-auto"></div>
+                    </div>
+
+                    <div className="flex flex-col items-center gap-2">
+                        <div className="w-10 h-10 rounded-full bg-red-500/20 border border-red-500 flex items-center justify-center text-red-400 font-bold text-xs">OPP</div>
+                        <div className="text-[10px] text-slate-500">500 FCFA</div>
+                    </div>
+                </div>
+            </motion.div>
+
+        </div>
+
+        {/* AI Referee Section */}
+        <motion.div 
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="bg-royal-900/30 border border-white/10 rounded-3xl p-8 md:p-12 text-center relative overflow-hidden mb-20"
+        >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500 via-blue-500 to-purple-500"></div>
+            
+            <div className="w-20 h-20 bg-royal-800 rounded-full mx-auto flex items-center justify-center mb-6 shadow-2xl border-4 border-royal-950 relative z-10">
+                <Cpu size={40} className="text-white" />
+            </div>
+
+            <h2 className="text-3xl font-display font-bold text-white mb-4">Meet V-Guard AI</h2>
+            <p className="text-slate-400 max-w-2xl mx-auto mb-8 leading-relaxed">
+                Our automated referee monitors network latency, game inputs, and user behavior in real-time. It detects bots, rage-quits, and suspicious patterns instantly.
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-4">
+                {['Anti-Cheat Engine', 'Latency Compensation', 'Bot Detection', 'Auto-Forfeit Logic'].map((feature, i) => (
+                    <div key={i} className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5 text-sm text-slate-300">
+                        <CheckCircle size={14} className="text-green-400" /> {feature}
+                    </div>
                 ))}
             </div>
-        </div>
+        </motion.div>
 
         {/* CTA */}
-        <div className="text-center bg-gradient-to-r from-royal-800 via-royal-900 to-royal-800 rounded-3xl p-12 border border-white/10 relative overflow-hidden">
-            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-            <div className="relative z-10">
-                <h2 className="text-3xl md:text-5xl font-display font-bold text-white mb-6">Ready to prove your skill?</h2>
-                <button 
-                    onClick={onLogin}
-                    className="bg-gold-500 hover:bg-gold-400 text-royal-950 font-black text-lg py-4 px-12 rounded-full shadow-[0_0_30px_rgba(251,191,36,0.4)] hover:shadow-[0_0_50px_rgba(251,191,36,0.6)] transition-all transform hover:-translate-y-1 active:scale-95"
-                >
-                    START PLAYING NOW
-                </button>
-            </div>
+        <div className="text-center relative z-10">
+            <h2 className="text-4xl font-display font-bold text-white mb-8">Ready to play?</h2>
+            <button 
+                onClick={onLogin}
+                className="bg-gold-500 hover:bg-gold-400 text-royal-950 font-black text-xl py-5 px-16 rounded-full shadow-[0_0_40px_rgba(251,191,36,0.4)] hover:shadow-[0_0_60px_rgba(251,191,36,0.6)] transition-all transform hover:-translate-y-2 active:scale-95"
+            >
+                CREATE ACCOUNT
+            </button>
+            <p className="text-slate-500 text-sm mt-6">Secure payments powered by Fapshi • Regulated P2P Gaming</p>
         </div>
 
-        <footer className="mt-20 pt-8 border-t border-white/5 text-center text-slate-500 text-sm">
-            &copy; 2024 Vantage Gaming Cameroon. Built for Trust.
-        </footer>
       </div>
     </div>
   );

@@ -1,10 +1,10 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
-import { getUserTransactions } from '../services/firebase';
+import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap, CheckCircle } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '../services/i18n';
 
 interface ProfileProps {
   user: User;
@@ -26,6 +26,7 @@ const PRESET_AVATARS = [
 ];
 
 export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
+  const { t, language, setLanguage } = useLanguage();
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'settings'>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -45,13 +46,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   
   // Settings State - Initialize with defaults or load later
   const [preferences, setPreferences] = useState({
-      biometrics: true,
       notifications: true,
       sound: getSoundEnabled(),
       marketing: false,
-      language: 'English',
-      twoFactor: true
   });
+
+  // Account Management State
+  const [currentEmail, setCurrentEmail] = useState(auth.currentUser?.email || '');
+  const [isEditingEmail, setIsEditingEmail] = useState(false);
+  const [newEmailInput, setNewEmailInput] = useState('');
 
   // Load Preferences from LocalStorage on Mount
   useEffect(() => {
@@ -66,6 +69,9 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
               console.error("Failed to load preferences", e);
           }
       }
+      
+      // Sync email if changed elsewhere
+      if (auth.currentUser?.email) setCurrentEmail(auth.currentUser.email);
   }, []);
 
   // Save Preferences to LocalStorage on Change
@@ -143,41 +149,66 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       if (key === 'sound') {
           setSoundEnabled(newVal as boolean);
           showToast(newVal ? 'Sound Effects Enabled' : 'Sound Effects Disabled');
-      } else if (key === 'biometrics') {
-          showToast(newVal ? 'Biometric Login Enabled' : 'Biometric Login Disabled');
       } else if (key === 'notifications') {
           showToast(newVal ? 'Push Notifications Enabled' : 'Push Notifications Disabled');
       } else if (key === 'marketing') {
           showToast(newVal ? 'Marketing Emails Subscribed' : 'Marketing Emails Unsubscribed');
-      } else if (key === 'twoFactor') {
-          showToast(newVal ? 'Two-Factor Auth Enabled' : 'Two-Factor Auth Disabled');
       } else {
           playSFX('click');
       }
   };
 
   const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const lang = e.target.value;
-      setPreferences(prev => ({ ...prev, language: lang }));
+      const lang = e.target.value as 'en' | 'fr';
+      setLanguage(lang);
       playSFX('click');
-      showToast(`Language changed to ${lang}`);
+      showToast(`Language changed to ${lang === 'en' ? 'English' : 'Français'}`);
   };
 
-  const handleUpdatePin = () => {
+  // --- ACCOUNT HANDLERS ---
+
+  const handlePasswordReset = async () => {
+      if (!currentEmail) return alert("No email associated with this account.");
       playSFX('click');
-      // Simple prompt simulation for MVP
-      const newPin = window.prompt("Enter new 4-digit Security PIN:");
-      if (newPin !== null) {
-          if (/^\d{4}$/.test(newPin)) {
-              localStorage.setItem('vantage_pin', newPin);
-              playSFX('win');
-              showToast("Security PIN Updated Successfully");
-          } else {
-              playSFX('error');
-              alert("Invalid PIN. Please enter exactly 4 digits.");
-          }
+      try {
+          await triggerPasswordReset(currentEmail);
+          showToast("Password reset email sent!");
+      } catch (e: any) {
+          showToast("Error: " + e.message);
       }
   };
+
+  const handleChangeEmail = async () => {
+      if (!newEmailInput.includes('@')) {
+          alert("Please enter a valid email address.");
+          return;
+      }
+      playSFX('click');
+      try {
+          await updateUserEmail(newEmailInput);
+          setCurrentEmail(newEmailInput);
+          setIsEditingEmail(false);
+          showToast("Email updated successfully!");
+      } catch (e: any) {
+          console.error(e);
+          showToast("Failed to update email. Re-login required.");
+      }
+  };
+
+  const handleDeleteAccount = async () => {
+      playSFX('click');
+      if (!window.confirm("Are you sure? This action is permanent and cannot be undone. All funds and data will be lost.")) return;
+      
+      try {
+          await deleteAccount();
+          onLogout(); // Redirect to landing
+      } catch (e: any) {
+          console.error(e);
+          showToast("Deletion failed: " + e.message);
+      }
+  };
+
+  // ------------------------
 
   const handleSaveProfile = () => {
       playSFX('click');
@@ -295,7 +326,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                        {isEditing ? (
                            <>
                                 <button onClick={handleSaveProfile} className="flex-1 md:flex-none px-6 py-3 bg-green-500 hover:bg-green-600 rounded-xl text-white font-bold transition-all flex items-center justify-center gap-2 shadow-lg">
-                                    <Check size={18} /> Save
+                                    <Check size={18} /> {t('save')}
                                 </button>
                                 <button onClick={handleCancelEdit} className="px-4 py-3 bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all flex items-center justify-center">
                                     <X size={20} />
@@ -304,7 +335,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                        ) : (
                            <>
                                 <button onClick={() => { setIsEditing(true); playSFX('click'); }} className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm flex items-center justify-center gap-2">
-                                    <Edit2 size={16} /> Edit Profile
+                                    <Edit2 size={16} /> {t('edit_profile')}
                                 </button>
                                 <button onClick={onLogout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all flex items-center justify-center">
                                     <LogOut size={20} />
@@ -360,7 +391,9 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                       activeTab === tab ? 'text-white' : 'text-slate-500 hover:text-slate-300'
                   }`}
                >
-                   {tab}
+                   {tab === 'overview' && t('recent_activity')}
+                   {tab === 'history' && t('history')}
+                   {tab === 'settings' && t('settings')}
                    {activeTab === tab && (
                        <motion.div 
                            layoutId="profileTab" 
@@ -387,10 +420,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                       <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               {[
-                                  { label: 'Total Games', value: stats.totalGames.toString(), icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
-                                  { label: 'Win Rate', value: `${stats.winRate}%`, icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-                                  { label: 'Current Streak', value: `${stats.streak} 🔥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
-                                  { label: 'Total Earnings', value: formatEarnings(stats.totalEarnings), icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
+                                  { label: t('total_games'), value: stats.totalGames.toString(), icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+                                  { label: t('win_rate'), value: `${stats.winRate}%`, icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
+                                  { label: t('current_streak'), value: `${stats.streak} 🔥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+                                  { label: t('total_earnings'), value: formatEarnings(stats.totalEarnings), icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
                               ].map((stat, idx) => (
                                   <div key={idx} className={`glass-panel p-4 rounded-2xl border ${stat.border} hover:bg-white/5 transition-colors`}>
                                       <div className={`w-10 h-10 rounded-xl ${stat.bg} ${stat.color} flex items-center justify-center mb-3`}>
@@ -404,7 +437,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
                           <div className="glass-panel p-6 rounded-2xl relative overflow-hidden">
                               <div className="flex justify-between items-center mb-6 relative z-10">
-                                  <h3 className="text-lg font-bold text-white">Performance Analytics</h3>
+                                  <h3 className="text-lg font-bold text-white">{t('performance_analytics')}</h3>
                                   <select className="bg-black/30 text-xs text-slate-400 border border-white/10 rounded-lg px-2 py-1 outline-none">
                                       <option>Last 7 Days</option>
                                       <option>Last 30 Days</option>
@@ -441,7 +474,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                               </div>
                               <div className="relative z-10">
                                   <div className="flex justify-between items-start mb-4">
-                                      <p className="text-sm text-slate-400">Available Balance</p>
+                                      <p className="text-sm text-slate-400">{t('balance_label')}</p>
                                       <div className="p-2 bg-gold-500/10 rounded-lg">
                                           <Shield size={16} className="text-gold-400"/>
                                       </div>
@@ -454,24 +487,24 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                         onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-[0_0_20px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] active:scale-95 flex items-center justify-center gap-2"
                                       >
-                                          <Wallet size={18} /> Deposit Funds
+                                          <Wallet size={18} /> {t('deposit')}
                                       </button>
                                       <button 
                                         onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10 flex items-center justify-center gap-2"
                                       >
-                                          <CreditCard size={18} /> Withdraw
+                                          <CreditCard size={18} /> {t('withdraw')}
                                       </button>
                                   </div>
                               </div>
                           </div>
                           
                           <div className="p-5 rounded-2xl border border-dashed border-white/10 text-center bg-royal-900/30">
-                              <p className="text-sm text-slate-400 mb-2 font-medium">Referral Code</p>
+                              <p className="text-sm text-slate-400 mb-2 font-medium">{t('referral_code')}</p>
                               <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/5 select-all">
                                   {user.name.toUpperCase().substring(0,5)}-2024
                               </div>
-                              <p className="text-xs text-slate-500">Share to earn <span className="text-white font-bold">500 FCFA</span> per friend</p>
+                              <p className="text-xs text-slate-500">{t('share_earn')} <span className="text-white font-bold">500 FCFA</span> {t('per_friend')}</p>
                           </div>
                       </motion.div>
                    </>
@@ -482,7 +515,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                    <motion.div variants={itemVariants} className="md:col-span-3">
                        <div className="glass-panel rounded-2xl overflow-hidden border border-white/5">
                            <div className="p-4 border-b border-white/5 flex justify-between items-center bg-royal-900/50">
-                               <h3 className="font-bold text-white">Transaction History</h3>
+                               <h3 className="font-bold text-white">{t('transaction_type')}</h3>
                                <button className="text-xs text-gold-400 font-bold uppercase hover:text-white">Export CSV</button>
                            </div>
                            <div className="overflow-x-auto">
@@ -490,11 +523,11 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                    <table className="w-full text-left whitespace-nowrap">
                                        <thead className="bg-royal-950/50 text-xs uppercase text-slate-500 font-medium">
                                            <tr>
-                                               <th className="p-4">Transaction Type</th>
+                                               <th className="p-4">{t('transaction_type')}</th>
                                                <th className="p-4">Reference ID</th>
-                                               <th className="p-4">Date & Time</th>
-                                               <th className="p-4">Status</th>
-                                               <th className="p-4 text-right">Amount</th>
+                                               <th className="p-4">{t('date_time')}</th>
+                                               <th className="p-4">{t('status')}</th>
+                                               <th className="p-4 text-right">{t('amount')}</th>
                                            </tr>
                                        </thead>
                                        <tbody className="divide-y divide-white/5">
@@ -544,58 +577,68 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                    <>
                        <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                            
-                           {/* Security Section */}
+                           {/* Security Section (MODIFIED) */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                                   <Shield className="text-gold-400" size={20} /> Security & Access
+                                   <Shield className="text-gold-400" size={20} /> {t('security_access')}
                                </h3>
                                
                                <div className="space-y-4">
-                                   {/* Biometric */}
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   {/* Email Address */}
+                                   <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5 gap-4">
                                        <div className="flex items-center gap-3">
-                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Fingerprint size={20}/></div>
-                                           <div>
-                                               <div className="font-bold text-white text-sm">Biometric Login</div>
-                                               <div className="text-xs text-slate-500">Use FaceID or Fingerprint to sign in</div>
+                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Mail size={20}/></div>
+                                           <div className="w-full">
+                                               <div className="font-bold text-white text-sm">{t('email_label')}</div>
+                                               {isEditingEmail ? (
+                                                   <input 
+                                                      value={newEmailInput}
+                                                      onChange={(e) => setNewEmailInput(e.target.value)}
+                                                      className="mt-1 bg-black/40 border border-white/10 rounded px-2 py-1 text-xs text-white outline-none focus:border-gold-500 w-full"
+                                                      placeholder="new@email.com"
+                                                   />
+                                               ) : (
+                                                   <div className="text-xs text-slate-500 truncate max-w-[200px]">{currentEmail}</div>
+                                               )}
                                            </div>
                                        </div>
-                                       <button 
-                                          onClick={() => togglePref('biometrics')}
-                                          className={`w-12 h-6 rounded-full transition-colors relative ${preferences.biometrics ? 'bg-gold-500' : 'bg-royal-800'}`}
-                                       >
-                                           <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${preferences.biometrics ? 'translate-x-6' : 'translate-x-0'}`} />
+                                       {isEditingEmail ? (
+                                           <div className="flex gap-2">
+                                               <button onClick={handleChangeEmail} className="px-3 py-1.5 bg-green-500 text-white rounded-lg text-xs font-bold hover:bg-green-600 transition-colors">{t('save')}</button>
+                                               <button onClick={() => { setIsEditingEmail(false); setNewEmailInput(''); }} className="px-3 py-1.5 bg-white/10 text-white rounded-lg text-xs font-bold hover:bg-white/20 transition-colors">{t('cancel')}</button>
+                                           </div>
+                                       ) : (
+                                           <button onClick={() => { setIsEditingEmail(true); setNewEmailInput(currentEmail); }} className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors whitespace-nowrap">
+                                               Change Email
+                                           </button>
+                                       )}
+                                   </div>
+
+                                   {/* Password Reset */}
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                       <div className="flex items-center gap-3">
+                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Key size={20}/></div>
+                                           <div>
+                                               <div className="font-bold text-white text-sm">{t('pass_label')}</div>
+                                               <div className="text-xs text-slate-500">Secure your account</div>
+                                           </div>
+                                       </div>
+                                       <button onClick={handlePasswordReset} className="text-xs font-bold text-white hover:text-gold-400 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5">
+                                           Reset via Email
                                        </button>
                                    </div>
 
-                                   {/* Transaction PIN */}
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   {/* Delete Account */}
+                                   <div className="flex items-center justify-between p-4 bg-red-500/5 rounded-xl border border-red-500/20">
                                        <div className="flex items-center gap-3">
-                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Lock size={20}/></div>
+                                           <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Trash2 size={20}/></div>
                                            <div>
-                                               <div className="font-bold text-white text-sm">Transaction PIN</div>
-                                               <div className="text-xs text-slate-500">Change your 4-digit security code</div>
+                                               <div className="font-bold text-white text-sm">Delete Account</div>
+                                               <div className="text-xs text-slate-500">Permanent action</div>
                                            </div>
                                        </div>
-                                       <button onClick={handleUpdatePin} className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors">
-                                           Update
-                                       </button>
-                                   </div>
-
-                                   {/* 2FA */}
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
-                                       <div className="flex items-center gap-3">
-                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Smartphone size={20}/></div>
-                                           <div>
-                                               <div className="font-bold text-white text-sm">Two-Factor Authentication</div>
-                                               <div className="text-xs text-slate-500">SMS verification for withdrawals</div>
-                                           </div>
-                                       </div>
-                                       <button 
-                                          onClick={() => togglePref('twoFactor')}
-                                          className={`w-12 h-6 rounded-full transition-colors relative ${preferences.twoFactor ? 'bg-green-500' : 'bg-royal-800'}`}
-                                       >
-                                           <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${preferences.twoFactor ? 'translate-x-6' : 'translate-x-0'}`} />
+                                       <button onClick={handleDeleteAccount} className="text-xs font-bold text-red-400 hover:text-white px-3 py-1.5 bg-red-500/10 hover:bg-red-500 rounded-lg transition-colors border border-red-500/20">
+                                           Delete
                                        </button>
                                    </div>
                                </div>
@@ -604,7 +647,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                            {/* App Preferences */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                                   <Settings className="text-purple-400" size={20} /> App Preferences
+                                   <Settings className="text-purple-400" size={20} /> {t('app_preferences')}
                                </h3>
                                
                                <div className="space-y-4">
@@ -612,17 +655,17 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Globe size={20}/></div>
                                            <div>
-                                               <div className="font-bold text-white text-sm">Language / Langue</div>
+                                               <div className="font-bold text-white text-sm">{t('language')}</div>
                                                <div className="text-xs text-slate-500">App interface language</div>
                                            </div>
                                        </div>
                                        <select 
-                                          value={preferences.language}
+                                          value={language}
                                           onChange={handleLanguageChange}
                                           className="bg-royal-950 text-xs font-bold text-white border border-white/10 rounded-lg px-3 py-2 outline-none focus:border-gold-500 transition-colors"
                                        >
-                                           <option value="English">English</option>
-                                           <option value="French">Français</option>
+                                           <option value="en">English</option>
+                                           <option value="fr">Français</option>
                                        </select>
                                    </div>
 
@@ -630,7 +673,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Volume2 size={20}/></div>
                                            <div>
-                                               <div className="font-bold text-white text-sm">Sound Effects</div>
+                                               <div className="font-bold text-white text-sm">{t('sound_effects')}</div>
                                                <div className="text-xs text-slate-500">Game audio and UI sounds</div>
                                            </div>
                                        </div>
@@ -650,7 +693,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                            {/* Notifications */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                                   <Bell className="text-red-400" size={20} /> Notifications
+                                   <Bell className="text-red-400" size={20} /> {t('notifications')}
                                </h3>
                                <div className="space-y-4">
                                    <div className="flex items-center justify-between">
@@ -663,7 +706,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </button>
                                    </div>
                                    <div className="flex items-center justify-between">
-                                       <span className="text-sm text-slate-300">Marketing Emails</span>
+                                       <span className="text-sm text-slate-300">{t('marketing_emails')}</span>
                                        <button 
                                           onClick={() => togglePref('marketing')}
                                           className={`w-10 h-5 rounded-full transition-colors relative ${preferences.marketing ? 'bg-green-500' : 'bg-royal-800'}`}
@@ -677,26 +720,26 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                            {/* Support */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                                   <HelpCircle className="text-blue-400" size={20} /> Support
+                                   <HelpCircle className="text-blue-400" size={20} /> {t('support')}
                                </h3>
                                <div className="space-y-2">
                                    <button 
                                      onClick={() => { onNavigate('help-center'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
-                                       Help Center <ChevronRight size={16} />
+                                       {t('help_center')} <ChevronRight size={16} />
                                    </button>
                                    <button 
                                      onClick={() => { onNavigate('report-bug'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
-                                       Report a Bug <ChevronRight size={16} />
+                                       {t('report_bug')} <ChevronRight size={16} />
                                    </button>
                                    <button 
                                      onClick={() => { onNavigate('terms'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
-                                       Terms of Service <ChevronRight size={16} />
+                                       {t('terms')} <ChevronRight size={16} />
                                    </button>
                                </div>
                            </section>

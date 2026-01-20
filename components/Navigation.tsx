@@ -1,6 +1,7 @@
 import React from 'react';
 import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
 import { ViewState, User as AppUser } from '../types';
+import { useLanguage } from '../services/i18n';
 
 interface NavigationProps {
   currentView: ViewState;
@@ -10,11 +11,13 @@ interface NavigationProps {
 }
 
 export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user, hasUnreadMessages }) => {
+  const { t } = useLanguage();
+  
   const navItems = [
-    { id: 'dashboard', icon: Home, label: 'Home' },
-    { id: 'lobby', icon: LayoutGrid, label: 'Lobby' },
-    { id: 'forum', icon: MessageSquare, label: 'Forum', hasBadge: hasUnreadMessages },
-    { id: 'finance', icon: Wallet, label: 'Wallet' },
+    { id: 'dashboard', icon: Home, label: t('nav_home') },
+    { id: 'lobby', icon: LayoutGrid, label: t('nav_lobby') },
+    { id: 'forum', icon: MessageSquare, label: t('nav_forum'), hasBadge: hasUnreadMessages },
+    { id: 'finance', icon: Wallet, label: t('nav_wallet') },
   ];
 
   return (
@@ -56,7 +59,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
           <div className={`p-2 rounded-xl transition-all ${currentView === 'profile' ? 'bg-royal-800' : 'group-hover:bg-royal-800/50'}`}>
              <User size={24} className={currentView === 'profile' ? 'drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : ''} />
           </div>
-          <span className="text-[10px] font-medium tracking-wide">Profile</span>
+          <span className="text-[10px] font-medium tracking-wide">{t('nav_profile')}</span>
           {currentView === 'profile' && (
              <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-1 h-8 bg-gold-500 rounded-l-full hidden md:block" />
           )}
@@ -73,7 +76,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
             <div className={`p-2 rounded-xl transition-all ${currentView === 'admin' ? 'bg-red-500/20' : 'group-hover:bg-red-500/10'}`}>
                 <ShieldAlert size={24} className={currentView === 'admin' ? 'drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]' : ''} />
             </div>
-            <span className="text-[10px] font-bold tracking-wide">Admin</span>
+            <span className="text-[10px] font-bold tracking-wide">{t('nav_admin')}</span>
             {currentView === 'admin' && (
                 <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-1 h-8 bg-red-500 rounded-l-full hidden md:block" />
             )}

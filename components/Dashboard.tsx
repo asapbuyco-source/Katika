@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect } from 'react';
 import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useLanguage } from '../services/i18n';
 
 interface DashboardProps {
   user: User;
@@ -13,6 +13,7 @@ interface DashboardProps {
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch }) => {
+  const { t } = useLanguage();
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
 
@@ -80,9 +81,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       <header className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl md:text-3xl font-display font-bold text-white">
-            Bonjour, <span className="text-gold-400">{user.name}</span>
+            {t('hello')}, <span className="text-gold-400">{user.name}</span>
           </h1>
-          <p className="text-slate-400 text-xs md:text-sm mt-1">Welcome back to the arena</p>
+          <p className="text-slate-400 text-xs md:text-sm mt-1">{t('welcome_arena')}</p>
         </div>
         <motion.div whileHover={{ scale: 1.05 }} className="relative cursor-pointer" onClick={() => setView('profile')}>
           <img
@@ -97,7 +98,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       {/* Live Winners Ticker */}
       <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
           <div className="flex items-center gap-2 text-gold-400 font-bold text-[10px] md:text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-3 border-r border-white/10 shrink-0">
-              <Flame size={12} className="animate-bounce" /> Live Wins
+              <Flame size={12} className="animate-bounce" /> {t('live_wins')}
           </div>
           <div className="flex-1 h-6 relative overflow-hidden">
               <AnimatePresence mode='wait'>
@@ -111,9 +112,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                       >
                           <img src={winners[0].avatar} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
                           <span className="text-white font-bold truncate max-w-[80px]">{winners[0].name}</span>
-                          <span className="shrink-0">won</span>
+                          <span className="shrink-0">{t('won')}</span>
                           <span className="text-gold-400 font-mono font-bold shrink-0">{winners[0].amount} FCFA</span>
-                          <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">in {winners[0].game}</span>
+                          <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {winners[0].game}</span>
                       </motion.div>
                   )}
               </AnimatePresence>
@@ -131,7 +132,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           <div>
             <div className="flex items-center gap-1.5 text-gold-400 text-xs font-bold uppercase tracking-widest mb-1">
                 <Shield size={12} fill="currentColor" /> 
-                <span>Vantage Secure Vault</span>
+                <span>{t('vantage_vault')}</span>
             </div>
             <h2 className="text-4xl md:text-5xl font-display font-bold text-white mt-2 tracking-tight">
               {user.balance.toLocaleString()} <span className="text-slate-400 text-2xl font-sans font-normal">FCFA</span>
@@ -143,7 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                 className="flex-1 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black py-4 px-6 rounded-xl flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(251,191,36,0.3)] hover:shadow-[0_0_30px_rgba(251,191,36,0.5)] active:scale-95 group/btn"
             >
               <Plus size={20} className="group-hover/btn:rotate-90 transition-transform" /> 
-              <span>DEPOSIT FUNDS</span>
+              <span>{t('deposit_funds')}</span>
             </button>
             <div className="flex gap-2">
                 <button onClick={onTopUp} className="w-14 h-full bg-[#ffcc00] rounded-xl flex items-center justify-center text-[10px] font-black text-black hover:scale-105 transition-transform shadow-lg" title="MTN Mobile Money">MTN</button>
@@ -155,9 +156,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
         {/* GAMES GRID TITLE */}
         <motion.div variants={itemVariants} className="md:col-span-3 flex items-center justify-between mt-4">
              <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
-                 <Zap className="text-gold-400 fill-gold-400" size={20} /> Trending Games
+                 <Zap className="text-gold-400 fill-gold-400" size={20} /> {t('trending_games')}
              </h3>
-             <button onClick={() => onQuickMatch()} className="text-xs text-gold-400 font-bold uppercase hover:text-white transition-colors">View Lobby</button>
+             <button onClick={() => onQuickMatch()} className="text-xs text-gold-400 font-bold uppercase hover:text-white transition-colors">{t('view_lobby')}</button>
         </motion.div>
 
         {/* GAMES GRID */}
@@ -187,7 +188,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                     <p className="text-xs text-slate-500 mb-4 group-hover:text-slate-400">Ranked & Casual Tables</p>
 
                     <button className={`w-full py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold uppercase tracking-wider transition-colors ${game.color}`}>
-                        Play Now
+                        {t('play_now')}
                     </button>
                 </div>
             </motion.div>
@@ -198,9 +199,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-3">
               <History className="text-slate-400" size={20} />
-              <h3 className="text-lg font-bold text-white">Recent Activity</h3>
+              <h3 className="text-lg font-bold text-white">{t('recent_activity')}</h3>
             </div>
-            <button onClick={() => setView('finance')} className="text-xs text-gold-400 hover:text-white font-bold uppercase tracking-wide">View All</button>
+            <button onClick={() => setView('finance')} className="text-xs text-gold-400 hover:text-white font-bold uppercase tracking-wide">{t('view_all')}</button>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

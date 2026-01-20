@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Shield, Trophy, AlertTriangle, Crown, Brain, Clock } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ArrowLeft, Shield, Trophy, AlertTriangle, Crown, Brain, Clock, ScrollText } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -48,6 +48,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   // Timer State (10 mins = 600s)
   const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
   
+  // Move History Scroll Ref
+  const historyRef = useRef<HTMLDivElement>(null);
+
   const isP2P = !!socket && !!socketGame;
 
   // --- INIT & SYNC ---
@@ -65,25 +68,38 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               setMyColor(isPlayer1 ? 'w' : 'b');
           }
 
-          // Sync Game State from FEN
-          if (socketGame.fen) {
-              const newGame = new Chess(socketGame.fen);
-              setGame(newGame);
-              setBoard(newGame.board());
-              
-              // Check Game Over from synced state
-              if (newGame.isGameOver()) {
-                  setIsGameOver(true);
-                  if (newGame.isCheckmate()) {
-                      // Winner is the side who just moved (not current turn)
-                      // If turn is White, Black won.
-                      const winnerColor = newGame.turn() === 'w' ? 'b' : 'w';
-                      const winnerId = winnerColor === 'w' ? socketGame.players[0] : socketGame.players[1];
-                      if (winnerId === user.id) onGameEnd('win');
-                      else onGameEnd('loss');
-                  } else if (newGame.isDraw() || newGame.isStalemate()) {
-                      onGameEnd('quit'); // Treat as draw/quit for now
-                  }
+          // Sync Game State from PGN (preferred for history) or FEN
+          const newGame = new Chess();
+          let loaded = false;
+
+          if (socketGame.pgn) {
+              try {
+                  newGame.loadPgn(socketGame.pgn);
+                  loaded = true;
+              } catch (e) {
+                  console.warn("PGN Load failed, falling back to FEN", e);
+              }
+          } 
+          
+          if (!loaded && socketGame.fen) {
+              newGame.load(socketGame.fen);
+          }
+
+          setGame(newGame);
+          setBoard(newGame.board());
+          
+          // Check Game Over from synced state
+          if (newGame.isGameOver()) {
+              setIsGameOver(true);
+              if (newGame.isCheckmate()) {
+                  // Winner is the side who just moved (not current turn)
+                  // If turn is White, Black won.
+                  const winnerColor = newGame.turn() === 'w' ? 'b' : 'w';
+                  const winnerId = winnerColor === 'w' ? socketGame.players[0] : socketGame.players[1];
+                  if (winnerId === user.id) onGameEnd('win');
+                  else onGameEnd('loss');
+              } else if (newGame.isDraw() || newGame.isStalemate()) {
+                  onGameEnd('quit'); // Treat as draw/quit for now
               }
           }
 
@@ -102,7 +118,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               else onGameEnd('loss');
           }
       }
-  }, [socketGame?.fen, socketGame?.winner, user.id, isP2P, table]);
+  }, [socketGame?.fen, socketGame?.pgn, socketGame?.winner, user.id, isP2P, table]);
+
+  // Scroll history to bottom when moves update
+  useEffect(() => {
+      if (historyRef.current) {
+          historyRef.current.scrollTop = historyRef.current.scrollHeight;
+      }
+  }, [game]);
 
   // --- TIMER EFFECT ---
   useEffect(() => {
@@ -186,8 +209,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
             if (move) {
                 // Local Update
-                setGame(new Chess(game.fen()));
-                setBoard(game.board());
+                const newGame = new Chess(game.fen()); // Just to clone state, but better to clone object if possible
+                // Actually game is mutated by .move(), so we just need to trigger re-render properly. 
+                // But creating new instance from PGN/FEN is safest for React state
+                newGame.loadPgn(game.pgn());
+                
+                setGame(newGame);
+                setBoard(newGame.board());
                 setSelectedSquare(null);
                 setOptionSquares({});
                 
@@ -224,6 +252,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                             type: 'MOVE',
                             newState: {
                                 fen: game.fen(),
+                                pgn: game.pgn(),
                                 turn: nextUserId,
                                 winner: winnerId,
                                 timers: updatedTimers
@@ -270,8 +299,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       const randomIndex = Math.floor(Math.random() * possibleMoves.length);
       game.move(possibleMoves[randomIndex]);
       
-      setGame(new Chess(game.fen()));
-      setBoard(game.board());
+      // Update State
+      const newGame = new Chess();
+      newGame.loadPgn(game.pgn());
+      setGame(newGame);
+      setBoard(newGame.board());
       
       playSFX('move');
       if (game.inCheck()) playSFX('notification');
@@ -303,6 +335,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           </motion.span>
       );
   };
+
+  // Move History
+  const moveHistory = game.history();
+  const historyPairs = [];
+  for (let i = 0; i < moveHistory.length; i += 2) {
+      historyPairs.push({
+          num: Math.floor(i / 2) + 1,
+          white: moveHistory[i],
+          black: moveHistory[i + 1] || ''
+      });
+  }
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
@@ -337,14 +380,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10`}>
                 {board.map((row: any[], rowIndex: number) => 
                     row.map((piece: any, colIndex: number) => {
-                        // Logic to handle board flipping
-                        const r = myColor === 'w' ? rowIndex : 7 - rowIndex;
-                        const c = myColor === 'w' ? colIndex : 7 - colIndex;
-                        
-                        // We need to map visual grid index to algebraic notation (e.g., 'e4')
-                        // chess.js board() returns board[0][0] as 'a8'.
-                        // row 0 = rank 8, col 0 = file a.
-                        
                         const actualRow = myColor === 'w' ? rowIndex : 7 - rowIndex;
                         const actualCol = myColor === 'w' ? colIndex : 7 - colIndex;
                         const visualPiece = board[actualRow][actualCol]; // Get piece at logic coord
@@ -389,6 +424,30 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     })
                 )}
             </div>
+       </div>
+
+       {/* Move History */}
+       <div className="w-full max-w-[600px] mt-4 flex flex-col gap-2">
+           <div className="flex items-center gap-2 text-gold-400 font-bold text-xs uppercase tracking-wider pl-2">
+               <ScrollText size={14} /> Move History
+           </div>
+           <div 
+               ref={historyRef}
+               className="bg-royal-900/50 border border-white/10 rounded-xl p-3 h-32 overflow-y-auto custom-scrollbar shadow-inner"
+           >
+               <div className="grid grid-cols-5 gap-y-1 text-sm font-mono">
+                   {historyPairs.map((pair) => (
+                       <React.Fragment key={pair.num}>
+                           <div className="col-span-1 text-slate-600 font-bold text-right pr-3">{pair.num}.</div>
+                           <div className="col-span-2 text-slate-200 bg-white/5 rounded px-2">{pair.white}</div>
+                           <div className="col-span-2 text-slate-200 bg-black/20 rounded px-2">{pair.black}</div>
+                       </React.Fragment>
+                   ))}
+                   {historyPairs.length === 0 && (
+                       <div className="col-span-5 text-center text-slate-600 py-10 italic">Game has not started</div>
+                   )}
+               </div>
+           </div>
        </div>
 
         {/* P2P Chat */}

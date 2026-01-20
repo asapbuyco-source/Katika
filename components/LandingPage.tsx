@@ -1,7 +1,7 @@
-
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, LayoutGrid } from 'lucide-react';
+import { useLanguage } from '../services/i18n';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -9,6 +9,7 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks }) => {
+  const { t } = useLanguage();
   const [activeTicker, setActiveTicker] = useState(0);
 
   // Simulated Live Winners Data
@@ -113,7 +114,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-gold-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-gold-500"></span>
                     </span>
-                    Live Payouts
+                    {t('live_payouts')}
                 </div>
                 <div className="h-4 overflow-hidden relative w-48 text-left">
                     <AnimatePresence mode='wait'>
@@ -124,7 +125,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                             exit={{ y: -20, opacity: 0 }}
                             className="text-xs text-slate-300 truncate"
                         >
-                            <span className="text-white font-bold">{winners[activeTicker].name}</span> won <span className="text-gold-400">{winners[activeTicker].amount} FCFA</span> in {winners[activeTicker].game}
+                            <span className="text-white font-bold">{winners[activeTicker].name}</span> {t('won')} <span className="text-gold-400">{winners[activeTicker].amount} FCFA</span> {t('in')} {winners[activeTicker].game}
                         </motion.div>
                     </AnimatePresence>
                 </div>
@@ -133,14 +134,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
 
          {/* Main Title */}
          <motion.h1 variants={itemVariants} className="text-5xl md:text-8xl font-display font-bold leading-tight mb-6">
-            Play Skill.<br/>
+            {t('landing_title_1')}<br/>
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-400 via-gold-200 to-gold-500">
-              Win Cash.
+              {t('landing_title_2')}
             </span>
          </motion.h1>
 
          <motion.p variants={itemVariants} className="text-slate-400 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed mb-10">
-            The premium P2P gaming platform for Cameroon. Secure Escrow, AI Referee, and instant Mobile Money withdrawals.
+            {t('landing_subtitle')}
          </motion.p>
 
          <motion.div variants={itemVariants} className="flex flex-col md:flex-row gap-4">
@@ -148,14 +149,14 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                 onClick={onLogin}
                 className="group relative inline-flex items-center gap-3 px-8 py-4 bg-white text-royal-900 rounded-full font-bold text-lg shadow-[0_0_30px_rgba(255,255,255,0.2)] hover:shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:scale-105 transition-all"
             >
-                <span>Connect Wallet</span>
+                <span>{t('connect_wallet')}</span>
                 <ChevronRight size={20} className="group-hover:translate-x-1 transition-transform" />
             </button>
             <button 
                 onClick={onHowItWorks}
                 className="px-8 py-4 rounded-full border border-white/10 hover:bg-white/5 font-medium text-slate-300 transition-colors"
             >
-                How it Works
+                {t('how_it_works')}
             </button>
          </motion.div>
       </motion.section>

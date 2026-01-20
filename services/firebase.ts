@@ -1,4 +1,3 @@
-
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -7,6 +6,9 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut as firebaseSignOut,
+  sendPasswordResetEmail,
+  updateEmail,
+  deleteUser,
   User as FirebaseUser
 } from "firebase/auth";
 import { 
@@ -79,6 +81,27 @@ export const loginWithEmail = async (email: string, pass: string) => {
 
 export const logout = async () => {
     await firebaseSignOut(auth);
+};
+
+export const triggerPasswordReset = async (email: string) => {
+    await sendPasswordResetEmail(auth, email);
+};
+
+export const updateUserEmail = async (newEmail: string) => {
+    if (auth.currentUser) {
+        await updateEmail(auth.currentUser, newEmail);
+    } else {
+        throw new Error("No user logged in");
+    }
+};
+
+export const deleteAccount = async () => {
+    if (auth.currentUser) {
+        // Also delete user document in Firestore ideally, but basic auth deletion here
+        await deleteUser(auth.currentUser);
+    } else {
+        throw new Error("No user logged in");
+    }
 };
 
 // --- USER MANAGEMENT ---

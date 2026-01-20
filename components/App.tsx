@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -31,6 +31,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
 import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff, RefreshCw } from 'lucide-react';
+import { LanguageProvider } from '../services/i18n';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
@@ -43,11 +44,9 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
-
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.handleReset = this.handleReset.bind(this);
+    this.state = { hasError: false };
   }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -58,7 +57,7 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
     console.error("Game Critical Error:", error, errorInfo);
   }
 
-  handleReset() {
+  handleReset = () => {
     this.setState({ hasError: false });
     this.props.onReset();
   }
@@ -323,6 +322,9 @@ export default function App() {
               setView('dashboard');
           }
       } else {
+          // If viewing How It Works, don't redirect to landing
+          if (currentView === 'how-it-works') return;
+
           const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum'];
           if (protectedViews.includes(currentView)) {
               setView('landing');
@@ -490,6 +492,7 @@ export default function App() {
   }
 
   return (
+    <LanguageProvider>
     <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum'].includes(currentView) && (
         <Navigation 
@@ -536,7 +539,7 @@ export default function App() {
       )}
 
       <main id="main-scroll-container" className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {currentView !== 'landing' && currentView !== 'auth' && (
+        {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
              <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
                 <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
@@ -544,6 +547,7 @@ export default function App() {
         )}
 
         {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />}
+        {currentView === 'how-it-works' && <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />}
         {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} />}
 
         {user && (
@@ -597,5 +601,6 @@ export default function App() {
         )}
       </main>
     </div>
+    </LanguageProvider>
   );
 }
