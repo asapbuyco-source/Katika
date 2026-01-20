@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ProfileProps {
@@ -28,6 +28,7 @@ const PRESET_AVATARS = [
 export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'history' | 'settings'>('overview');
   const [isEditing, setIsEditing] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   
   // Real Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -42,14 +43,35 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [tempName, setTempName] = useState(user.name);
   const [tempAvatar, setTempAvatar] = useState(user.avatar);
   
-  // Settings State
+  // Settings State - Initialize with defaults or load later
   const [preferences, setPreferences] = useState({
       biometrics: true,
       notifications: true,
       sound: getSoundEnabled(),
       marketing: false,
-      language: 'English'
+      language: 'English',
+      twoFactor: true
   });
+
+  // Load Preferences from LocalStorage on Mount
+  useEffect(() => {
+      const savedPrefs = localStorage.getItem('vantage_profile_prefs');
+      if (savedPrefs) {
+          try {
+              const parsed = JSON.parse(savedPrefs);
+              // Ensure sound state is synced with the service source of truth
+              parsed.sound = getSoundEnabled();
+              setPreferences(parsed);
+          } catch (e) {
+              console.error("Failed to load preferences", e);
+          }
+      }
+  }, []);
+
+  // Save Preferences to LocalStorage on Change
+  useEffect(() => {
+      localStorage.setItem('vantage_profile_prefs', JSON.stringify(preferences));
+  }, [preferences]);
 
   useEffect(() => {
     if (!isEditing) {
@@ -109,14 +131,51 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       fetchData();
   }, [user.id]);
 
+  const showToast = (msg: string) => {
+      setToastMessage(msg);
+      setTimeout(() => setToastMessage(null), 3000);
+  };
+
   const togglePref = (key: keyof typeof preferences) => {
       const newVal = !preferences[key];
       setPreferences(prev => ({ ...prev, [key]: newVal }));
       
       if (key === 'sound') {
           setSoundEnabled(newVal as boolean);
+          showToast(newVal ? 'Sound Effects Enabled' : 'Sound Effects Disabled');
+      } else if (key === 'biometrics') {
+          showToast(newVal ? 'Biometric Login Enabled' : 'Biometric Login Disabled');
+      } else if (key === 'notifications') {
+          showToast(newVal ? 'Push Notifications Enabled' : 'Push Notifications Disabled');
+      } else if (key === 'marketing') {
+          showToast(newVal ? 'Marketing Emails Subscribed' : 'Marketing Emails Unsubscribed');
+      } else if (key === 'twoFactor') {
+          showToast(newVal ? 'Two-Factor Auth Enabled' : 'Two-Factor Auth Disabled');
       } else {
           playSFX('click');
+      }
+  };
+
+  const handleLanguageChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+      const lang = e.target.value;
+      setPreferences(prev => ({ ...prev, language: lang }));
+      playSFX('click');
+      showToast(`Language changed to ${lang}`);
+  };
+
+  const handleUpdatePin = () => {
+      playSFX('click');
+      // Simple prompt simulation for MVP
+      const newPin = window.prompt("Enter new 4-digit Security PIN:");
+      if (newPin !== null) {
+          if (/^\d{4}$/.test(newPin)) {
+              localStorage.setItem('vantage_pin', newPin);
+              playSFX('win');
+              showToast("Security PIN Updated Successfully");
+          } else {
+              playSFX('error');
+              alert("Invalid PIN. Please enter exactly 4 digits.");
+          }
       }
   };
 
@@ -128,6 +187,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       }
       onUpdateProfile({ name: tempName, avatar: tempAvatar });
       setIsEditing(false);
+      showToast("Profile Updated Successfully");
   };
 
   const handleCancelEdit = () => {
@@ -163,8 +223,23 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6">
+    <div className="p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative">
        
+       {/* TOAST NOTIFICATION */}
+       <AnimatePresence>
+           {toastMessage && (
+               <motion.div 
+                   initial={{ y: -100, x: '-50%', opacity: 0 }}
+                   animate={{ y: 20, x: '-50%', opacity: 1 }}
+                   exit={{ y: -100, x: '-50%', opacity: 0 }}
+                   className="fixed top-0 left-1/2 z-50 bg-royal-800 border border-gold-500/50 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-3 min-w-max"
+               >
+                   <CheckCircle size={20} className="text-gold-400" />
+                   <span className="font-bold text-sm">{toastMessage}</span>
+               </motion.div>
+           )}
+       </AnimatePresence>
+
        {/* Profile Header */}
        <header className="relative mb-8 pt-10">
            {/* Banner/Cover */}
@@ -476,6 +551,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                </h3>
                                
                                <div className="space-y-4">
+                                   {/* Biometric */}
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Fingerprint size={20}/></div>
@@ -492,6 +568,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </button>
                                    </div>
 
+                                   {/* Transaction PIN */}
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Lock size={20}/></div>
@@ -500,11 +577,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                                <div className="text-xs text-slate-500">Change your 4-digit security code</div>
                                            </div>
                                        </div>
-                                       <button onClick={() => playSFX('click')} className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors">
+                                       <button onClick={handleUpdatePin} className="text-xs font-bold text-gold-400 hover:text-white px-3 py-1.5 bg-gold-500/10 hover:bg-gold-500/20 rounded-lg transition-colors">
                                            Update
                                        </button>
                                    </div>
 
+                                   {/* 2FA */}
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Smartphone size={20}/></div>
@@ -513,9 +591,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                                <div className="text-xs text-slate-500">SMS verification for withdrawals</div>
                                            </div>
                                        </div>
-                                       <span className="text-xs font-bold text-green-400 flex items-center gap-1">
-                                           <Shield size={12} fill="currentColor" /> Enabled
-                                       </span>
+                                       <button 
+                                          onClick={() => togglePref('twoFactor')}
+                                          className={`w-12 h-6 rounded-full transition-colors relative ${preferences.twoFactor ? 'bg-green-500' : 'bg-royal-800'}`}
+                                       >
+                                           <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${preferences.twoFactor ? 'translate-x-6' : 'translate-x-0'}`} />
+                                       </button>
                                    </div>
                                </div>
                            </section>
@@ -537,8 +618,8 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </div>
                                        <select 
                                           value={preferences.language}
-                                          onChange={(e) => { setPreferences({...preferences, language: e.target.value}); playSFX('click'); }}
-                                          className="bg-royal-950 text-xs font-bold text-white border border-white/10 rounded-lg px-3 py-2 outline-none"
+                                          onChange={handleLanguageChange}
+                                          className="bg-royal-950 text-xs font-bold text-white border border-white/10 rounded-lg px-3 py-2 outline-none focus:border-gold-500 transition-colors"
                                        >
                                            <option value="English">English</option>
                                            <option value="French">Français</option>
@@ -622,7 +703,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
                            {/* Version Info */}
                            <div className="text-center text-xs text-slate-600 font-mono">
-                               Vantage App v1.4.2 (Build 20240315)
+                               Vantage App v1.4.3 (Build 20240320)
                                <br />
                                Server: Cameroon-Central-1
                            </div>

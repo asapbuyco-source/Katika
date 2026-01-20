@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -43,7 +43,11 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+    this.handleReset = this.handleReset.bind(this);
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -53,7 +57,7 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
     console.error("Game Critical Error:", error, errorInfo);
   }
 
-  handleReset = () => {
+  handleReset() {
     this.setState({ hasError: false });
     this.props.onReset();
   }
@@ -151,7 +155,7 @@ export default function App() {
     });
 
     newSocket.on('match_found', (gameState) => {
-        console.log("Socket Match Found!", gameState);
+        console.log("Socket Match Found/Restored!", gameState);
         setSocketGame(gameState);
         setIsWaitingForSocketMatch(false);
         setBypassConnection(false);
@@ -181,6 +185,30 @@ export default function App() {
         newSocket.close();
     };
   }, []);
+
+  // 1.5 Automatic Rejoin & Refresh Warning
+  useEffect(() => {
+      // Rejoin Logic
+      if (socket && isConnected && user) {
+          socket.emit('rejoin_game', { userProfile: user });
+      }
+  }, [socket, isConnected, user]);
+
+  useEffect(() => {
+      // Prevent Refresh Warning
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+          // If in a socket game and no result yet
+          if (currentView === 'game' && socketGame && !gameResult) {
+              const message = "You have an active game! Refreshing may cause you to disconnect and lose.";
+              e.preventDefault();
+              e.returnValue = message; // Chrome requires returnValue to be set
+              return message;
+          }
+      };
+
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [currentView, socketGame, gameResult]);
 
   // 2. Automatic Fallback Logic
   useEffect(() => {

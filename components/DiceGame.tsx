@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Trophy, Shield, Box, User, Cpu, Wifi, Clock, Zap } from 'lucide-react';
+import { ArrowLeft, Trophy, Shield, Box, User, Cpu, Wifi, Clock, Zap, Hand } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, PanInfo } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 
 interface DiceGameProps {
@@ -107,6 +107,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
   const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
   const [isMyTurn, setIsMyTurn] = useState(true);
 
+  // Determine Opponent info
+  const opponentName = table.host?.id === user.id && table.guest ? table.guest.name : (table.host?.name || "Opponent");
+  const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
+
+  // Track previous state to avoid redundant sound/log updates
+  const prevRoundState = useRef<string>('');
+
   // Sync with Socket State
   useEffect(() => {
       if (isP2P && socketGame) {
@@ -129,12 +136,46 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
           if (socketGame.roundState === 'scored') {
               setPhase('scored');
+              
+              // Only process result once per round state change
+              if (prevRoundState.current !== 'scored') {
+                  const myD = socketGame.roundRolls[user.id] || [0,0];
+                  const oppD = socketGame.roundRolls[opponentId] || [0,0];
+                  const myTotal = myD[0] + myD[1];
+                  const oppTotal = oppD[0] + oppD[1];
+
+                  if (myTotal > oppTotal) {
+                      setRoundWinner('me');
+                      setGameLog(`You Won Round ${socketGame.currentRound}!`);
+                      playSFX('win');
+                  } else if (oppTotal > myTotal) {
+                      setRoundWinner('opp');
+                      setGameLog(`${opponentName} Won Round ${socketGame.currentRound}`);
+                      playSFX('loss');
+                  } else {
+                      setRoundWinner('tie');
+                      setGameLog("Round Tied");
+                  }
+              }
           } else {
-              if (phase !== 'rolling') setPhase('waiting');
-              setRoundWinner(null);
+              if (phase === 'scored' || (phase === 'rolling' && amITurn)) {
+                  // Reset if server moved to next round
+                  setPhase('waiting');
+                  setRoundWinner(null);
+                  setGameLog(`Round ${socketGame.currentRound} Start`);
+              } else if (phase !== 'rolling') {
+                  setPhase('waiting');
+              }
+          }
+          prevRoundState.current = socketGame.roundState;
+          
+          // Check for Game Over
+          if (socketGame.winner) {
+              // Ensure we show result
+              onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
           }
       }
-  }, [socketGame, user.id, opponentId, isP2P]);
+  }, [socketGame, user.id, opponentId, isP2P, phase, opponentName]);
 
   // Timer Effect
   useEffect(() => {
@@ -170,20 +211,18 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       }
   };
 
-  // Determine Opponent info
-  const opponentName = table.host?.id === user.id && table.guest ? table.guest.name : (table.host?.name || "Opponent");
-  const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
-
   const roll = () => {
       if (!isMyTurn || phase !== 'waiting') return;
-      setPhase('rolling');
+      
       playSFX('dice');
       setGameLog("You are rolling...");
 
       if (isP2P && socket) {
+          setPhase('rolling'); // Visual feedback immediately
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
       } else {
           // Local Logic
+          setPhase('rolling');
           setTimeout(() => {
               const d1 = Math.ceil(Math.random() * 6);
               const d2 = Math.ceil(Math.random() * 6);
@@ -238,6 +277,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           setRoundWinner(null);
           setGameLog(`Round ${round + 1} Start`);
           setTimeLeft(TURN_TIME_LIMIT);
+      }
+  };
+
+  const handleSwipe = (event: any, info: PanInfo) => {
+      if (info.velocity.y < -300 && isMyTurn && phase === 'waiting') {
+          roll();
       }
   };
 
@@ -317,8 +362,23 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 </div>
             </div>
 
-            {/* Player Zone */}
-            <div className={`transition-all duration-500 relative ${isMyTurn ? 'opacity-100 z-20' : 'opacity-60 scale-95 blur-[1px]'}`}>
+            {/* Player Zone (Swipeable) */}
+            <motion.div 
+                className={`transition-all duration-500 relative ${isMyTurn ? 'opacity-100 z-20 cursor-grab active:cursor-grabbing' : 'opacity-60 scale-95 blur-[1px]'}`}
+                onPanEnd={handleSwipe}
+            >
+                {/* Swipe Hint */}
+                {isMyTurn && phase === 'waiting' && (
+                    <motion.div 
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="absolute -top-12 left-1/2 -translate-x-1/2 text-gold-400 text-xs font-bold flex flex-col items-center gap-1 animate-bounce"
+                    >
+                        <Hand className="rotate-180" size={16} />
+                        SWIPE UP
+                    </motion.div>
+                )}
+
                 <div className="text-center mb-6 h-8">
                     {(!isMyTurn || phase === 'scored') && (
                         <motion.span 
@@ -353,7 +413,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                         />
                     </div>
                 )}
-            </div>
+            </motion.div>
 
         </div>
 

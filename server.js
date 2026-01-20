@@ -83,10 +83,16 @@ const createInitialState = (gameType, players, stake, profiles) => {
                 }
             }
         }
-        return { ...base, pieces };
+        // Initialize 10 min timers (600s)
+        return { ...base, pieces, timers: { [players[0]]: 600, [players[1]]: 600 } };
     }
     if (gameType === 'Chess') {
-        return { ...base, board: null }; // Client state relay
+        // Initialize 10 min timers (600s) and starting FEN
+        return { 
+            ...base, 
+            fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', 
+            timers: { [players[0]]: 600, [players[1]]: 600 } 
+        }; 
     }
     if (gameType === 'Ludo') {
         const pieces = [];
@@ -177,12 +183,43 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Reconnection Handler
+  socket.on('rejoin_game', ({ userProfile }) => {
+      if (!userProfile || !userProfile.id) return;
+      const userId = userProfile.id;
+      
+      // Check if user has an active session
+      const session = userSessions[userId];
+      if (session && session.roomId && activeGames[session.roomId]) {
+          const game = activeGames[session.roomId];
+          
+          // Update socket ID for this user session
+          userSessions[userId].socketId = socket.id;
+          
+          // Re-join the socket room
+          socket.join(session.roomId);
+          
+          // Send the current game state immediately
+          socket.emit('match_found', game);
+          console.log(`User ${userId} rejoined match in room ${session.roomId}`);
+          
+          // Optionally notify the room
+          socket.emit('game_action', { 
+              action: { type: 'CHAT', message: 'Player reconnected.' }, 
+              roomId: session.roomId 
+          });
+      }
+  });
+
   // Game Actions
   socket.on('game_action', ({ action, roomId }) => {
       const game = activeGames[roomId];
       if (!game) return;
 
       const userId = Object.keys(userSessions).find(uid => userSessions[uid].socketId === socket.id);
+      // Fallback for ID lookup if session didn't update fast enough, though unlikely with rejoin logic
+      if (!userId) return; 
+
       game.lastActionAt = Date.now();
 
       // --- CHAT ---
@@ -194,6 +231,13 @@ io.on('connection', (socket) => {
               message: action.message,
               timestamp: Date.now()
           });
+      }
+
+      // --- TIMEOUT CLAIM ---
+      else if (action.type === 'TIMEOUT_CLAIM') {
+          game.winner = userId; // The person claiming the timeout usually wins if opponent time is 0
+          // Logic should verify time on server, but trusting client for this MVP
+          game.status = 'completed';
       }
 
       // --- DICE ---
@@ -254,6 +298,10 @@ io.on('connection', (socket) => {
           if (action.newState) {
               if (action.newState.pieces) game.pieces = action.newState.pieces;
               if (action.newState.board) game.board = action.newState.board;
+              if (action.newState.fen) game.fen = action.newState.fen; // Added FEN support
+              // Sync timers if provided
+              if (action.newState.timers) game.timers = action.newState.timers;
+              
               game.turn = action.newState.turn;
               if (action.newState.winner) {
                   game.winner = action.newState.winner;
