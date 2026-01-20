@@ -251,6 +251,7 @@ export const LanguageProvider: React.FC<{ children: ReactNode }> = ({ children }
   };
 
   const t = (key: keyof typeof translations['en']) => {
+    // Basic fallback logic
     return translations[language][key] || translations['en'][key] || key;
   };
 
