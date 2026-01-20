@@ -7,7 +7,7 @@ import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-import { Chess } from 'chess.js';
+import { Chess, Square } from 'chess.js';
 
 interface ChessGameProps {
   table: Table;
@@ -38,7 +38,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [game, setGame] = useState(new Chess());
   const [board, setBoard] = useState(game.board());
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
-  const [selectedSquare, setSelectedSquare] = useState<string | null>(null);
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
@@ -142,7 +142,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       }
   };
 
-  const getMoveOptions = (square: string) => {
+  const getMoveOptions = (square: Square) => {
     const moves = game.moves({
       square,
       verbose: true,
@@ -169,7 +169,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     return true;
   };
 
-  const onSquareClick = (square: string) => {
+  const onSquareClick = (square: Square) => {
     if (isGameOver) return;
 
     // 1. If trying to move to a square (completing a move)
@@ -246,9 +246,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     }
 
     // 2. Selecting a piece
-    if (game.get(square as any)) {
+    if (game.get(square)) {
         // Can only select own pieces
-        if (game.get(square as any).color !== myColor) return;
+        if (game.get(square).color !== myColor) return;
         
         // Can only select if it's my turn
         if (game.turn() !== myColor) return;
@@ -351,7 +351,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
                         const file = ['a','b','c','d','e','f','g','h'][actualCol];
                         const rank = 8 - actualRow;
-                        const square = `${file}${rank}`;
+                        const square = `${file}${rank}` as Square;
 
                         const isDark = (actualRow + actualCol) % 2 === 1;
                         const option = optionSquares[square];
