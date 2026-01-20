@@ -153,7 +153,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     }
 
     const newSquares: any = {};
-    moves.map((move) => {
+    moves.map((move: any) => {
       newSquares[move.to] = {
         background:
           game.get(move.to) && game.get(move.to).color !== game.get(square).color
@@ -335,8 +335,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
        {/* Board */}
        <div className="relative w-full max-w-[600px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 border-royal-800 transition-transform duration-700">
             <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10`}>
-                {board.map((row, rowIndex) => 
-                    row.map((piece, colIndex) => {
+                {board.map((row: any[], rowIndex: number) => 
+                    row.map((piece: any, colIndex: number) => {
                         // Logic to handle board flipping
                         const r = myColor === 'w' ? rowIndex : 7 - rowIndex;
                         const c = myColor === 'w' ? colIndex : 7 - colIndex;
