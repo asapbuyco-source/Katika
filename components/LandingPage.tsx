@@ -1,7 +1,6 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, useScroll, useTransform, useSpring, useMotionValue, useMotionTemplate } from 'framer-motion';
-import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, Zap, Star, Smartphone, Activity, LayoutGrid, Layers } from 'lucide-react';
+import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, Zap, Star, Smartphone, Activity, LayoutGrid, Layers, UserPlus, Wallet, Swords } from 'lucide-react';
 import { useLanguage } from '../services/i18n';
 
 interface LandingPageProps {
@@ -31,45 +30,59 @@ const InfiniteMarquee = ({ items }: { items: string[] }) => {
   );
 };
 
-const TiltCard = ({ children, className, onClick }: any) => {
-    const ref = useRef<HTMLDivElement>(null);
-    const x = useMotionValue(0);
-    const y = useMotionValue(0);
-    
-    const mouseX = useSpring(x, { stiffness: 500, damping: 100 });
-    const mouseY = useSpring(y, { stiffness: 500, damping: 100 });
+interface GameCardProps {
+  game: {
+    name: string;
+    desc: string;
+    players: string;
+    pot: string;
+    icon: any;
+    color: string;
+    bg: string;
+    border: string;
+  };
+  onClick: () => void;
+  index: number;
+}
 
-    const rotateX = useTransform(mouseY, [-0.5, 0.5], ["17.5deg", "-17.5deg"]);
-    const rotateY = useTransform(mouseX, [-0.5, 0.5], ["-17.5deg", "17.5deg"]);
-
-    const handleMouseMove = (e: React.MouseEvent) => {
-        if (!ref.current) return;
-        const rect = ref.current.getBoundingClientRect();
-        const width = rect.width;
-        const height = rect.height;
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
-        const xPct = clickX / width - 0.5;
-        const yPct = clickY / height - 0.5;
-        x.set(xPct);
-        y.set(yPct);
-    };
-
-    const handleMouseLeave = () => {
-        x.set(0);
-        y.set(0);
-    };
-
+const GameCard: React.FC<GameCardProps> = ({ game, onClick, index }) => {
     return (
         <motion.div
-            ref={ref}
-            onMouseMove={handleMouseMove}
-            onMouseLeave={handleMouseLeave}
+            initial={{ opacity: 0, y: 30 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ delay: index * 0.1, duration: 0.5 }}
+            whileHover={{ y: -10 }}
             onClick={onClick}
-            style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
-            className={className}
+            className={`group h-[400px] p-6 rounded-[2rem] border ${game.border} ${game.bg} backdrop-blur-md relative overflow-hidden cursor-pointer flex flex-col justify-between transition-all shadow-lg hover:shadow-2xl`}
         >
-            {children}
+            <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+            
+            <div className="relative z-10">
+                <div className="flex justify-between items-start mb-8">
+                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${game.color} bg-black/40 border border-white/10 shadow-xl group-hover:scale-110 transition-transform duration-300`}>
+                        <game.icon size={36} />
+                    </div>
+                    <div className="flex items-center gap-2 text-[10px] font-bold bg-black/40 px-3 py-1.5 rounded-full text-slate-300 border border-white/5">
+                        <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                        Live
+                    </div>
+                </div>
+                
+                <h3 className="text-3xl font-display font-bold text-white mb-3 group-hover:translate-x-1 transition-transform">{game.name}</h3>
+                <p className="text-slate-300 text-sm leading-relaxed">{game.desc}</p>
+            </div>
+            
+            <div className="relative z-10 pt-6 border-t border-white/10 transform translate-y-2 group-hover:translate-y-0 transition-transform">
+                <div className="flex items-center justify-between mb-2">
+                    <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Pot Size</span>
+                    <span className={`font-mono font-bold text-xl ${game.color}`}>{game.pot}</span>
+                </div>
+                <div className="w-full h-1 bg-black/20 rounded-full overflow-hidden">
+                    <div className={`h-full w-3/4 ${game.color.replace('text-', 'bg-')} opacity-50`}></div>
+                </div>
+                <div className="mt-2 text-right text-[10px] text-slate-500">{game.players} players active</div>
+            </div>
         </motion.div>
     );
 };
@@ -77,8 +90,13 @@ const TiltCard = ({ children, className, onClick }: any) => {
 export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks }) => {
   const { t } = useLanguage();
   const { scrollY } = useScroll();
-  const yHero = useTransform(scrollY, [0, 500], [0, 200]);
   
+  // Parallax transforms
+  const yHero = useTransform(scrollY, [0, 500], [0, 100]);
+  const yBg1 = useTransform(scrollY, [0, 1000], [0, 200]);
+  const yBg2 = useTransform(scrollY, [0, 1000], [0, -150]);
+  const opacityHero = useTransform(scrollY, [0, 300], [1, 0]);
+
   // Fake Stats Counter
   const [payoutCounter, setPayoutCounter] = useState(1450000);
   useEffect(() => {
@@ -141,21 +159,26 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
     },
   ];
 
+  const howItWorksSteps = [
+      { title: "Create Account", desc: "Sign up in seconds via Google or Email.", icon: UserPlus },
+      { title: "Deposit Funds", desc: "Securely load your wallet with MTN/Orange Money.", icon: Wallet },
+      { title: "Win Real Cash", desc: "Dominate the arena and withdraw instantly.", icon: Trophy }
+  ];
+
   return (
-    <div className="min-h-screen bg-[#0f0a1f] text-white selection:bg-gold-500/30 overflow-x-hidden relative font-sans perspective-1000">
+    <div className="min-h-screen bg-[#0f0a1f] text-white selection:bg-gold-500/30 overflow-x-hidden font-sans">
       
-      {/* Animated Background Grid */}
+      {/* Parallax Background */}
       <div className="fixed inset-0 z-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#1a103c] via-[#0f0a1f] to-black">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_0%,#000_70%,transparent_100%)]"></div>
+          
           <motion.div 
-            animate={{ opacity: [0.3, 0.6, 0.3], scale: [1, 1.2, 1] }}
-            transition={{ duration: 8, repeat: Infinity }}
-            className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px]"
+            style={{ y: yBg1 }}
+            className="absolute top-[-10%] left-[20%] w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px] opacity-30"
           />
           <motion.div 
-            animate={{ opacity: [0.2, 0.5, 0.2], scale: [1, 1.1, 1] }}
-            transition={{ duration: 10, repeat: Infinity, delay: 1 }}
-            className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] bg-gold-600/10 rounded-full blur-[120px]"
+            style={{ y: yBg2 }}
+            className="absolute bottom-[-10%] right-[10%] w-[600px] h-[600px] bg-gold-600/10 rounded-full blur-[120px] opacity-20"
           />
       </div>
 
@@ -180,11 +203,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
       </nav>
 
       {/* HERO SECTION */}
-      <section className="relative z-10 pt-36 pb-20 px-6 max-w-7xl mx-auto min-h-screen flex flex-col justify-center">
+      <section className="relative z-10 pt-32 pb-20 px-6 max-w-7xl mx-auto min-h-[90vh] flex flex-col justify-center">
          <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center">
              
              {/* Left: Text Content */}
              <motion.div 
+                style={{ opacity: opacityHero }}
                 initial={{ opacity: 0, x: -50 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.8, ease: "easeOut" }}
@@ -197,7 +221,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                     Live in Cameroon
                  </div>
                  
-                 <h1 className="text-6xl md:text-8xl font-display font-black leading-[0.95] mb-8 tracking-tight">
+                 <h1 className="text-5xl md:text-7xl lg:text-8xl font-display font-black leading-[0.95] mb-8 tracking-tight">
                     Play Skill.<br/>
                     <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-300 via-yellow-100 to-gold-500 drop-shadow-sm">
                       Win Cash.
@@ -233,82 +257,51 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                  </div>
              </motion.div>
 
-             {/* Right: 3D Phone Mockup */}
+             {/* Right: Phone Mockup with Parallax */}
              <motion.div 
                 style={{ y: yHero }}
-                className="relative hidden lg:block perspective-1000"
+                className="relative hidden lg:block"
              >
                  <motion.div 
-                    animate={{ y: [0, -20, 0], rotateY: [-5, 5, -5] }}
+                    animate={{ y: [0, -15, 0] }}
                     transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                    className="relative z-20 w-[320px] mx-auto h-[640px] bg-black rounded-[3rem] border-[8px] border-slate-800 shadow-2xl overflow-hidden ring-1 ring-white/20 transform-style-3d"
+                    className="relative z-20 w-[300px] mx-auto h-[600px] bg-black rounded-[3rem] border-[8px] border-slate-800 shadow-2xl overflow-hidden ring-1 ring-white/20"
                  >
                      {/* Phone UI */}
                      <div className="absolute top-0 left-0 w-full h-full bg-royal-950 flex flex-col">
                          {/* Dynamic Notch */}
-                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-black rounded-b-2xl z-50"></div>
+                         <div className="absolute top-0 left-1/2 -translate-x-1/2 w-28 h-6 bg-black rounded-b-xl z-50"></div>
                          
-                         {/* Header */}
-                         <div className="h-28 bg-gradient-to-b from-royal-800 to-royal-950 p-6 pt-12 flex justify-between items-end pb-4 border-b border-white/5">
-                             <div className="flex items-center gap-2">
-                                <div className="w-8 h-8 rounded-full bg-gold-500/20 flex items-center justify-center"><Trophy size={14} className="text-gold-500" /></div>
-                                <div className="text-xs font-bold text-white">Prize Pool</div>
-                             </div>
-                             <div className="px-3 py-1 bg-green-500/20 rounded-full text-xs font-mono text-green-400 font-bold border border-green-500/30">+5,000 FCFA</div>
-                         </div>
-
-                         {/* Game Body */}
-                         <div className="flex-1 p-4 relative overflow-hidden flex flex-col items-center justify-center">
+                         {/* Phone Content (Simulated Game) */}
+                         <div className="flex-1 relative flex flex-col items-center justify-center p-4">
                              <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
                              
-                             {/* Opponent Card */}
+                             {/* Match Found Animation inside Phone */}
                              <motion.div 
-                                initial={{ y: -20, opacity: 0 }}
-                                animate={{ y: 0, opacity: 1 }}
-                                transition={{ delay: 0.5 }}
-                                className="w-full bg-white/5 p-3 rounded-2xl border border-white/5 mb-8 flex items-center gap-3"
+                                animate={{ scale: [0.9, 1, 0.9], opacity: [0.8, 1, 0.8] }}
+                                transition={{ duration: 3, repeat: Infinity }}
+                                className="w-40 h-40 rounded-full border-4 border-gold-500/30 flex items-center justify-center relative"
                              >
-                                 <div className="w-10 h-10 rounded-full bg-red-500 border-2 border-red-400 shadow-lg shadow-red-500/20"></div>
-                                 <div className="space-y-1">
-                                     <div className="h-2 w-20 bg-slate-700 rounded-full"></div>
-                                     <div className="h-1.5 w-12 bg-slate-800 rounded-full"></div>
+                                 <div className="absolute inset-0 rounded-full border-t-4 border-gold-500 animate-spin"></div>
+                                 <div className="text-center">
+                                     <div className="text-3xl font-black text-white">VS</div>
+                                     <div className="text-[10px] text-gold-400 font-bold uppercase tracking-widest mt-1">Match Found</div>
                                  </div>
                              </motion.div>
 
-                             {/* Center Action */}
-                             <div className="relative w-40 h-40">
-                                 <motion.div 
-                                    animate={{ rotate: 360 }}
-                                    transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                                    className="absolute inset-0 rounded-full border-2 border-dashed border-white/10"
-                                 />
-                                 <div className="absolute inset-4 bg-royal-900 rounded-full flex items-center justify-center shadow-inner border border-white/5">
-                                     <div className="text-center">
-                                         <div className="text-xs text-slate-500 uppercase tracking-widest mb-1">Your Turn</div>
-                                         <div className="text-3xl font-black text-white">ROLL</div>
-                                     </div>
+                             <div className="mt-8 w-full bg-white/5 rounded-xl p-3 border border-white/10 flex items-center justify-between">
+                                 <div className="flex items-center gap-2">
+                                     <div className="w-8 h-8 rounded-full bg-red-500"></div>
+                                     <div className="h-2 w-16 bg-slate-700 rounded"></div>
                                  </div>
+                                 <div className="text-xs font-mono text-green-400">+5,000 FCFA</div>
                              </div>
-
-                             {/* Player Card */}
-                             <motion.div 
-                                initial={{ y: 20, opacity: 0 }}
-                                animate={{ y: 0, opacity: 1 }}
-                                transition={{ delay: 0.7 }}
-                                className="w-full bg-gold-500/10 p-3 rounded-2xl border border-gold-500/20 mt-8 flex items-center gap-3"
-                             >
-                                 <div className="w-10 h-10 rounded-full bg-gold-500 border-2 border-white shadow-lg shadow-gold-500/20"></div>
-                                 <div className="space-y-1">
-                                     <div className="h-2 w-24 bg-gold-500/40 rounded-full"></div>
-                                     <div className="h-1.5 w-16 bg-gold-500/20 rounded-full"></div>
-                                 </div>
-                             </motion.div>
                          </div>
 
-                         {/* Bottom Action */}
-                         <div className="p-4 pb-8 bg-royal-950 border-t border-white/5">
-                             <div className="w-full h-14 bg-gradient-to-r from-gold-500 to-gold-600 rounded-2xl flex items-center justify-center text-royal-950 font-black shadow-[0_0_20px_rgba(251,191,36,0.3)]">
-                                 ROLL DICE
+                         {/* Bottom Button */}
+                         <div className="p-4 pb-8">
+                             <div className="w-full h-12 bg-gradient-to-r from-gold-500 to-gold-600 rounded-xl flex items-center justify-center text-royal-950 font-bold shadow-lg">
+                                 ENTER MATCH
                              </div>
                          </div>
                      </div>
@@ -321,8 +314,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
       </section>
 
       {/* INFINITE MARQUEE */}
-      <div className="relative z-20 mb-20 transform -rotate-1 origin-left">
-          <div className="bg-royal-900 border-y-4 border-gold-500 py-2 shadow-2xl">
+      <div className="relative z-20 mb-20">
+          <div className="bg-royal-900/80 border-y border-gold-500/30 py-3 shadow-2xl backdrop-blur-md">
               <InfiniteMarquee items={winnersList} />
           </div>
       </div>
@@ -337,7 +330,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
               ].map((stat, i) => (
                   <motion.div 
                     key={i}
-                    initial={{ opacity: 0, y: 20 }}
+                    initial={{ opacity: 0, y: 30 }}
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ delay: i * 0.2 }}
@@ -349,7 +342,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                       <div>
                           <div className="text-3xl font-display font-bold text-white mb-1">{stat.value}</div>
                           <div className="text-xs text-slate-400 uppercase tracking-wider font-bold flex items-center gap-1">
-                              {stat.label} <ChevronRight size={12} />
+                              {stat.label}
                           </div>
                       </div>
                   </motion.div>
@@ -357,50 +350,57 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
           </div>
       </div>
 
-      {/* GAMES SHOWCASE (TILT CARDS) */}
+      {/* HOW IT WORKS (ANIMATED STEPS) */}
+      <section className="relative z-10 py-20 px-6 max-w-7xl mx-auto">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            className="text-center mb-16"
+          >
+              <h2 className="text-3xl md:text-5xl font-display font-bold text-white mb-4">Start Winning in Minutes</h2>
+              <p className="text-slate-400 text-lg">No complex setup. Just pure skill-based gaming.</p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {howItWorksSteps.map((step, idx) => (
+                  <motion.div
+                    key={idx}
+                    initial={{ opacity: 0, y: 50 }}
+                    whileInView={{ opacity: 1, y: 0 }}
+                    viewport={{ once: true, margin: "-50px" }}
+                    transition={{ delay: idx * 0.2, type: "spring", stiffness: 50 }}
+                    className="relative p-8 rounded-3xl bg-royal-900/40 border border-white/10 flex flex-col items-center text-center group hover:bg-royal-900/60 transition-colors"
+                  >
+                      {/* Step Number Background */}
+                      <div className="absolute top-4 right-6 text-6xl font-black text-white/5 select-none">{idx + 1}</div>
+                      
+                      <div className="w-16 h-16 rounded-2xl bg-gold-500/10 flex items-center justify-center text-gold-400 mb-6 group-hover:scale-110 transition-transform duration-300 border border-gold-500/20">
+                          <step.icon size={32} />
+                      </div>
+                      <h3 className="text-xl font-bold text-white mb-2">{step.title}</h3>
+                      <p className="text-slate-400 text-sm leading-relaxed">{step.desc}</p>
+                  </motion.div>
+              ))}
+          </div>
+      </section>
+
+      {/* GAMES SHOWCASE */}
       <section className="relative z-10 py-20 overflow-hidden">
          <div className="container mx-auto px-6">
-            <div className="text-center mb-16 max-w-2xl mx-auto">
+            <motion.div 
+                initial={{ opacity: 0 }}
+                whileInView={{ opacity: 1 }}
+                viewport={{ once: true }}
+                className="text-center mb-16 max-w-2xl mx-auto"
+            >
                 <h2 className="text-4xl md:text-6xl font-display font-bold text-white mb-6">Choose Your Arena</h2>
                 <p className="text-slate-400 text-lg">Four classic games. One secure platform. Prove your skill in 1v1 matches.</p>
-            </div>
+            </motion.div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
                 {games.map((game, idx) => (
-                    <TiltCard
-                        key={idx}
-                        onClick={onLogin}
-                        className={`group h-[420px] p-6 rounded-[2rem] border ${game.border} ${game.bg} backdrop-blur-md relative overflow-hidden cursor-pointer flex flex-col justify-between`}
-                    >
-                        {/* Hover Gradient */}
-                        <div className="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                        
-                        <div className="relative z-10">
-                            <div className="flex justify-between items-start mb-8">
-                                <div className={`w-16 h-16 rounded-2xl flex items-center justify-center ${game.color} bg-black/40 border border-white/10 shadow-xl group-hover:scale-110 transition-transform duration-300`}>
-                                    <game.icon size={36} />
-                                </div>
-                                <div className="flex items-center gap-2 text-[10px] font-bold bg-black/40 px-3 py-1.5 rounded-full text-slate-300 border border-white/5">
-                                    <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                                    Live
-                                </div>
-                            </div>
-                            
-                            <h3 className="text-3xl font-display font-bold text-white mb-3 group-hover:translate-x-1 transition-transform">{game.name}</h3>
-                            <p className="text-slate-300 text-sm leading-relaxed">{game.desc}</p>
-                        </div>
-                        
-                        <div className="relative z-10 pt-6 border-t border-white/10 transform translate-y-2 group-hover:translate-y-0 transition-transform">
-                            <div className="flex items-center justify-between mb-2">
-                                <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">Pot Size</span>
-                                <span className={`font-mono font-bold text-xl ${game.color}`}>{game.pot}</span>
-                            </div>
-                            <div className="w-full h-1 bg-black/20 rounded-full overflow-hidden">
-                                <div className={`h-full w-3/4 ${game.color.replace('text-', 'bg-')} opacity-50`}></div>
-                            </div>
-                            <div className="mt-2 text-right text-[10px] text-slate-500">{game.players} players active</div>
-                        </div>
-                    </TiltCard>
+                    <GameCard key={idx} game={game} index={idx} onClick={onLogin} />
                 ))}
             </div>
          </div>
@@ -411,9 +411,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
          <div className="container mx-auto px-6">
              <div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
                  <motion.div 
-                    initial={{ opacity: 0, x: -30 }}
+                    initial={{ opacity: 0, x: -50 }}
                     whileInView={{ opacity: 1, x: 0 }}
                     viewport={{ once: true }}
+                    transition={{ duration: 0.6 }}
                  >
                      <h2 className="text-4xl md:text-5xl font-display font-bold text-white mb-8 leading-tight">
                          <span className="text-purple-400">V-Guard AI</span> Referee System
@@ -424,10 +425,17 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
                      
                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                          {['Anti-Cheat Engine', 'Latency Checks', 'Bot Detection', 'Auto-Forfeit Logic'].map((feature, i) => (
-                             <div key={i} className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5">
+                             <motion.div 
+                                key={i}
+                                initial={{ opacity: 0, y: 10 }}
+                                whileInView={{ opacity: 1, y: 0 }}
+                                viewport={{ once: true }}
+                                transition={{ delay: i * 0.1 }}
+                                className="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/5"
+                             >
                                  <div className="p-1 rounded-full bg-green-500/20 text-green-400"><ShieldCheck size={16} /></div>
                                  <span className="text-slate-200 font-bold text-sm">{feature}</span>
-                             </div>
+                             </motion.div>
                          ))}
                      </div>
                  </motion.div>
@@ -499,11 +507,12 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onHowItWorks 
         .animate-scan {
             animation: scan 3s linear infinite;
         }
-        .perspective-1000 {
-            perspective: 1000px;
+        .animate-fade-in-up {
+            animation: fadeInUp 0.8s ease-out forwards;
         }
-        .transform-style-3d {
-            transform-style: preserve-3d;
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </div>
