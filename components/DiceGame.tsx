@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Trophy, Shield, Box, User, Cpu, Wifi, Clock, Zap, Hand } from 'lucide-react';
+import { ArrowLeft, Trophy, Shield, Box, User, Cpu, Wifi, Clock, Zap, Hand, XCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -50,18 +50,19 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
     return (
         <motion.div
             animate={rolling ? {
-                rotate: [0, -10, 10, -10, 10, 0],
-                x: [0, -2, 2, -2, 2, 0],
-                y: [0, -2, 2, 0],
+                rotate: [0, -15, 15, -15, 15, 0],
+                x: [0, -5, 5, -5, 5, 0],
+                y: [0, -5, 5, 0],
+                scale: 1.1
             } : {
-                scale: [1.1, 1],
+                scale: 1,
                 rotate: 0,
                 x: 0,
                 y: 0
             }}
-            transition={rolling ? { duration: 0.3, repeat: Infinity } : { duration: 0.4, type: 'spring' }}
+            transition={rolling ? { duration: 0.2, repeat: Infinity } : { duration: 0.4, type: 'spring', bounce: 0.5 }}
             className={`
-                w-20 h-20 md:w-24 md:h-24 rounded-2xl shadow-[0_4px_10px_rgba(0,0,0,0.3)] flex items-center justify-center p-2 border-2
+                w-20 h-20 md:w-24 md:h-24 rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex items-center justify-center p-2 border-2 relative
                 ${isMe 
                     ? 'bg-gradient-to-br from-amber-100 to-amber-400 border-amber-500' 
                     : 'bg-gradient-to-br from-red-100 to-red-400 border-red-500'}
@@ -72,13 +73,15 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
                     <div key={idx} className="flex items-center justify-center">
                         {pips.includes(idx) && (
                             <div className={`
-                                w-3 h-3 md:w-4 md:h-4 rounded-full shadow-sm
+                                w-3 h-3 md:w-4 md:h-4 rounded-full shadow-inner
                                 ${isMe ? 'bg-black' : 'bg-white'}
                             `} />
                         )}
                     </div>
                 ))}
             </div>
+            {/* Gloss Effect */}
+            <div className="absolute top-0 right-0 w-1/2 h-1/2 bg-gradient-to-bl from-white/40 to-transparent rounded-tr-xl pointer-events-none"></div>
         </motion.div>
     );
 };
@@ -101,7 +104,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
   const [oppDice, setOppDice] = useState([1, 1]);
   const [roundWinner, setRoundWinner] = useState<'me' | 'opp' | 'tie' | null>(null);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
-  const [gameLog, setGameLog] = useState("Round 1 Start");
+  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   
   // Timer State
   const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
@@ -113,6 +116,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
   // Track previous state to avoid redundant sound/log updates
   const prevRoundState = useRef<string>('');
+
+  const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
+    setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
+  };
 
   // Sync with Socket State
   useEffect(() => {
@@ -146,15 +153,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
                   if (myTotal > oppTotal) {
                       setRoundWinner('me');
-                      setGameLog(`You Won Round ${socketGame.currentRound}!`);
                       playSFX('win');
                   } else if (oppTotal > myTotal) {
                       setRoundWinner('opp');
-                      setGameLog(`${opponentName} Won Round ${socketGame.currentRound}`);
                       playSFX('loss');
                   } else {
                       setRoundWinner('tie');
-                      setGameLog("Round Tied");
                   }
               }
           } else {
@@ -162,7 +166,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                   // Reset if server moved to next round
                   setPhase('waiting');
                   setRoundWinner(null);
-                  setGameLog(`Round ${socketGame.currentRound} Start`);
+                  addLog(`Round ${socketGame.currentRound} Started`);
               } else if (phase !== 'rolling') {
                   setPhase('waiting');
               }
@@ -204,7 +208,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       // Auto-roll on timeout to keep game moving
       if (isMyTurn) {
           playSFX('error');
-          setGameLog("Time's up! Auto-rolling...");
+          addLog("Auto-roll triggered", "alert");
           roll();
       } else if (!isP2P) {
           botPlay(); 
@@ -215,8 +219,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       if (!isMyTurn || phase !== 'waiting') return;
       
       playSFX('dice');
-      setGameLog("You are rolling...");
-
+      
       if (isP2P && socket) {
           setPhase('rolling'); // Visual feedback immediately
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
@@ -229,8 +232,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
               setMyDice([d1, d2]);
               setPhase('waiting'); 
               setIsMyTurn(false);
-              setGameLog(`${opponentName}'s Turn`);
-              setTimeout(botPlay, 1000); 
+              setTimeout(botPlay, 1500); 
           }, 1000);
       }
   };
@@ -254,16 +256,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       if (pTotal > oTotal) {
           setScores(s => ({ ...s, me: s.me + 1 }));
           setRoundWinner('me');
-          setGameLog(`You Won Round ${round}!`);
           playSFX('win');
       } else if (oTotal > pTotal) {
           setScores(s => ({ ...s, opp: s.opp + 1 }));
           setRoundWinner('opp');
-          setGameLog(`${opponentName} Won Round ${round}`);
           playSFX('loss');
       } else {
           setRoundWinner('tie');
-          setGameLog("Round Tied");
       }
   };
 
@@ -275,7 +274,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           setIsMyTurn(true);
           setPhase('waiting');
           setRoundWinner(null);
-          setGameLog(`Round ${round + 1} Start`);
           setTimeLeft(TURN_TIME_LIMIT);
       }
   };
@@ -293,126 +291,129 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
 
         {/* --- HEADER --- */}
-        <div className="w-full max-w-lg flex justify-between items-start relative z-10 pt-2">
+        <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
             <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                 <ArrowLeft size={20} />
             </button>
             <div className="flex flex-col items-center">
                 <div className="text-gold-400 font-bold text-xs uppercase tracking-widest mb-1 flex items-center gap-2">
-                    {isP2P && <Wifi size={12} className="animate-pulse" />} First to 3 Wins
+                    {isP2P && <Wifi size={12} className="animate-pulse" />} Round {round} of 5
                 </div>
                 <div className="bg-black/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 flex items-center gap-4">
-                    <span className={`font-bold ${scores.me > scores.opp ? 'text-green-400' : 'text-white'}`}>{scores.me}</span>
-                    <span className="text-slate-500 text-xs">VS</span>
-                    <span className={`font-bold ${scores.opp > scores.me ? 'text-red-400' : 'text-white'}`}>{scores.opp}</span>
+                    <div className="flex flex-col items-center">
+                        <span className={`font-bold text-2xl ${scores.me > scores.opp ? 'text-green-400' : 'text-white'}`}>{scores.me}</span>
+                        <span className="text-[8px] uppercase text-slate-500 font-bold">YOU</span>
+                    </div>
+                    <div className="h-8 w-px bg-white/10"></div>
+                    <div className="flex flex-col items-center">
+                        <span className={`font-bold text-2xl ${scores.opp > scores.me ? 'text-red-400' : 'text-white'}`}>{scores.opp}</span>
+                        <span className="text-[8px] uppercase text-slate-500 font-bold">OPP</span>
+                    </div>
                 </div>
             </div>
-            <div className="w-10"></div>
+            <div className="w-32 hidden md:block">
+                 <AIReferee externalLog={refereeLog} />
+            </div>
+        </div>
+
+        {/* --- TURN INDICATOR --- */}
+        <div className="mt-6 flex justify-center w-full relative z-20">
+            <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                key={isMyTurn ? 'my-turn' : 'opp-turn'}
+                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
+                    isMyTurn 
+                    ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
+                    : 'bg-royal-800 text-slate-400 border border-white/10'
+                }`}
+            >
+                {isMyTurn ? "Your Turn" : "Opponent's Turn"}
+            </motion.div>
         </div>
 
         {/* --- ARENA --- */}
-        <div className="flex-1 w-full max-w-lg flex flex-col justify-center gap-10 md:gap-16 relative z-10 my-4 md:my-8">
+        <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-4 gap-8">
             
-            {/* Opponent Zone */}
-            <div className={`transition-all duration-500 relative ${!isMyTurn ? 'opacity-100 z-20' : 'opacity-60 scale-95 blur-[1px]'}`}>
-                {/* Timer Bar Opponent */}
-                {!isMyTurn && phase === 'waiting' && (
-                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 w-32 h-1 bg-royal-800 rounded-full overflow-hidden">
-                        <motion.div 
-                            initial={{ width: '100%' }} 
-                            animate={{ width: '0%' }} 
-                            transition={{ duration: TURN_TIME_LIMIT, ease: "linear" }}
-                            className="h-full bg-red-500" 
-                        />
+            {/* OPPONENT AREA */}
+            <div className="relative">
+                <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
+                    <div className="flex items-center gap-3">
+                        <div className={`relative ${!isMyTurn ? 'ring-4 ring-red-500/50 rounded-full' : ''}`}>
+                            <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
+                            {!isMyTurn && phase === 'rolling' && (
+                                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
+                            )}
+                        </div>
+                        <div className="text-red-200 font-bold text-sm">{opponentName}</div>
                     </div>
-                )}
 
-                <div className="flex justify-center mb-6">
-                    <div className={`flex items-center gap-3 px-4 py-2 rounded-xl border shadow-lg transition-all ${!isMyTurn ? 'bg-red-500/20 border-red-500/50' : 'bg-red-900/20 border-red-500/10'}`}>
-                        <img src={opponentAvatar} className="w-8 h-8 rounded-full border border-red-500" />
-                        <span className="text-red-200 font-bold text-sm">{opponentName}</span>
-                        {!isMyTurn && phase === 'waiting' && <span className="text-xs text-red-400 animate-pulse font-mono">{timeLeft}s</span>}
-                        {!isMyTurn && phase === 'rolling' && <span className="text-xs text-red-400 font-bold">Rolling...</span>}
-                    </div>
-                </div>
-                <div className="flex justify-center gap-6 md:gap-12">
-                    <Die2D value={oppDice[0]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
-                    <Die2D value={oppDice[1]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
-                </div>
-                <div className="text-center mt-6 h-8">
-                    {(isMyTurn || phase === 'scored') && (
-                        <motion.span 
-                            initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                            className="text-4xl font-display font-black text-white drop-shadow-md"
-                        >
-                            {oppDice[0] + oppDice[1]}
-                        </motion.span>
-                    )}
-                </div>
-            </div>
-
-            {/* Divider / Status */}
-            <div className="flex items-center justify-center relative">
-                <div className="h-px bg-gradient-to-r from-transparent via-white/20 to-transparent w-full absolute top-1/2 -translate-y-1/2"></div>
-                <div className="relative z-10">
-                    <div className="text-slate-300 text-xs font-bold uppercase tracking-wider bg-royal-950 px-6 py-2 rounded-full border border-white/10 shadow-xl flex items-center gap-2">
-                        {phase === 'waiting' && <Clock size={12} className="animate-pulse text-gold-400"/>}
-                        {gameLog}
+                    <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
+                        <div className="flex justify-center gap-6">
+                            <Die2D value={oppDice[0]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
+                            <Die2D value={oppDice[1]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
+                        </div>
+                        
+                        {/* Score Badge */}
+                        <div className="absolute -right-4 top-1/2 -translate-y-1/2">
+                            {(isMyTurn || phase === 'scored') && (
+                                <motion.div 
+                                    initial={{ scale: 0 }} animate={{ scale: 1 }}
+                                    className="w-12 h-12 rounded-full bg-royal-800 border-2 border-red-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
+                                >
+                                    {oppDice[0] + oppDice[1]}
+                                </motion.div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Player Zone (Swipeable) */}
+            {/* PLAYER AREA */}
             <motion.div 
-                className={`transition-all duration-500 relative ${isMyTurn ? 'opacity-100 z-20 cursor-grab active:cursor-grabbing' : 'opacity-60 scale-95 blur-[1px]'}`}
+                className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                 onPanEnd={handleSwipe}
             >
-                {/* Swipe Hint */}
-                {isMyTurn && phase === 'waiting' && (
-                    <motion.div 
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="absolute -top-12 left-1/2 -translate-x-1/2 text-gold-400 text-xs font-bold flex flex-col items-center gap-1 animate-bounce"
-                    >
-                        <Hand className="rotate-180" size={16} />
-                        SWIPE UP
-                    </motion.div>
-                )}
-
-                <div className="text-center mb-6 h-8">
-                    {(!isMyTurn || phase === 'scored') && (
-                        <motion.span 
-                            initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                            className="text-4xl font-display font-black text-white drop-shadow-md"
-                        >
-                            {myDice[0] + myDice[1]}
-                        </motion.span>
-                    )}
-                </div>
-                <div className="flex justify-center gap-6 md:gap-12 mb-6">
-                    <Die2D value={myDice[0]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
-                    <Die2D value={myDice[1]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
-                </div>
-                <div className="flex justify-center">
-                    <div className={`flex items-center gap-3 px-4 py-2 rounded-xl border shadow-lg transition-all ${isMyTurn ? 'bg-gold-500/20 border-gold-500/50' : 'bg-gold-500/5 border-gold-500/10'}`}>
-                        <img src={user.avatar} className="w-8 h-8 rounded-full border border-gold-500" />
-                        <span className="text-gold-200 font-bold text-sm">You</span>
-                        {isMyTurn && phase === 'waiting' && <span className="text-xs text-gold-400 animate-pulse font-mono">{timeLeft}s</span>}
-                        {isMyTurn && phase === 'rolling' && <span className="text-xs text-gold-400 font-bold">Rolling...</span>}
-                    </div>
-                </div>
-
-                {/* Timer Bar Player */}
-                {isMyTurn && phase === 'waiting' && (
-                    <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 w-32 h-1 bg-royal-800 rounded-full overflow-hidden">
+                <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
+                    {/* Swipe Hint */}
+                    {isMyTurn && phase === 'waiting' && (
                         <motion.div 
-                            initial={{ width: '100%' }} 
-                            animate={{ width: '0%' }} 
-                            transition={{ duration: TURN_TIME_LIMIT, ease: "linear" }}
-                            className="h-full bg-gold-500" 
-                        />
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="absolute -top-8 left-1/2 -translate-x-1/2 text-gold-400 text-xs font-bold flex flex-col items-center gap-1 animate-bounce"
+                        >
+                            <Hand className="rotate-180" size={16} />
+                            SWIPE UP TO ROLL
+                        </motion.div>
+                    )}
+
+                    <div className="flex justify-center gap-6">
+                        <Die2D value={myDice[0]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
+                        <Die2D value={myDice[1]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
                     </div>
-                )}
+
+                    {/* Score Badge */}
+                    <div className="absolute -right-4 top-1/2 -translate-y-1/2">
+                        {(!isMyTurn || phase === 'scored') && (
+                            <motion.div 
+                                initial={{ scale: 0 }} animate={{ scale: 1 }}
+                                className="w-12 h-12 rounded-full bg-royal-800 border-2 border-gold-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
+                            >
+                                {myDice[0] + myDice[1]}
+                            </motion.div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                    <div className={`relative ${isMyTurn ? 'ring-4 ring-gold-500/50 rounded-full' : ''}`}>
+                        <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
+                        {isMyTurn && phase === 'rolling' && (
+                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
+                        )}
+                    </div>
+                    <div className="text-gold-200 font-bold text-sm">You</div>
+                </div>
             </motion.div>
 
         </div>
@@ -427,7 +428,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                         onClick={roll}
                         className="w-full py-4 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black text-xl rounded-2xl shadow-[0_0_40px_rgba(251,191,36,0.4)] transition-all transform active:scale-95 flex items-center justify-center gap-3 border-t border-white/20"
                     >
-                        <Box size={24} strokeWidth={3} /> ROLL DICE
+                        <Box size={24} strokeWidth={3} /> ROLL DICE ({timeLeft}s)
                     </motion.button>
                 ) : phase === 'scored' && !isP2P ? (
                     <motion.button 
@@ -445,12 +446,42 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                         className="w-full py-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-center gap-2 text-slate-400 font-bold backdrop-blur-sm"
                     >
                         {phase === 'rolling' ? <Cpu className="animate-spin" size={20} /> : <Clock className="animate-pulse" size={20} />}
-                        {phase === 'rolling' ? 'Rolling...' : isP2P && phase === 'scored' ? 'Starting Next Round...' : 'Opponent Turn...'}
+                        {phase === 'rolling' ? 'Rolling...' : isP2P && phase === 'scored' ? 'Starting Next Round...' : `Waiting for ${opponentName}...`}
                     </motion.div>
                 )}
             </AnimatePresence>
         </div>
 
+        {/* --- ROUND RESULT OVERLAY --- */}
+        <AnimatePresence>
+            {phase === 'scored' && roundWinner && (
+                <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+                    <motion.div
+                        initial={{ scale: 0.5, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        exit={{ scale: 1.5, opacity: 0 }}
+                        className={`px-8 py-4 rounded-3xl border-4 shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 ${
+                            roundWinner === 'me' 
+                            ? 'bg-green-500/80 border-green-400 text-white' 
+                            : roundWinner === 'opp' 
+                            ? 'bg-red-600/80 border-red-500 text-white'
+                            : 'bg-slate-600/80 border-slate-400 text-white'
+                        }`}
+                    >
+                        {roundWinner === 'me' && <CheckCircle2 size={48} className="drop-shadow-md" />}
+                        {roundWinner === 'opp' && <XCircle size={48} className="drop-shadow-md" />}
+                        {roundWinner === 'tie' && <RefreshCw size={48} className="drop-shadow-md" />}
+                        
+                        <h2 className="text-3xl font-black uppercase italic tracking-tighter drop-shadow-lg">
+                            {roundWinner === 'me' ? "Round Won!" : roundWinner === 'opp' ? "Round Lost" : "Draw"}
+                        </h2>
+                        {roundWinner === 'me' && <p className="text-sm font-bold opacity-90">+1 Point</p>}
+                    </motion.div>
+                </div>
+            )}
+        </AnimatePresence>
+
+        {/* FORFEIT MODAL */}
         <AnimatePresence>
           {showForfeitModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">

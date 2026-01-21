@@ -1,10 +1,12 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Sun, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+import { useTheme } from '../services/theme';
 
 interface ProfileProps {
   user: User;
@@ -30,6 +32,7 @@ const PRESET_AVATARS = [
 
 export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const { t, language, setLanguage } = useLanguage();
+  const { theme, toggleTheme } = useTheme();
   // Ensure the state uses the ProfileTab union type
   const [activeTab, setActiveTab] = useState<ProfileTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
@@ -261,7 +264,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   };
 
   return (
-    <div className="p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative">
+    <div className="p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative text-white">
        
        {/* TOAST NOTIFICATION */}
        <AnimatePresence>
@@ -658,6 +661,25 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                </h3>
                                
                                <div className="space-y-4">
+                                   {/* Theme Toggle */}
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                       <div className="flex items-center gap-3">
+                                           <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
+                                              {theme === 'dark' ? <Moon size={20}/> : <Sun size={20}/>}
+                                           </div>
+                                           <div>
+                                               <div className="font-bold text-white text-sm">Appearance</div>
+                                               <div className="text-xs text-slate-500">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
+                                           </div>
+                                       </div>
+                                       <button 
+                                          onClick={() => { toggleTheme(); playSFX('click'); }}
+                                          className={`w-12 h-6 rounded-full transition-colors relative ${theme === 'light' ? 'bg-gold-500' : 'bg-royal-800'}`}
+                                       >
+                                           <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${theme === 'light' ? 'translate-x-6' : 'translate-x-0'}`} />
+                                       </button>
+                                   </div>
+
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Globe size={20}/></div>

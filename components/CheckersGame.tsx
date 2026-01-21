@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle, Clock } from 'lucide-react';
-import { Table, User, AIRefereeLog } from '../types';
+import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle, Clock, Play, User, Cpu } from 'lucide-react';
+import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -10,7 +10,7 @@ import { GameChat } from './GameChat';
 
 interface CheckersGameProps {
   table: Table;
-  user: User;
+  user: AppUser;
   onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
   socket?: Socket | null;
   socketGame?: any;
@@ -60,11 +60,16 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, i
     >
         {isDark && <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />}
         {(isLastFrom || isLastTo) && <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />}
+        
+        {/* Valid Move Indicator */}
         {validMove && (
-           <motion.div initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className={`absolute inset-2 rounded-full border-2 border-dashed flex items-center justify-center z-10 ${validMove.isJump ? 'border-red-500 bg-red-500/10' : 'border-green-500 bg-green-500/10'}`}>
-               <div className={`w-3 h-3 rounded-full ${validMove.isJump ? 'bg-red-500' : 'bg-green-500'} animate-pulse`} />
-           </motion.div>
+           <motion.div 
+             initial={{ scale: 0, opacity: 0 }} 
+             animate={{ scale: 1, opacity: 1 }} 
+             className={`absolute w-4 h-4 rounded-full z-10 ${validMove.isJump ? 'bg-red-500 shadow-[0_0_10px_red]' : 'bg-green-500/50'}`}
+           />
         )}
+
         <AnimatePresence mode="popLayout">
             {piece && (
                 <motion.div
@@ -74,9 +79,17 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, i
                     exit={{ scale: 0, opacity: 0 }}
                     className="relative w-[80%] h-[80%] z-20 pointer-events-none"
                 >
-                    <div className={`w-full h-full rounded-full shadow-md border-2 border-opacity-50 flex items-center justify-center relative overflow-hidden ${isMe ? 'bg-gradient-to-br from-gold-400 to-yellow-600 border-yellow-200' : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300'} ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}`}>
+                    <div className={`w-full h-full rounded-full shadow-[0_4px_6px_rgba(0,0,0,0.5)] border-2 flex items-center justify-center relative overflow-hidden ${isMe ? 'bg-gradient-to-br from-gold-400 to-yellow-600 border-yellow-200' : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300'} ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}`}>
                         <div className={`absolute inset-[20%] rounded-full border border-black/10 ${isMe ? 'bg-gold-300' : 'bg-red-400'}`}></div>
-                        {piece.isKing && <Crown size={20} className="text-white drop-shadow-md relative z-10" fill="currentColor" />}
+                        {piece.isKing && (
+                            <motion.div 
+                                initial={{ scale: 0, rotate: -45 }} 
+                                animate={{ scale: 1, rotate: 0 }}
+                                className="relative z-10"
+                            >
+                                <Crown size={24} className="text-white drop-shadow-md" fill="currentColor" />
+                            </motion.div>
+                        )}
                     </div>
                 </motion.div>
             )}
@@ -97,11 +110,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
   const [isGameOver, setIsGameOver] = useState(false);
+  const [capturedCount, setCapturedCount] = useState({ me: 0, opponent: 0 });
   
   // -1 = Up (Standard for P1/Local), 1 = Down (P2)
   const [forwardDir, setForwardDir] = useState(-1);
 
   const isP2P = !!socket && !!socketGame;
+  const isBotGame = !isP2P && table.guest?.id === 'bot';
 
   // --- INIT & SYNC ---
   useEffect(() => {
@@ -113,6 +128,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 player: p.owner === user.id ? 'me' : 'opponent'
             }));
             setPieces(mappedPieces);
+            updateCapturedCounts(mappedPieces);
         }
         if (socketGame.turn) {
             setTurn(socketGame.turn === user.id ? 'me' : 'opponent');
@@ -151,9 +167,20 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
               }
             }
             setPieces(initialPieces);
+            updateCapturedCounts(initialPieces);
         }
     }
   }, [socketGame, user.id, isP2P]);
+
+  // Update captured count based on remaining pieces
+  const updateCapturedCounts = (currentPieces: Piece[]) => {
+      const meCount = currentPieces.filter(p => p.player === 'me').length;
+      const oppCount = currentPieces.filter(p => p.player === 'opponent').length;
+      setCapturedCount({
+          me: 12 - oppCount, // I captured what opponent lost
+          opponent: 12 - meCount
+      });
+  };
 
   // --- TIMER LOGIC ---
   useEffect(() => {
@@ -177,16 +204,34 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       return () => clearInterval(interval);
   }, [turn, isGameOver, isP2P, socket, socketGame]);
 
+  // --- BOT LOGIC (LOCAL) ---
+  useEffect(() => {
+      if (isBotGame && turn === 'opponent' && !isGameOver) {
+          const timeout = setTimeout(() => {
+              makeBotMove();
+          }, 1000);
+          return () => clearTimeout(timeout);
+      }
+  }, [isBotGame, turn, isGameOver, pieces, mustJumpFrom]);
+
   // --- ACTIONS ---
   const handlePieceClick = useCallback((p: Piece) => {
     if (turn !== 'me' || p.player !== 'me' || isGameOver) return;
+    
+    // Valid moves considering mandatory jumps
     const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
 
+    // If forced jump, reject clicks on other pieces
     if (mustJumpFrom && mustJumpFrom !== p.id) {
         playSFX('error'); return;
     }
-    if (hasJump && !moves.some(m => m.fromR === p.r && m.fromC === p.c)) {
-        playSFX('error'); return; // Must jump
+    
+    // If ANY jump is available on board, you must pick a piece that can jump
+    const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
+    if (hasJump && !canThisPieceJump) {
+        // Visual shake or error?
+        playSFX('error'); 
+        return; 
     }
     
     if (selectedPieceId === p.id && !mustJumpFrom) {
@@ -204,8 +249,16 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const handleMoveClick = useCallback((move: Move) => {
       if (!selectedPieceId || isGameOver) return;
       
+      executeMove(move);
+
+  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir, timeRemaining]);
+
+  const executeMove = (move: Move) => {
+      const pieceId = pieces.find(p => p.r === move.fromR && p.c === move.fromC)?.id;
+      if (!pieceId) return;
+
       const nextPieces = pieces.filter(p => p.id !== move.jumpId).map(p => {
-          if (p.id === selectedPieceId) {
+          if (p.id === pieceId) {
               const kingRow = p.player === 'me' ? (forwardDir === -1 ? 0 : 7) : (forwardDir === -1 ? 7 : 0);
               const isKing = p.isKing || move.r === kingRow;
               if (isKing && !p.isKing) playSFX('king');
@@ -214,47 +267,50 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           return p;
       });
 
-      // Update Local State for immediate feedback
       setPieces(nextPieces);
       setValidMoves([]);
       setLastMove({ from: `${move.fromR},${move.fromC}`, to: `${move.r},${move.c}` });
+      updateCapturedCounts(nextPieces);
+      
       if (move.isJump) playSFX('capture'); else playSFX('move');
 
-      // Determine Next Turn (Multi-jump logic)
-      let nextTurn: 'me' | 'opponent' = 'opponent';
+      // Check for Double Jump
+      let nextTurn: 'me' | 'opponent' = turn === 'me' ? 'opponent' : 'me';
       let nextMustJump: string | null = null;
 
       if (move.isJump) {
-          const movedPiece = nextPieces.find(p => p.id === selectedPieceId)!;
+          const movedPiece = nextPieces.find(p => p.id === pieceId)!;
           // Must check for MORE jumps for THIS specific piece
-          const { moves: moreJumps } = getGlobalValidMoves('me', nextPieces, movedPiece.id);
-          // Only if this specific piece has more jumps
+          const { moves: moreJumps } = getGlobalValidMoves(movedPiece.player, nextPieces, movedPiece.id);
           const canContinueJump = moreJumps.some(m => m.isJump && m.fromR === movedPiece.r && m.fromC === movedPiece.c);
           
           if (canContinueJump) {
-              nextTurn = 'me';
+              nextTurn = movedPiece.player;
               nextMustJump = movedPiece.id;
           }
       }
 
-      // Check Game Over
-      const { moves: oppMoves } = getGlobalValidMoves('opponent', nextPieces);
+      setMustJumpFrom(nextMustJump);
+      
+      // Game Over Check
+      const { moves: oppMoves } = getGlobalValidMoves(nextTurn, nextPieces);
+      const oppPieces = nextPieces.filter(p => p.player === nextTurn);
+      
       let winner = null;
-      if (oppMoves.length === 0 && nextTurn === 'opponent') winner = user.id;
+      if (oppPieces.length === 0 || oppMoves.length === 0) {
+          // If opponent can't move or has no pieces, current player wins
+          winner = turn === 'me' ? user.id : 'bot'; // Simplification
+          setIsGameOver(true);
+          onGameEnd(winner === user.id ? 'win' : 'loss');
+      }
 
-      // Sync with Server
+      // Sync P2P
       if (isP2P && socket && socketGame) {
-          // Robustly find opponent ID. If not found, use a fallback to prevent crash, though logic should prevent this.
           const opponentId = socketGame.players.find((uid: string) => uid !== user.id) || 'unknown_opponent';
-          
-          // CRITICAL FIX: Ensure 'owner' is mapped correctly before sending. 
-          // 'me' -> user.id, 'opponent' -> opponentId
           const serverPieces = nextPieces.map(p => ({
               ...p,
               owner: p.player === 'me' ? user.id : opponentId
           }));
-          
-          // Send updated timers as well
           const updatedTimers = {
               [user.id]: timeRemaining.me,
               [opponentId]: timeRemaining.opponent
@@ -274,36 +330,75 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           });
       }
 
-      setMustJumpFrom(nextMustJump);
-      setSelectedPieceId(nextMustJump ? selectedPieceId : null);
+      // UI Update
       if (nextTurn === 'me' && nextMustJump) {
-          // Auto-select for multi-jump
+          setSelectedPieceId(nextMustJump);
           const { moves } = getGlobalValidMoves('me', nextPieces, nextMustJump);
           setValidMoves(moves);
+          // Don't switch turn
       } else {
           setTurn(nextTurn);
+          setSelectedPieceId(null);
       }
+  };
 
-  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir, timeRemaining]);
+  const makeBotMove = () => {
+      // 1. Get all valid moves for opponent
+      const { moves } = getGlobalValidMoves('opponent', pieces, mustJumpFrom);
+      
+      if (moves.length === 0) return; // Should be game over, handled in prev turn
+
+      // 2. Greedy Strategy: Prioritize Jumps, then Kings, then center control
+      let bestMove = moves[0];
+      let bestScore = -Infinity;
+
+      // Shuffle moves to add variety
+      const shuffled = moves.sort(() => Math.random() - 0.5);
+
+      shuffled.forEach(move => {
+          let score = 0;
+          if (move.isJump) score += 100;
+          
+          // King promotion incentive
+          const kingRow = forwardDir === -1 ? 7 : 0; // Opponent moves opposite to me
+          if (move.r === kingRow) score += 50;
+
+          // Center control
+          if (move.c >= 2 && move.c <= 5 && move.r >= 2 && move.r <= 5) score += 10;
+
+          // Safety (don't move into capture - Simplified)
+          // ... (advanced)
+
+          if (score > bestScore) {
+              bestScore = score;
+              bestMove = move;
+          }
+      });
+
+      // 3. Execute
+      executeMove(bestMove);
+  };
 
   // --- LOGIC HELPERS ---
   const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
+  
   const getGlobalValidMoves = (player: 'me' | 'opponent', currentPieces: Piece[], specificId?: string | null) => {
       let allMoves: Move[] = [];
       const myPieces = currentPieces.filter(p => p.player === player);
-      // If specificId is provided, ONLY check that piece
       const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
 
       toCheck.forEach(p => {
+          // 'me' moves in forwardDir (-1 usually), 'opponent' moves in -forwardDir
           const moveDir = p.player === 'me' ? forwardDir : -forwardDir;
-          // King moves in all dirs, normal only forward
           const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[moveDir, -1], [moveDir, 1]];
           
           const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
           
-          // Jumps
+          // 1. Check Jumps
           dirs.forEach(([dr, dc]) => {
-             const mr = p.r + dr, mc = p.c + dc, jr = p.r + dr*2, jc = p.c + dc*2;
+             const mr = p.r + dr, mc = p.c + dc; // Mid square
+             const jr = p.r + dr*2, jc = p.c + dc*2; // Jump square
+             
              if (isValidPos(jr, jc) && !pieceMap.has(`${jr},${jc}`)) {
                  const mid = pieceMap.get(`${mr},${mc}`);
                  if (mid && mid.player !== player) {
@@ -312,19 +407,30 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
              }
           });
           
-          // Simple Moves (only if not forced to jump elsewhere logic handled by filtering later)
-          if (!specificId) { 
-             dirs.forEach(([dr, dc]) => {
-                 const tr = p.r + dr, tc = p.c + dc;
-                 if (isValidPos(tr, tc) && !pieceMap.has(`${tr},${tc}`)) {
-                     allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
-                 }
-             });
-          }
+          // 2. Check Simple Moves (Only if NO jumps found globally later)
+          dirs.forEach(([dr, dc]) => {
+             const tr = p.r + dr, tc = p.c + dc;
+             if (isValidPos(tr, tc) && !pieceMap.has(`${tr},${tc}`)) {
+                 allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
+             }
+          });
       });
 
+      // Enforce Mandatory Jumps
       const jumps = allMoves.filter(m => m.isJump);
-      return { moves: jumps.length > 0 ? jumps : allMoves, hasJump: jumps.length > 0 };
+      const finalMoves = jumps.length > 0 ? jumps : allMoves;
+      
+      // If specific ID was requested but it has no jumps, and there ARE jumps globally (from other pieces),
+      // then this piece shouldn't move (unless it's a multi-jump scenario which is handled by caller).
+      // However, caller `handlePieceClick` checks `hasJump` to enforce selection.
+      
+      // We need to know if ANY jump exists for the player to enforce the rule
+      const allPlayerMovesRaw = !specificId ? allMoves : []; // If we checked all, we know. If specific, we don't know global state.
+      
+      // If we are checking specific ID, we might need to know if OTHER pieces can jump. 
+      // But for recursion performance, we rely on the caller passing null first to get global `hasJump`.
+      
+      return { moves: finalMoves, hasJump: jumps.length > 0 };
   };
 
   // Maps
@@ -350,7 +456,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           )}
        </AnimatePresence>
 
-        <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
+        <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
             <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
             </button>
@@ -361,18 +467,40 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
+       {/* Turn Indicator Banner */}
+        <div className="mb-4 flex items-center justify-center">
+            <motion.div 
+                key={turn}
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
+                    turn === 'me' 
+                    ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
+                    : 'bg-royal-800 text-slate-400 border border-white/10'
+                }`}
+            >
+                {turn === 'me' ? "Your Turn" : "Opponent's Turn"}
+            </motion.div>
+        </div>
+
        <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full max-w-5xl">
-           {/* Opponent */}
+           {/* Opponent Side */}
            <div className="order-1 flex md:flex-col items-center gap-4 md:w-32">
-               <div className={`relative ${turn === 'opponent' ? 'scale-110' : 'opacity-70'}`}>
+               <div className={`relative transition-all duration-300 ${turn === 'opponent' ? 'scale-110 ring-4 ring-red-500/50 rounded-2xl' : 'opacity-70'}`}>
                    <img src={table.host?.avatar || "https://i.pravatar.cc/150"} className="w-16 h-16 rounded-2xl border-2 border-red-500 shadow-[0_0_20px_red]" />
-                   {turn === 'opponent' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Playing...</div>}
+                   {turn === 'opponent' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse whitespace-nowrap">Thinking...</div>}
                </div>
                <TimerDisplay time={timeRemaining.opponent} isActive={turn === 'opponent'} />
+               {/* Captured Indicator */}
+               <div className="flex gap-1 mt-2">
+                   {Array.from({length: capturedCount.opponent}).map((_, i) => (
+                       <div key={i} className="w-3 h-3 rounded-full bg-gold-500 border border-black/20" />
+                   ))}
+               </div>
            </div>
 
            {/* Board */}
-           <div className={`order-2 w-full max-w-[500px] aspect-square relative bg-[#1a103c] rounded-xl shadow-2xl border-4 border-royal-800 grid grid-cols-8 grid-rows-8 overflow-hidden transition-transform duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
+           <div className={`order-2 w-full max-w-[500px] aspect-square relative bg-[#1a103c] rounded-xl shadow-2xl border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} grid grid-cols-8 grid-rows-8 overflow-hidden transition-all duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
                {Array.from({length: 8}).map((_, r) => Array.from({length: 8}).map((_, c) => {
                    const key = `${r},${c}`;
                    return <CheckersCell 
@@ -393,13 +521,19 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                }))}
            </div>
 
-           {/* Player */}
+           {/* Player Side */}
            <div className="order-3 flex md:flex-col items-center gap-4 md:w-32">
-               <div className={`relative ${turn === 'me' ? 'scale-110' : 'opacity-70'}`}>
+               <div className={`relative transition-all duration-300 ${turn === 'me' ? 'scale-110 ring-4 ring-gold-500/50 rounded-2xl' : 'opacity-70'}`}>
                    <img src={user.avatar} className="w-16 h-16 rounded-2xl border-2 border-gold-500 shadow-[0_0_20px_gold]" />
-                   {turn === 'me' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-full">Your Turn</div>}
+                   {turn === 'me' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">Active</div>}
                </div>
                <TimerDisplay time={timeRemaining.me} isActive={turn === 'me'} />
+               {/* Captured Indicator */}
+               <div className="flex gap-1 mt-2">
+                   {Array.from({length: capturedCount.me}).map((_, i) => (
+                       <div key={i} className="w-3 h-3 rounded-full bg-red-600 border border-black/20" />
+                   ))}
+               </div>
            </div>
        </div>
 

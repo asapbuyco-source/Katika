@@ -3,13 +3,14 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft } from 'lucide-react';
 import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile } from '../services/firebase';
-import { User as AppUser } from '../types';
+import { User as AppUser, ViewState } from '../types';
 
 interface AuthScreenProps {
   onAuthenticated: (user?: AppUser) => void;
+  onNavigate: (view: ViewState) => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavigate }) => {
   const [method, setMethod] = useState<'menu' | 'email'>('menu');
   const [isRegistering, setIsRegistering] = useState(false);
   
@@ -263,7 +264,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated }) => {
         </div>
         
         <p className="text-center text-xs text-slate-600 mt-8">
-            By connecting, you agree to Vantage Gaming's <span className="text-slate-400 underline">Terms of Service</span>.
+            By connecting, you agree to Vantage Gaming's <button onClick={() => onNavigate('terms')} className="text-slate-400 underline hover:text-white transition-colors">Terms of Service</button>.
         </p>
       </div>
     </div>

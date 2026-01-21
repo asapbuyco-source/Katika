@@ -9,6 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
     <script>
       tailwind.config = {
+        darkMode: 'class',
         theme: {
           extend: {
             fontFamily: {
@@ -17,10 +18,10 @@
             },
             colors: {
               royal: {
-                900: '#1a103c',
-                800: '#2d1b69',
+                900: 'rgb(var(--c-royal-900) / <alpha-value>)',
+                800: 'rgb(var(--c-royal-800) / <alpha-value>)',
                 700: '#432c9a',
-                950: '#0f0a1f',
+                950: 'rgb(var(--c-royal-950) / <alpha-value>)',
               },
               gold: {
                 400: '#fbbf24',
@@ -31,7 +32,10 @@
                 green: '#007a5e',
                 red: '#ce1126',
                 yellow: '#fcd116',
-              }
+              },
+              // Remap white/slate to dynamic vars if needed, or rely on overrides
+              white: 'rgb(var(--c-text-white) / <alpha-value>)', 
+              'slate-200': 'rgb(var(--c-text-base) / <alpha-value>)',
             },
             gridTemplateColumns: {
               '15': 'repeat(15, minmax(0, 1fr))',
@@ -63,6 +67,16 @@
   }
 }
 </script>
+<style>
+  /* Base Variables (Default Dark) - Fallback before React hydration */
+  :root {
+    --c-royal-950: 15 10 31;
+    --c-royal-900: 26 16 60;
+    --c-royal-800: 45 27 105;
+    --c-text-white: 255 255 255;
+    --c-text-base: 226 232 240; 
+  }
+</style>
 </head>
   <body>
     <div id="root"></div>

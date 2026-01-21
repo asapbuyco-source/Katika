@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo, ReactNode } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -19,6 +19,7 @@ import { AdminDashboard } from './AdminDashboard';
 import { HelpCenter } from './HelpCenter';
 import { ReportBug } from './ReportBug';
 import { TermsOfService } from './TermsOfService';
+import { PrivacyPolicy } from './PrivacyPolicy';
 import { Forum } from './Forum';
 import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
@@ -30,12 +31,13 @@ import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff, RefreshCw } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
+import { ThemeProvider, useTheme } from '../services/theme';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
   onReset: () => void;
 }
 
@@ -44,7 +46,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -79,7 +84,8 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 
-export default function App() {
+// Internal app content wrapper to access useTheme context
+const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setView] = useState<ViewState>('landing');
   const [activeTable, setActiveTable] = useState<Table | null>(null);
@@ -111,6 +117,28 @@ export default function App() {
   // Connection Handling
   const [bypassConnection, setBypassConnection] = useState(false);
   const [connectionTime, setConnectionTime] = useState(0);
+
+  // Theme Hook
+  const { theme } = useTheme();
+
+  // Apply Theme CSS Variables
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.style.setProperty('--c-royal-950', '15 10 31'); // #0f0a1f
+      root.style.setProperty('--c-royal-900', '26 16 60'); // #1a103c
+      root.style.setProperty('--c-royal-800', '45 27 105'); // #2d1b69
+      root.style.setProperty('--c-text-white', '255 255 255');
+      root.style.setProperty('--c-text-base', '226 232 240');
+    } else {
+      // Light Mode Mapping
+      root.style.setProperty('--c-royal-950', '248 250 252'); // Slate 50 (Main BG)
+      root.style.setProperty('--c-royal-900', '255 255 255'); // White (Cards)
+      root.style.setProperty('--c-royal-800', '226 232 240'); // Slate 200 (Accents/Borders)
+      root.style.setProperty('--c-text-white', '15 23 42'); // Slate 900 (Headings)
+      root.style.setProperty('--c-text-base', '51 65 85'); // Slate 700 (Body)
+    }
+  }, [theme]);
 
   // Update view ref whenever view changes (for the forum listener)
   useEffect(() => {
@@ -319,11 +347,10 @@ export default function App() {
               setView('dashboard');
           }
       } else {
-          // If viewing How It Works, don't redirect to landing
-          if (currentView === 'how-it-works') return;
-
-          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum', 'settings'];
-          if (protectedViews.includes(currentView)) {
+          // Safe public routes
+          const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
+          
+          if (!publicViews.includes(currentView)) {
               setView('landing');
           }
       }
@@ -490,114 +517,19 @@ export default function App() {
 
   return (
     <LanguageProvider>
-    <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
-      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum', 'settings'].includes(currentView) && (
-        <Navigation 
-            currentView={currentView} 
-            setView={setView} 
-            user={user} 
-            hasUnreadMessages={unreadForum} 
-        />
-      )}
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </LanguageProvider>
+  );
+}
 
-      {/* Connection Status Indicators */}
-      {user && (!isConnected && bypassConnection && !socketGame) && currentView !== 'landing' && currentView !== 'auth' && (
-          <div className="fixed top-4 right-4 z-50 animate-pulse">
-              <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                  <WifiOff size={12} /> Offline Mode
-              </div>
-          </div>
-      )}
-
-      {user && (!isConnected && !bypassConnection && hasConnectedOnce) && (
-          <div className="fixed top-4 right-4 z-50">
-              <div className="bg-yellow-500/20 border border-yellow-500/50 backdrop-blur-md text-yellow-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                  <RefreshCw size={12} className="animate-spin" /> Reconnecting...
-              </div>
-          </div>
-      )}
-
-      <AnimatePresence>
-          {incomingChallenge && (
-              <ChallengeRequestModal 
-                  challenge={incomingChallenge}
-                  onAccept={handleAcceptChallenge}
-                  onDecline={() => setIncomingChallenge(null)}
-              />
-          )}
-      </AnimatePresence>
-
-      {gameResult && (
-          <GameResultOverlay 
-             result={gameResult.result} 
-             amount={gameResult.amount} 
-             onContinue={finalizeGameEnd} 
-              />
-      )}
-
-      <main id="main-scroll-container" className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
-             <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
-            </div>
-        )}
-
-        {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />}
-        {currentView === 'how-it-works' && <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />}
-        {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} />}
-
-        {user && (
-            <>
-                {currentView === 'dashboard' && <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} />}
-                {currentView === 'lobby' && <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} />}
-                {currentView === 'matchmaking' && (
-                    <MatchmakingScreen 
-                        user={user} 
-                        gameType={matchmakingConfig?.gameType || 'Ludo'}
-                        stake={matchmakingConfig?.stake || 100}
-                        onMatchFound={() => {}} 
-                        onCancel={cancelMatchmaking}
-                        isSocketMode={true} 
-                    />
-                )}
-
-                {/* SOCKET GAME RENDERING - UNIVERSAL */}
-                {currentView === 'game' && socketGame ? (
-                     <GameErrorBoundary onReset={() => setView('lobby')}>
-                         {socketGame.gameType === 'Dice' && <DiceGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'TicTacToe' && <TicTacToeGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Checkers' && <CheckersGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Chess' && <ChessGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Cards' && <CardGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Ludo' && <GameRoom table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                     </GameErrorBoundary>
-                ) : (
-                    // Fallback to original Game Room (Local/Firebase Mode)
-                    currentView === 'game' && activeTable && (
-                        <GameErrorBoundary onReset={() => setView('lobby')}>
-                            {activeTable.gameType === 'Ludo' && <GameRoom table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'TicTacToe' && <TicTacToeGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Checkers' && <CheckersGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Chess' && <ChessGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Dice' && <DiceGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Cards' && <CardGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                        </GameErrorBoundary>
-                    )
-                )}
-
-                {/* Other Views */}
-                {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
-                {(currentView === 'profile' || currentView === 'settings') && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
-                {currentView === 'admin' && <AdminDashboard user={user} />}
-                {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
-                {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
-                {currentView === 'terms' && <TermsOfService onBack={() => setView('profile')} />}
-                {currentView === 'forum' && <Forum user={user} />}
-            </>
-        )}
-      </main>
-    </div>
+export default function App() {
+  return (
+    <LanguageProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
     </LanguageProvider>
   );
 }

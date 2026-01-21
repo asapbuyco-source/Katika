@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -19,23 +19,25 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { HelpCenter } from './components/HelpCenter';
 import { ReportBug } from './components/ReportBug';
 import { TermsOfService } from './components/TermsOfService';
+import { PrivacyPolicy } from './components/PrivacyPolicy';
 import { Forum } from './components/Forum';
 import { GameResultOverlay } from './components/GameResultOverlay';
 import { ChallengeRequestModal } from './components/ChallengeRequestModal';
 import { 
-    auth, syncUserProfile, logout, subscribeToUser, addUserTransaction, 
-    createBotMatch, subscribeToIncomingChallenges, respondToChallenge, createChallengeGame, getGame, subscribeToForum
+    auth, syncUserProfile, logout, subscribeToUser, createBotMatch, 
+    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum
 } from './services/firebase';
 import { playSFX } from './services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, Clock, AlertTriangle, Play, ServerOff, RefreshCw } from 'lucide-react';
+import { Loader2, Wifi, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
 import { LanguageProvider } from './services/i18n';
+import { ThemeProvider, useTheme } from './services/theme';
 
 // --- Error Boundary ---
 interface ErrorBoundaryProps {
-  children?: React.ReactNode;
+  children?: ReactNode;
   onReset: () => void;
 }
 
@@ -44,7 +46,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -79,7 +84,8 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 
-export default function App() {
+// Internal app content wrapper to access useTheme context
+const AppContent = () => {
   const [user, setUser] = useState<User | null>(null);
   const [currentView, setView] = useState<ViewState>('landing');
   const [activeTable, setActiveTable] = useState<Table | null>(null);
@@ -106,11 +112,32 @@ export default function App() {
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<number>(20); 
   
   // Connection Handling
   const [bypassConnection, setBypassConnection] = useState(false);
   const [connectionTime, setConnectionTime] = useState(0);
+
+  // Theme Hook
+  const { theme } = useTheme();
+
+  // Apply Theme CSS Variables
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.style.setProperty('--c-royal-950', '15 10 31'); // #0f0a1f
+      root.style.setProperty('--c-royal-900', '26 16 60'); // #1a103c
+      root.style.setProperty('--c-royal-800', '45 27 105'); // #2d1b69
+      root.style.setProperty('--c-text-white', '255 255 255');
+      root.style.setProperty('--c-text-base', '226 232 240');
+    } else {
+      // Light Mode Mapping
+      root.style.setProperty('--c-royal-950', '248 250 252'); // Slate 50 (Main BG)
+      root.style.setProperty('--c-royal-900', '255 255 255'); // White (Cards)
+      root.style.setProperty('--c-royal-800', '226 232 240'); // Slate 200 (Accents/Borders)
+      root.style.setProperty('--c-text-white', '15 23 42'); // Slate 900 (Headings)
+      root.style.setProperty('--c-text-base', '51 65 85'); // Slate 700 (Body)
+    }
+  }, [theme]);
 
   // Update view ref whenever view changes (for the forum listener)
   useEffect(() => {
@@ -167,7 +194,7 @@ export default function App() {
         setSocketGame(gameState);
     });
 
-    newSocket.on('turn_timeout', (data) => {
+    newSocket.on('turn_timeout', () => {
         console.log("Turn timed out");
     });
 
@@ -240,18 +267,6 @@ export default function App() {
   }, [socket, user]);
 
 
-  // 4. Timer Logic
-  useEffect(() => {
-      if (!socketGame || !socketGame.turnExpiresAt) return;
-
-      const interval = setInterval(() => {
-          const delta = Math.max(0, Math.ceil((socketGame.turnExpiresAt - Date.now()) / 1000));
-          setTimeLeft(delta);
-      }, 1000);
-
-      return () => clearInterval(interval);
-  }, [socketGame]);
-
   // 5. Firebase Auth & Global Listeners
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
@@ -319,11 +334,10 @@ export default function App() {
               setView('dashboard');
           }
       } else {
-          // If viewing How It Works, don't redirect to landing
-          if (currentView === 'how-it-works') return;
-
-          const protectedViews: ViewState[] = ['dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'admin', 'help-center', 'report-bug', 'terms', 'forum', 'settings'];
-          if (protectedViews.includes(currentView)) {
+          // Safe public routes
+          const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
+          
+          if (!publicViews.includes(currentView)) {
               setView('landing');
           }
       }
@@ -489,8 +503,7 @@ export default function App() {
   }
 
   return (
-    <LanguageProvider>
-    <div className="min-h-screen bg-[#0f0a1f] text-slate-200 font-sans md:flex">
+    <div className="min-h-screen bg-royal-950 text-slate-200 font-sans md:flex transition-colors duration-500">
       {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum', 'settings'].includes(currentView) && (
         <Navigation 
             currentView={currentView} 
@@ -543,9 +556,15 @@ export default function App() {
             </div>
         )}
 
-        {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onHowItWorks={() => setView('how-it-works')} />}
+        {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />}
         {currentView === 'how-it-works' && <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />}
-        {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} />}
+        {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} onNavigate={setView} />}
+        
+        {/* Public Pages accessed via Footer */}
+        {currentView === 'terms' && <TermsOfService onBack={() => setView('landing')} />}
+        {currentView === 'privacy' && <PrivacyPolicy onBack={() => setView('landing')} />}
+        {currentView === 'help-center' && <HelpCenter onBack={() => setView('landing')} />}
+        {currentView === 'report-bug' && <ReportBug onBack={() => setView('landing')} />}
 
         {user && (
             <>
@@ -598,6 +617,15 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+};
+
+export default function App() {
+  return (
+    <LanguageProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
     </LanguageProvider>
   );
 }
