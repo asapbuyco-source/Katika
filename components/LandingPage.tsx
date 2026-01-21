@@ -1,6 +1,7 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, useScroll, useTransform, useSpring, useMotionValue, useMotionTemplate } from 'framer-motion';
-import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, Zap, Star, Smartphone, Activity, LayoutGrid, Layers, UserPlus, Wallet, Swords } from 'lucide-react';
+import { ShieldCheck, Lock, Cpu, ChevronRight, Trophy, Users, Brain, Dice5, Target, TrendingUp, Zap, Star, Smartphone, Activity, LayoutGrid, Layers, UserPlus, Wallet } from 'lucide-react';
 import { useLanguage } from '../services/i18n';
 
 interface LandingPageProps {
