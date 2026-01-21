@@ -44,7 +44,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -588,7 +591,7 @@ export default function App() {
 
                 {/* Other Views */}
                 {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
-                {currentView === 'profile' && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
+                {(currentView === 'profile' || currentView === 'settings') && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
                 {currentView === 'admin' && <AdminDashboard user={user} />}
                 {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
                 {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
