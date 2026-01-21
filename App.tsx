@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -43,11 +43,8 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -591,7 +588,7 @@ export default function App() {
 
                 {/* Other Views */}
                 {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
-                {currentView === 'profile' && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
+                {(currentView === 'profile' || currentView === 'settings') && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
                 {currentView === 'admin' && <AdminDashboard user={user} />}
                 {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
                 {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
