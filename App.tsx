@@ -45,11 +45,8 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  constructor(props: ErrorBoundaryProps) {
-    super(props);
-    this.state = { hasError: false };
-  }
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -139,7 +136,7 @@ const AppContent = () => {
     }
   }, [theme]);
 
-  // Update view ref whenever view changes (for the forum listener)
+  // Update view ref whenever view changes (for the forum listener) and handle scrolling
   useEffect(() => {
       viewRef.current = currentView;
       if (currentView === 'forum') {
@@ -245,8 +242,8 @@ const AppContent = () => {
 
   // 2. Automatic Fallback Logic
   useEffect(() => {
-      // If 8 seconds pass and not connected, auto-enable offline mode to prevent freezing
-      if (connectionTime >= 8 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+      // If 5 seconds pass and not connected, auto-enable offline mode to prevent freezing
+      if (connectionTime >= 5 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
           console.log("Connection timeout reached. Switching to Offline Mode.");
           setBypassConnection(true);
       }
@@ -496,11 +493,11 @@ const AppContent = () => {
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: '100%' }}
-                    transition={{ duration: 8, ease: "linear" }}
+                    transition={{ duration: 5, ease: "linear" }}
                     className="h-full bg-gold-500"
                   />
               </div>
-              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 8 - connectionTime)}s...</p>
+              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 5 - connectionTime)}s...</p>
               
               <button 
                 onClick={() => setBypassConnection(true)}
