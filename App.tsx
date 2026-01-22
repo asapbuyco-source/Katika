@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, ErrorInfo, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, ReactNode } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -55,7 +55,7 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     return { hasError: true };
   }
 
-  componentDidCatch(error: any, errorInfo: ErrorInfo) {
+  componentDidCatch(error: any, errorInfo: React.ErrorInfo) {
     console.error("Game Critical Error:", error, errorInfo);
   }
 
@@ -503,122 +503,13 @@ const AppContent = () => {
   }
 
   return (
-    <div className="min-h-screen bg-royal-950 text-slate-200 font-sans md:flex transition-colors duration-500">
-      {user && ['dashboard', 'lobby', 'profile', 'finance', 'admin', 'forum', 'settings'].includes(currentView) && (
-        <Navigation 
-            currentView={currentView} 
-            setView={setView} 
-            user={user} 
-            hasUnreadMessages={unreadForum} 
-        />
-      )}
-
-      {/* Connection Status Indicators */}
-      {user && (!isConnected && bypassConnection && !socketGame) && currentView !== 'landing' && currentView !== 'auth' && (
-          <div className="fixed top-4 right-4 z-50 animate-pulse">
-              <div className="bg-red-500/20 border border-red-500/50 backdrop-blur-md text-red-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                  <WifiOff size={12} /> Offline Mode
-              </div>
-          </div>
-      )}
-
-      {user && (!isConnected && !bypassConnection && hasConnectedOnce) && (
-          <div className="fixed top-4 right-4 z-50">
-              <div className="bg-yellow-500/20 border border-yellow-500/50 backdrop-blur-md text-yellow-400 px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-2 shadow-lg">
-                  <RefreshCw size={12} className="animate-spin" /> Reconnecting...
-              </div>
-          </div>
-      )}
-
-      <AnimatePresence>
-          {incomingChallenge && (
-              <ChallengeRequestModal 
-                  challenge={incomingChallenge}
-                  onAccept={handleAcceptChallenge}
-                  onDecline={() => setIncomingChallenge(null)}
-              />
-          )}
-      </AnimatePresence>
-
-      {gameResult && (
-          <GameResultOverlay 
-             result={gameResult.result} 
-             amount={gameResult.amount} 
-             onContinue={finalizeGameEnd} 
-              />
-      )}
-
-      <main id="main-scroll-container" className="flex-1 relative overflow-y-auto h-screen scrollbar-hide">
-        {currentView !== 'landing' && currentView !== 'auth' && currentView !== 'how-it-works' && (
-             <div className="fixed top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
-                <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 rounded-full blur-[120px]"></div>
-                <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-gold-600/10 rounded-full blur-[100px]"></div>
-            </div>
-        )}
-
-        {currentView === 'landing' && <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />}
-        {currentView === 'how-it-works' && <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />}
-        {currentView === 'auth' && <AuthScreen onAuthenticated={(guestUser?: User) => { if (guestUser) { setUser(guestUser); setView('dashboard'); } }} onNavigate={setView} />}
-        
-        {/* Public Pages accessed via Footer */}
-        {currentView === 'terms' && <TermsOfService onBack={() => setView('landing')} />}
-        {currentView === 'privacy' && <PrivacyPolicy onBack={() => setView('landing')} />}
-        {currentView === 'help-center' && <HelpCenter onBack={() => setView('landing')} />}
-        {currentView === 'report-bug' && <ReportBug onBack={() => setView('landing')} />}
-
-        {user && (
-            <>
-                {currentView === 'dashboard' && <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} />}
-                {currentView === 'lobby' && <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} />}
-                {currentView === 'matchmaking' && (
-                    <MatchmakingScreen 
-                        user={user} 
-                        gameType={matchmakingConfig?.gameType || 'Ludo'}
-                        stake={matchmakingConfig?.stake || 100}
-                        onMatchFound={() => {}} 
-                        onCancel={cancelMatchmaking}
-                        isSocketMode={true} 
-                    />
-                )}
-
-                {/* SOCKET GAME RENDERING - UNIVERSAL */}
-                {currentView === 'game' && socketGame ? (
-                     <GameErrorBoundary onReset={() => setView('lobby')}>
-                         {socketGame.gameType === 'Dice' && <DiceGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'TicTacToe' && <TicTacToeGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Checkers' && <CheckersGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Chess' && <ChessGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Cards' && <CardGame table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                         {socketGame.gameType === 'Ludo' && <GameRoom table={constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
-                     </GameErrorBoundary>
-                ) : (
-                    // Fallback to original Game Room (Local/Firebase Mode)
-                    currentView === 'game' && activeTable && (
-                        <GameErrorBoundary onReset={() => setView('lobby')}>
-                            {activeTable.gameType === 'Ludo' && <GameRoom table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'TicTacToe' && <TicTacToeGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Checkers' && <CheckersGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Chess' && <ChessGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Dice' && <DiceGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                            {activeTable.gameType === 'Cards' && <CardGame table={activeTable} user={user} onGameEnd={handleGameEnd} />}
-                        </GameErrorBoundary>
-                    )
-                )}
-
-                {/* Other Views */}
-                {currentView === 'finance' && <Finance user={user} onTopUp={() => {}} />}
-                {(currentView === 'profile' || currentView === 'settings') && <Profile user={user} onLogout={handleLogout} onUpdateProfile={() => {}} onNavigate={setView} />}
-                {currentView === 'admin' && <AdminDashboard user={user} />}
-                {currentView === 'help-center' && <HelpCenter onBack={() => setView('profile')} />}
-                {currentView === 'report-bug' && <ReportBug onBack={() => setView('profile')} />}
-                {currentView === 'terms' && <TermsOfService onBack={() => setView('profile')} />}
-                {currentView === 'forum' && <Forum user={user} />}
-            </>
-        )}
-      </main>
-    </div>
+    <LanguageProvider>
+      <ThemeProvider>
+        <AppContent />
+      </ThemeProvider>
+    </LanguageProvider>
   );
-};
+}
 
 export default function App() {
   return (
