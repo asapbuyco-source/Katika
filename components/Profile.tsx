@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
@@ -403,7 +402,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                >
                    {tab === 'overview' && t('recent_activity')}
                    {tab === 'history' && t('history')}
-                   {tab === 'settings' && t('settings' as any)}
+                   {tab === 'settings' && t('settings')}
                    {activeTab === tab && (
                        <motion.div 
                            layoutId="profileTab" 
