@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, Component, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -31,7 +31,7 @@ import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, Wifi, WifiOff, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
 import { ThemeProvider, useTheme } from '../services/theme';
 
@@ -46,7 +46,10 @@ interface ErrorBoundaryState {
 }
 
 class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -109,6 +112,7 @@ const AppContent = () => {
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
   const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   
   // Connection Handling
   const [bypassConnection, setBypassConnection] = useState(false);
@@ -154,7 +158,6 @@ const AppContent = () => {
 
   // 1. Initialize Socket Connection with Fallback Logic
   useEffect(() => {
-    // UPDATED SOCKET URL to the correct public endpoint
     const SOCKET_URL = "https://katika-production-a4a6.up.railway.app";
     
     // Timer to track connection duration
@@ -162,10 +165,13 @@ const AppContent = () => {
         setConnectionTime(prev => prev + 1);
     }, 1000);
 
+    console.log("Attempting socket connection to:", SOCKET_URL);
+
     const newSocket = io(SOCKET_URL, {
-        reconnectionAttempts: 3,
-        timeout: 5000, 
-        transports: ['websocket', 'polling']
+        reconnectionAttempts: 10,
+        timeout: 20000, 
+        transports: ['polling', 'websocket'], // Start with polling for max compatibility
+        autoConnect: true,
     });
 
     newSocket.on('connect', () => {
@@ -173,18 +179,18 @@ const AppContent = () => {
         setIsConnected(true);
         setHasConnectedOnce(true);
         setBypassConnection(false); // Auto-recover from offline mode
+        setConnectionError(null);
         clearInterval(timerInterval);
     });
 
-    newSocket.on('disconnect', () => {
+    newSocket.on('disconnect', (reason) => {
+        console.log("Disconnected:", reason);
         setIsConnected(false);
     });
 
     newSocket.on('connect_error', (err) => {
         console.warn("Socket Connection Error:", err.message);
-        // Immediate fallback to offline mode on connection error
-        // This prevents the user from being stuck on the loading screen
-        setBypassConnection(true);
+        setConnectionError(err.message);
     });
 
     newSocket.on('match_found', (gameState) => {
@@ -245,8 +251,9 @@ const AppContent = () => {
 
   // 2. Automatic Fallback Logic
   useEffect(() => {
-      // If 5 seconds pass and not connected, auto-enable offline mode to prevent freezing
-      if (connectionTime >= 5 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+      // If 20 seconds pass and not connected, auto-enable offline mode to prevent freezing
+      // Extended from 5s to 20s to handle Railway cold starts
+      if (connectionTime >= 20 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
           console.log("Connection timeout reached. Switching to Offline Mode.");
           setBypassConnection(true);
       }
@@ -488,26 +495,43 @@ const AppContent = () => {
               <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
               <p className="text-slate-400 max-w-md mb-8">
-                  {connectionTime > 3 ? "Waking up server..." : "Establishing secure connection..."}
+                  {connectionTime > 5 ? "Waking up server (cold start)..." : "Establishing secure connection..."}
                   <br/><span className="text-xs text-slate-600">({connectionTime}s)</span>
+                  {connectionError && (
+                      <span className="block text-red-400 text-xs mt-2 bg-red-900/20 p-1 rounded">
+                          {connectionError === 'xhr poll error' ? 'Network Error (Check Internet/CORS)' : connectionError}
+                      </span>
+                  )}
               </p>
               
-              <div className="w-64 h-2 bg-royal-800 rounded-full overflow-hidden mb-4">
+              <div className="w-64 h-2 bg-royal-800 rounded-full overflow-hidden mb-6">
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: '100%' }}
-                    transition={{ duration: 5, ease: "linear" }}
+                    transition={{ duration: 20, ease: "linear" }}
                     className="h-full bg-gold-500"
                   />
               </div>
-              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 5 - connectionTime)}s...</p>
               
-              <button 
-                onClick={() => setBypassConnection(true)}
-                className="mt-8 text-white/50 hover:text-white text-sm underline"
-              >
-                  Skip & Play Offline Now
-              </button>
+              <div className="flex flex-col gap-3">
+                  <button 
+                    onClick={() => { setConnectionError(null); socket?.connect(); }}
+                    className="px-6 py-2 bg-royal-800 border border-white/10 rounded-lg text-white font-bold hover:bg-royal-700 transition-colors flex items-center justify-center gap-2"
+                  >
+                      <RefreshCw size={16} /> Retry Connection
+                  </button>
+                  
+                  <p className="text-xs text-slate-500">
+                      Entering Offline Mode in {Math.max(0, 20 - connectionTime)}s...
+                  </p>
+                  
+                  <button 
+                    onClick={() => setBypassConnection(true)}
+                    className="text-white/50 hover:text-white text-sm underline mt-2"
+                  >
+                      Skip & Play Offline Now
+                  </button>
+              </div>
           </div>
       );
   }
