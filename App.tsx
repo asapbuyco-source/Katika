@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -144,6 +144,14 @@ const AppContent = () => {
       viewRef.current = currentView;
       if (currentView === 'forum') {
           setUnreadForum(false);
+      }
+      
+      // Auto-scroll to top when view changes
+      const mainContainer = document.getElementById('main-scroll-container');
+      if (mainContainer) {
+          mainContainer.scrollTo({ top: 0, behavior: 'instant' });
+      } else {
+          window.scrollTo(0, 0);
       }
   }, [currentView]);
 
