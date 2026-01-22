@@ -87,7 +87,7 @@ const translations = {
     support: "Support",
     help_center: "Help Center",
     report_bug: "Report a Bug",
-    settings: "Settings", // Added missing key
+    settings: "Settings",
     // Finance
     manage_funds: "Manage your funds securely with Mobile Money.",
     deposit: "Deposit",
@@ -195,7 +195,7 @@ const translations = {
     support: "Support",
     help_center: "Centre d'aide",
     report_bug: "Signaler un bug",
-    settings: "Paramètres", // Added missing key
+    settings: "Paramètres",
     // Finance
     manage_funds: "Gérez vos fonds en toute sécurité avec Mobile Money.",
     deposit: "Dépôt",

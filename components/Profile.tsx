@@ -403,7 +403,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                >
                    {tab === 'overview' && t('recent_activity')}
                    {tab === 'history' && t('history')}
-                   {tab === 'settings' && t('settings')}
+                   {tab === 'settings' && t('settings' as any)}
                    {activeTab === tab && (
                        <motion.div 
                            layoutId="profileTab" 

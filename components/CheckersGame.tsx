@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, RefreshCw, AlertCircle, ShieldCheck, Shield, AlertTriangle, Clock, Play, User, Cpu } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ArrowLeft, Crown, Clock, AlertTriangle, Play } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -19,7 +19,6 @@ interface CheckersGameProps {
 interface Piece {
   id: string;
   player: 'me' | 'opponent';
-  owner?: string; // Real User ID
   isKing: boolean;
   r: number;
   c: number;
@@ -56,7 +55,7 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, i
     <div 
        onClick={(e) => { e.stopPropagation(); if (piece && isMe) onPieceClick(piece); if (validMove) onMoveClick(validMove); }}
        className={`relative w-full h-full flex items-center justify-center ${isDark ? 'bg-royal-900/60' : 'bg-white/5'} ${isClickable ? 'cursor-pointer' : ''}`}
-       style={{ transform: rotate ? 'rotate(180deg)' : 'none' }} // Rotate cell content back upright if board is rotated
+       style={{ transform: rotate ? 'rotate(180deg)' : 'none' }} 
     >
         {isDark && <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />}
         {(isLastFrom || isLastTo) && <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />}
@@ -121,23 +120,23 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   // --- INIT & SYNC ---
   useEffect(() => {
     if (isP2P && socketGame) {
-        if (socketGame.pieces) {
+        if (socketGame.gameState && socketGame.gameState.pieces) {
             // Map server pieces (with owner IDs) to 'me'/'opponent'
-            const mappedPieces = socketGame.pieces.map((p: any) => ({
+            const mappedPieces = socketGame.gameState.pieces.map((p: any) => ({
                 ...p,
                 player: p.owner === user.id ? 'me' : 'opponent'
             }));
             setPieces(mappedPieces);
             updateCapturedCounts(mappedPieces);
         }
-        if (socketGame.turn) {
-            setTurn(socketGame.turn === user.id ? 'me' : 'opponent');
+        if (socketGame.gameState && socketGame.gameState.turn) {
+            setTurn(socketGame.gameState.turn === user.id ? 'me' : 'opponent');
         }
-        if (socketGame.timers) {
+        if (socketGame.gameState && socketGame.gameState.timers) {
             const oppId = socketGame.players.find((id: string) => id !== user.id);
             setTimeRemaining({
-                me: socketGame.timers[user.id] || 600,
-                opponent: socketGame.timers[oppId] || 600
+                me: socketGame.gameState.timers[user.id] || 600,
+                opponent: socketGame.gameState.timers[oppId] || 600
             });
         }
         if (socketGame.winner) {
@@ -229,7 +228,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     // If ANY jump is available on board, you must pick a piece that can jump
     const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
     if (hasJump && !canThisPieceJump) {
-        // Visual shake or error?
         playSFX('error'); 
         return; 
     }
@@ -248,9 +246,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
   const handleMoveClick = useCallback((move: Move) => {
       if (!selectedPieceId || isGameOver) return;
-      
       executeMove(move);
-
   }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir, timeRemaining]);
 
   const executeMove = (move: Move) => {
@@ -299,7 +295,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       let winner = null;
       if (oppPieces.length === 0 || oppMoves.length === 0) {
           // If opponent can't move or has no pieces, current player wins
-          winner = turn === 'me' ? user.id : 'bot'; // Simplification
+          winner = turn === 'me' ? user.id : 'bot'; 
           setIsGameOver(true);
           onGameEnd(winner === user.id ? 'win' : 'loss');
       }
@@ -366,16 +362,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           // Center control
           if (move.c >= 2 && move.c <= 5 && move.r >= 2 && move.r <= 5) score += 10;
 
-          // Safety (don't move into capture - Simplified)
-          // ... (advanced)
-
           if (score > bestScore) {
               bestScore = score;
               bestMove = move;
           }
       });
 
-      // 3. Execute
       executeMove(bestMove);
   };
 
@@ -387,12 +379,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       const myPieces = currentPieces.filter(p => p.player === player);
       const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
 
+      const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
+
       toCheck.forEach(p => {
           // 'me' moves in forwardDir (-1 usually), 'opponent' moves in -forwardDir
           const moveDir = p.player === 'me' ? forwardDir : -forwardDir;
           const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[moveDir, -1], [moveDir, 1]];
-          
-          const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
           
           // 1. Check Jumps
           dirs.forEach(([dr, dc]) => {
@@ -407,7 +399,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
              }
           });
           
-          // 2. Check Simple Moves (Only if NO jumps found globally later)
+          // 2. Check Simple Moves
           dirs.forEach(([dr, dc]) => {
              const tr = p.r + dr, tc = p.c + dc;
              if (isValidPos(tr, tc) && !pieceMap.has(`${tr},${tc}`)) {
@@ -419,16 +411,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       // Enforce Mandatory Jumps
       const jumps = allMoves.filter(m => m.isJump);
       const finalMoves = jumps.length > 0 ? jumps : allMoves;
-      
-      // If specific ID was requested but it has no jumps, and there ARE jumps globally (from other pieces),
-      // then this piece shouldn't move (unless it's a multi-jump scenario which is handled by caller).
-      // However, caller `handlePieceClick` checks `hasJump` to enforce selection.
-      
-      // We need to know if ANY jump exists for the player to enforce the rule
-      const allPlayerMovesRaw = !specificId ? allMoves : []; // If we checked all, we know. If specific, we don't know global state.
-      
-      // If we are checking specific ID, we might need to know if OTHER pieces can jump. 
-      // But for recursion performance, we rely on the caller passing null first to get global `hasJump`.
       
       return { moves: finalMoves, hasJump: jumps.length > 0 };
   };
@@ -516,7 +498,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             onPieceClick={handlePieceClick} 
                             onMoveClick={handleMoveClick} 
                             isMeTurn={turn === 'me'}
-                            rotate={forwardDir === 1} // Pass rotation prop to counter-rotate cell content
+                            rotate={forwardDir === 1} 
                           />;
                }))}
            </div>

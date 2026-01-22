@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, Component, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -55,7 +55,7 @@ class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundar
     return { hasError: true };
   }
 
-  componentDidCatch(error: any, errorInfo: React.ErrorInfo) {
+  componentDidCatch(error: any, errorInfo: ErrorInfo) {
     console.error("Game Critical Error:", error, errorInfo);
   }
 
@@ -149,7 +149,8 @@ const AppContent = () => {
 
   // 1. Initialize Socket Connection with Fallback Logic
   useEffect(() => {
-    const SOCKET_URL = "https://katika-production.up.railway.app";
+    // UPDATED SOCKET URL to the correct public endpoint
+    const SOCKET_URL = "https://katika-production-a4a6.up.railway.app";
     
     // Timer to track connection duration
     const timerInterval = setInterval(() => {
@@ -157,8 +158,8 @@ const AppContent = () => {
     }, 1000);
 
     const newSocket = io(SOCKET_URL, {
-        reconnectionAttempts: 5,
-        timeout: 10000, 
+        reconnectionAttempts: 3,
+        timeout: 5000, 
         transports: ['websocket', 'polling']
     });
 
@@ -236,8 +237,8 @@ const AppContent = () => {
 
   // 2. Automatic Fallback Logic
   useEffect(() => {
-      // If 15 seconds pass and not connected, auto-enable offline mode
-      if (connectionTime >= 15 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+      // If 8 seconds pass and not connected, auto-enable offline mode to prevent freezing
+      if (connectionTime >= 8 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
           console.log("Connection timeout reached. Switching to Offline Mode.");
           setBypassConnection(true);
       }
@@ -480,17 +481,18 @@ const AppContent = () => {
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
               <p className="text-slate-400 max-w-md mb-8">
                   {connectionTime > 3 ? "Waking up server..." : "Establishing secure connection..."}
+                  <br/><span className="text-xs text-slate-600">({connectionTime}s)</span>
               </p>
               
               <div className="w-64 h-2 bg-royal-800 rounded-full overflow-hidden mb-4">
                   <motion.div 
                     initial={{ width: 0 }}
                     animate={{ width: '100%' }}
-                    transition={{ duration: 7, ease: "linear" }}
+                    transition={{ duration: 8, ease: "linear" }}
                     className="h-full bg-gold-500"
                   />
               </div>
-              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 15 - connectionTime)}s...</p>
+              <p className="text-xs text-slate-500">Entering Offline Mode in {Math.max(0, 8 - connectionTime)}s...</p>
               
               <button 
                 onClick={() => setBypassConnection(true)}
@@ -503,13 +505,203 @@ const AppContent = () => {
   }
 
   return (
-    <LanguageProvider>
-      <ThemeProvider>
-        <AppContent />
-      </ThemeProvider>
-    </LanguageProvider>
+    <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
+      {user && currentView !== 'game' && currentView !== 'matchmaking' && (
+        <Navigation 
+            currentView={currentView} 
+            setView={setView} 
+            user={user} 
+            hasUnreadMessages={unreadForum}
+        />
+      )}
+      
+      <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
+        <AnimatePresence mode="wait">
+          {currentView === 'landing' && (
+            <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />
+            </motion.div>
+          )}
+
+          {currentView === 'auth' && (
+            <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} />
+            </motion.div>
+          )}
+
+          {currentView === 'dashboard' && user && (
+            <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Dashboard 
+                  user={user} 
+                  setView={setView} 
+                  onTopUp={() => setView('finance')} 
+                  onQuickMatch={handleDashboardQuickMatch}
+              />
+            </motion.div>
+          )}
+
+          {currentView === 'lobby' && user && (
+            <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Lobby 
+                  user={user} 
+                  setView={setView} 
+                  onQuickMatch={startMatchmaking} 
+                  initialGameId={preSelectedGame}
+                  onClearInitialGame={() => setPreSelectedGame(null)}
+              />
+            </motion.div>
+          )}
+
+          {currentView === 'matchmaking' && matchmakingConfig && user && (
+            <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <MatchmakingScreen
+                user={user}
+                gameType={matchmakingConfig.gameType}
+                stake={matchmakingConfig.stake}
+                onMatchFound={handleMatchFound}
+                onCancel={cancelMatchmaking}
+                isSocketMode={matchmakingConfig.stake !== -1} // Only use socket UI if not bot match
+              />
+            </motion.div>
+          )}
+
+          {currentView === 'game' && user && (activeTable || socketGame) && (
+            <motion.div key="game" className="h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <GameErrorBoundary onReset={finalizeGameEnd}>
+                    {/* Render appropriate game based on Type */}
+                    {(activeTable?.gameType === 'Checkers' || socketGame?.gameType === 'Checkers') ? (
+                        <CheckersGame 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd} 
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    ) : (activeTable?.gameType === 'Dice' || socketGame?.gameType === 'Dice') ? (
+                        <DiceGame 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd}
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    ) : (activeTable?.gameType === 'TicTacToe' || socketGame?.gameType === 'TicTacToe') ? (
+                        <TicTacToeGame 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd}
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    ) : (activeTable?.gameType === 'Chess' || socketGame?.gameType === 'Chess') ? (
+                        <ChessGame 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd}
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    ) : (activeTable?.gameType === 'Cards' || socketGame?.gameType === 'Cards') ? (
+                        <CardGame 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd}
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    ) : (
+                        <GameRoom 
+                            table={activeTable || constructTableFromSocket(socketGame)} 
+                            user={user} 
+                            onGameEnd={handleGameEnd} 
+                            socket={socket}
+                            socketGame={socketGame}
+                        />
+                    )}
+                </GameErrorBoundary>
+            </motion.div>
+          )}
+
+          {currentView === 'profile' && user && (
+            <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({...user, ...u})} onNavigate={setView} />
+            </motion.div>
+          )}
+
+          {currentView === 'finance' && user && (
+            <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Finance user={user} onTopUp={() => {}} />
+            </motion.div>
+          )}
+
+          {currentView === 'how-it-works' && (
+            <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />
+            </motion.div>
+          )}
+
+          {currentView === 'admin' && user && user.isAdmin && (
+            <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <AdminDashboard user={user} />
+            </motion.div>
+          )}
+
+          {currentView === 'help-center' && (
+            <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} />
+            </motion.div>
+          )}
+
+          {currentView === 'report-bug' && (
+            <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ReportBug onBack={() => setView(user ? 'profile' : 'landing')} />
+            </motion.div>
+          )}
+
+          {currentView === 'terms' && (
+            <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} />
+            </motion.div>
+          )}
+
+          {currentView === 'privacy' && (
+            <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} />
+            </motion.div>
+          )}
+
+          {currentView === 'forum' && user && (
+            <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <Forum user={user} />
+            </motion.div>
+          )}
+
+        </AnimatePresence>
+      </main>
+
+      {/* GLOBAL OVERLAYS */}
+      <AnimatePresence>
+          {gameResult && (
+              <GameResultOverlay 
+                  result={gameResult.result} 
+                  amount={gameResult.amount}
+                  onContinue={finalizeGameEnd}
+              />
+          )}
+          {incomingChallenge && (
+              <ChallengeRequestModal 
+                  challenge={incomingChallenge}
+                  onAccept={handleAcceptChallenge}
+                  onDecline={async () => {
+                      if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined');
+                      setIncomingChallenge(null);
+                  }}
+              />
+          )}
+      </AnimatePresence>
+    </div>
   );
-}
+};
 
 export default function App() {
   return (
