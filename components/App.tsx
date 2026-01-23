@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -243,7 +243,14 @@ const AppContent = () => {
     });
 
     newSocket.on('waiting_for_opponent', () => setIsWaitingForSocketMatch(true));
-    newSocket.on('game_update', (gameState) => setSocketGame(gameState));
+    newSocket.on('game_update', (gameState) => {
+        // Ensure robustness: If roomId missing in update but present in previous state, preserve it
+        setSocketGame((prev: any) => ({
+            ...(prev || {}),
+            ...gameState,
+            roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined)
+        }));
+    });
 
     newSocket.on('opponent_disconnected', () => {
         setOpponentDisconnected(true);

@@ -310,6 +310,7 @@ io.on('connection', (socket) => {
             
             io.to(roomId).emit('game_update', {
                 ...room,
+                roomId: roomId, // FIX: Ensure roomId is sent
                 gameState: room.gameState,
                 diceRolled: true,
                 diceValue: roll1 + roll2 
@@ -326,7 +327,7 @@ io.on('connection', (socket) => {
                     else if (total2 > total1) room.gameState.scores[p2]++;
 
                     room.gameState.roundState = 'scored';
-                    io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
+                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
 
                     setTimeout(() => {
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
@@ -337,14 +338,14 @@ io.on('connection', (socket) => {
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
                             room.turn = room.gameState.currentRound % 2 !== 0 ? p1 : p2;
-                            io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
+                            io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                         }
                     }, 3000);
 
                 }, 2000);
             } else {
                 room.turn = room.players.find(id => id !== userId);
-                io.to(roomId).emit('game_update', { ...room });
+                io.to(roomId).emit('game_update', { ...room, roomId });
             }
         }
 
@@ -381,15 +382,15 @@ io.on('connection', (socket) => {
                        endGame(roomId, winner, 'Line Complete');
                        return;
                    } else if (!board.includes(null)) {
-                       io.to(roomId).emit('game_update', { ...room, status: 'draw' });
+                       io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
                        setTimeout(() => {
                            room.gameState.board = Array(9).fill(null);
-                           io.to(roomId).emit('game_update', { ...room });
+                           io.to(roomId).emit('game_update', { ...room, roomId });
                        }, 3000);
                    }
                }
             }
-            io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
+            io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
         }
 
         // --- LUDO ---
@@ -399,7 +400,7 @@ io.on('connection', (socket) => {
                 const diceVal = Math.ceil(Math.random() * 6);
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
-                io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
+                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
             }
             else if (action.type === 'MOVE_PIECE') {
                 if (room.turn !== userId) return;
@@ -408,13 +409,13 @@ io.on('connection', (socket) => {
                 if (!action.bonusTurn) {
                     room.turn = room.players.find(id => id !== userId);
                 }
-                io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
+                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
             }
         }
 
         // --- CARDS ---
         else if (room.gameType === 'Cards') {
-            io.to(roomId).emit('game_update', { ...room }); 
+            io.to(roomId).emit('game_update', { ...room, roomId }); 
         }
 
         // --- CHAT ---
@@ -428,7 +429,7 @@ io.on('connection', (socket) => {
             if (!room.chat) room.chat = [];
             room.chat.push(msg);
             if (room.chat.length > 50) room.chat.shift();
-            io.to(roomId).emit('game_update', { ...room, chat: room.chat });
+            io.to(roomId).emit('game_update', { ...room, roomId, chat: room.chat });
         }
 
         // --- TIMEOUT CLAIM ---

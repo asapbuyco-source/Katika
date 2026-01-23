@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge } from './types';
 import { Dashboard } from './components/Dashboard';
 import { Lobby } from './components/Lobby';
@@ -243,7 +243,14 @@ const AppContent = () => {
     });
 
     newSocket.on('waiting_for_opponent', () => setIsWaitingForSocketMatch(true));
-    newSocket.on('game_update', (gameState) => setSocketGame(gameState));
+    newSocket.on('game_update', (gameState) => {
+        // Ensure robustness: If roomId missing in update but present in previous state, preserve it
+        setSocketGame((prev: any) => ({
+            ...(prev || {}),
+            ...gameState,
+            roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined)
+        }));
+    });
 
     newSocket.on('opponent_disconnected', () => {
         setOpponentDisconnected(true);
@@ -581,21 +588,22 @@ const AppContent = () => {
             else setView('landing');
             window.location.reload();
         }}>
-            <AnimatePresence mode="wait">
+            {/* Removed mode="wait" to fix navigation stuck issues from Profile */}
+            <AnimatePresence>
             {currentView === 'landing' && (
-                <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'auth' && (
-                <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'dashboard' && user && (
-                <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Dashboard 
                     user={user} 
                     setView={setView} 
@@ -606,7 +614,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'lobby' && user && (
-                <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Lobby 
                     user={user} 
                     setView={setView} 
@@ -618,7 +626,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'matchmaking' && matchmakingConfig && user && (
-                <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <MatchmakingScreen
                     user={user}
                     gameType={matchmakingConfig.gameType}
@@ -631,7 +639,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'game' && user && (activeTable || socketGame) && (
-                <motion.div key="game" className="h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
                     {/* Game-specific rendering */}
                     {(activeTable?.gameType === 'Checkers' || socketGame?.gameType === 'Checkers') ? (
                         <CheckersGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
@@ -650,55 +658,55 @@ const AppContent = () => {
             )}
 
             {currentView === 'profile' && user && (
-                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="w-full min-h-full">
                 <Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({...user, ...u})} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'finance' && user && (
-                <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Finance user={user} onTopUp={() => {}} />
                 </motion.div>
             )}
 
             {currentView === 'how-it-works' && (
-                <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />
                 </motion.div>
             )}
 
             {currentView === 'admin' && user && user.isAdmin && (
-                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <AdminDashboard user={user} />
                 </motion.div>
             )}
 
             {currentView === 'help-center' && (
-                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'report-bug' && (
-                <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <ReportBug onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'terms' && (
-                <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'privacy' && (
-                <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'forum' && user && (
-                <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Forum user={user} />
                 </motion.div>
             )}
