@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Dice5, Crown } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -7,6 +6,8 @@ import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+
+// ... (Imports and interfaces unchanged)
 
 interface GameRoomProps {
   table: Table;
@@ -20,8 +21,7 @@ type PlayerColor = 'Red' | 'Yellow';
 interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
 
 // COORDINATE MAPPING FOR LUDO BOARD (Simplified 15x15 grid concept flattened to % coords)
-// Path: 0 is start (Red), moves clockwise.
-// This is a simplified path map for visual representation.
+// ... (Coordinate logic unchanged)
 const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) => {
     // Base Positions (Home)
     if (step === -1) {
@@ -105,16 +105,23 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   // --- SYNC ---
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.pieces) setPieces(socketGame.pieces);
+          if (socketGame.gameState && socketGame.gameState.pieces) setPieces(socketGame.gameState.pieces);
+          if (socketGame.gameState && socketGame.gameState.diceValue) setDiceValue(socketGame.gameState.diceValue);
+          if (socketGame.gameState) setDiceRolled(socketGame.gameState.diceRolled);
           if (socketGame.turn) setCurrentTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Yellow');
-          if (socketGame.diceValue) setDiceValue(socketGame.diceValue);
-          setDiceRolled(socketGame.diceRolled);
           
           if (socketGame.winner) {
               onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
           }
       }
   }, [socketGame, user.id, isP2P]);
+
+  const handleQuit = () => {
+      if (isP2P && socket) {
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+      }
+      onGameEnd('quit');
+  };
 
   const handleRoll = () => {
       if (currentTurn !== myColor || diceRolled) return;
@@ -171,7 +178,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
         {/* Simple Ludo UI */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
-            <button onClick={() => onGameEnd('quit')} className="flex items-center gap-2 text-slate-400 hover:text-white">
+            <button onClick={handleQuit} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
             </button>
             <div className="flex flex-col items-center">

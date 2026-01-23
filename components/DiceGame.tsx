@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Trophy, Shield, Box, User, Cpu, Wifi, Clock, Zap, Hand, XCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
@@ -121,6 +120,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
   };
 
+  const handleQuit = () => {
+      if (isP2P && socket) {
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+      }
+      onGameEnd('quit');
+  };
+
   // Sync with Socket State
   useEffect(() => {
       if (isP2P && socketGame) {
@@ -162,13 +168,18 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                   }
               }
           } else {
-              if (phase === 'scored' || (phase === 'rolling' && amITurn)) {
-                  // Reset if server moved to next round
+              // --- STATE TRANSITION FIX ---
+              // If we were rolling and now turn changed, go to waiting
+              if (phase === 'rolling' && !amITurn) {
+                  setPhase('waiting');
+              }
+              // If we were scored and now waiting (new round started)
+              if (phase === 'scored' && socketGame.roundState === 'waiting') {
                   setPhase('waiting');
                   setRoundWinner(null);
                   addLog(`Round ${socketGame.currentRound} Started`);
-              } else if (phase !== 'rolling') {
-                  setPhase('waiting');
+                  // Reset timer visual
+                  setTimeLeft(TURN_TIME_LIMIT);
               }
           }
           prevRoundState.current = socketGame.roundState;
@@ -492,7 +503,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                   />
                   <motion.div 
                     initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="relative bg-[#1a1a1a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
                   >
                       <h2 className="text-xl font-black text-white mb-2 uppercase italic text-center">Forfeit?</h2>
                       <p className="text-sm text-slate-400 text-center mb-6">
@@ -500,7 +511,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                       </p>
                       <div className="flex gap-3">
                           <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
-                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Quit</button>
+                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Quit</button>
                       </div>
                   </motion.div>
               </div>

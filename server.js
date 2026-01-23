@@ -200,6 +200,15 @@ io.on('connection', (socket) => {
         const userId = socketUsers.get(socket.id);
         if (!userId || !room.players.includes(userId)) return;
 
+        // --- FORFEIT / QUIT (Generic) ---
+        if (action.type === 'FORFEIT') {
+            room.status = 'completed';
+            const winner = room.players.find(id => id !== userId);
+            room.winner = winner;
+            io.to(roomId).emit('game_over', { winner });
+            return;
+        }
+
         // --- DICE LOGIC (Server Authoritative) ---
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
             if (room.turn !== userId) return; // Not your turn
@@ -328,7 +337,6 @@ io.on('connection', (socket) => {
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
                 
-                // Auto-pass if no moves possible? (Simplified: Client handles logic, server just broadcasts)
                 io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
             }
             else if (action.type === 'MOVE_PIECE') {
@@ -347,7 +355,7 @@ io.on('connection', (socket) => {
         // --- CARD GAME (Kmer Cards) ---
         else if (room.gameType === 'Cards') {
             // Simplified Relay
-            io.to(roomId).emit('game_update', { ...room }); // Client sends full state usually in this arch
+            io.to(roomId).emit('game_update', { ...room }); 
         }
 
         // --- CHAT ---

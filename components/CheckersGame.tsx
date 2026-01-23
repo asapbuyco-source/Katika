@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { ArrowLeft, Crown, Clock, AlertTriangle, Play } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
@@ -212,6 +211,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
           return () => clearTimeout(timeout);
       }
   }, [isBotGame, turn, isGameOver, pieces, mustJumpFrom]);
+
+  const handleQuit = () => {
+      if (isP2P && socket) {
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+      }
+      onGameEnd('quit');
+  };
 
   // --- ACTIONS ---
   const handlePieceClick = useCallback((p: Piece) => {
@@ -431,7 +437,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                       <p className="text-sm text-slate-400 text-center mb-6">You will lose your entire stake.</p>
                       <div className="flex gap-3">
                           <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
-                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Quit</button>
+                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Quit</button>
                       </div>
                   </motion.div>
               </div>
