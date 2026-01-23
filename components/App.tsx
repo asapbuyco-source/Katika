@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -155,7 +155,8 @@ const AppContent = () => {
 
   // 1. Initialize Socket Connection with Fallback Logic
   useEffect(() => {
-    const SOCKET_URL = "https://katika-production-a4a6.up.railway.app";
+    // CORRECT URL FROM SCREENSHOTS
+    const SOCKET_URL = "https://katika-production.up.railway.app";
     
     // Timer to track connection duration
     const timerInterval = setInterval(() => {

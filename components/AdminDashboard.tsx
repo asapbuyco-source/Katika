@@ -1,9 +1,8 @@
-
 import React, { useState, useEffect } from 'react';
 import { User } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
@@ -20,8 +19,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   // System State
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [activeMatchesCount, setActiveMatchesCount] = useState(0); 
-  const [networkTraffic] = useState(Array.from({ length: 24 }, () => Math.random() * 60 + 20));
+  const [networkTraffic, setNetworkTraffic] = useState<number[]>(Array(24).fill(0));
   const [totalSystemFunds, setTotalSystemFunds] = useState(0);
+  const [bannedCount, setBannedCount] = useState(0);
 
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
@@ -42,6 +42,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               const totalFunds = users.reduce((acc, u) => acc + (u.balance || 0), 0);
               setTotalSystemFunds(totalFunds);
 
+              // Count Banned Users
+              const banned = users.filter(u => u.isBanned).length;
+              setBannedCount(banned);
+
               // 3. Fetch Active Games
               const gamesCount = await getActiveGamesCount();
               setActiveMatchesCount(gamesCount);
@@ -49,6 +53,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               // 4. Fetch Logs
               const recentLogs = await getSystemLogs();
               setLogs(recentLogs);
+
+              // 5. Fetch Game Activity (Replaces random traffic)
+              const activityStats = await getGameActivityStats();
+              setNetworkTraffic(activityStats);
 
           } catch (e) {
               console.error("Admin data fetch error", e);
@@ -95,7 +103,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       { label: 'Total User Funds', value: formatNumber(totalSystemFunds), unit: 'FCFA', icon: DollarSign, color: 'text-green-400', bg: 'bg-green-500/10' },
       { label: 'Registered Users', value: usersList.length.toString(), unit: 'Total', icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
       { label: 'Active Matches', value: maintenanceMode ? '0' : activeMatchesCount.toString(), unit: 'Live', icon: Activity, color: 'text-gold-400', bg: 'bg-gold-500/10' },
-      { label: 'Banned Users', value: '0', unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
+      { label: 'Banned Users', value: bannedCount.toString(), unit: 'Restricted', icon: Shield, color: 'text-red-400', bg: 'bg-red-500/10' },
   ];
 
   return (
@@ -163,21 +171,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                     <div className="md:col-span-2 glass-panel p-6 rounded-2xl border border-white/5">
                         <div className="flex justify-between items-center mb-6">
                             <h3 className="text-lg font-bold text-white flex items-center gap-2">
-                                <Activity size={18} className="text-blue-400" /> Network Traffic
+                                <Activity size={18} className="text-blue-400" /> Game Activity (24h)
                             </h3>
                             {maintenanceMode && <span className="text-xs font-bold text-red-500 uppercase animate-pulse">Maintenance Active</span>}
                         </div>
                         <div className="h-64 flex items-end gap-2">
-                            {networkTraffic.map((h, i) => (
-                                <div key={i} className="flex-1 bg-royal-800 rounded-t-sm relative group overflow-hidden">
+                            {networkTraffic.map((h, i) => {
+                                // Scale height based on max value to fill chart, default to 1 if empty
+                                const max = Math.max(...networkTraffic, 1);
+                                const percentage = (h / max) * 100;
+                                
+                                return (
+                                <div key={i} className="flex-1 bg-royal-800 rounded-t-sm relative group overflow-hidden" title={`${h} games`}>
                                     <motion.div 
                                         initial={{ height: 0 }}
-                                        animate={{ height: maintenanceMode ? 0 : `${h}%` }}
-                                        transition={{ duration: 1, delay: i * 0.05 }}
+                                        animate={{ height: maintenanceMode ? 0 : `${Math.max(percentage, 5)}%` }} // Min 5% height for visibility
+                                        transition={{ duration: 1, delay: i * 0.02 }}
                                         className={`w-full transition-colors absolute bottom-0 left-0 right-0 rounded-t-sm ${maintenanceMode ? 'bg-slate-700' : 'bg-blue-500/50 hover:bg-blue-400'}`}
                                     />
                                 </div>
-                            ))}
+                            )})}
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs text-slate-500">
+                            <span>24h ago</span>
+                            <span>Now</span>
                         </div>
                     </div>
 
@@ -278,7 +295,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                          </td>
                                          <td className="p-4 text-right">
                                              <div className="flex items-center justify-end gap-2">
-                                                 <button className="p-2 rounded-lg transition-colors border bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20" title="Ban User">
+                                                 <button 
+                                                    className={`p-2 rounded-lg transition-colors border ${player.isBanned ? 'bg-red-500 text-white border-red-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'}`}
+                                                    title={player.isBanned ? "Unban User" : "Ban User"}
+                                                 >
                                                      <Ban size={16} />
                                                  </button>
                                                  <button className="p-2 bg-royal-800 hover:bg-white/10 text-blue-400 rounded-lg transition-colors border border-white/5" title="View Details">

@@ -132,7 +132,8 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
                 balance: isAdmin ? 1000000 : 1000, 
                 elo: 1000,
                 rankTier: 'Bronze',
-                isAdmin: isAdmin
+                isAdmin: isAdmin,
+                isBanned: false
             };
             await setDoc(userRef, newUser);
             return newUser;
@@ -149,7 +150,8 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
             balance: isAdmin ? 1000000 : 2500, // Slightly higher starting balance for demo
             elo: 1000,
             rankTier: 'Bronze',
-            isAdmin: isAdmin
+            isAdmin: isAdmin,
+            isBanned: false
         };
     }
 };
@@ -197,7 +199,8 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
 
 export const getAllUsers = async (): Promise<User[]> => {
     try {
-        const q = query(collection(db, "users"), limit(100));
+        // Remove limit for accurate admin stats
+        const q = query(collection(db, "users"));
         const snapshot = await getDocs(q);
         return snapshot.docs.map(doc => doc.data() as User);
     } catch (e) {
@@ -468,7 +471,8 @@ export const loginAsGuest = async (): Promise<User> => {
             balance: 2000,
             elo: 1000,
             rankTier: 'Bronze',
-            isAdmin: false
+            isAdmin: false,
+            isBanned: false
         };
     }
 };
@@ -574,6 +578,47 @@ export const getActiveGamesCount = async (): Promise<number> => {
         return snapshot.size;
     } catch (e) {
         return 0;
+    }
+};
+
+export const getGameActivityStats = async (): Promise<number[]> => {
+    try {
+        // Get games from last 24 hours
+        const yesterday = new Date();
+        yesterday.setHours(yesterday.getHours() - 24);
+        
+        const q = query(
+            collection(db, "games"),
+            where("createdAt", ">=", yesterday),
+            orderBy("createdAt", "asc")
+        );
+        
+        const snapshot = await getDocs(q);
+        
+        // Initialize buckets for 24 hours
+        // Bucket 0 = 24 hours ago, Bucket 23 = Now
+        const buckets = new Array(24).fill(0);
+        const now = new Date().getTime();
+        
+        snapshot.forEach(doc => {
+            const data = doc.data();
+            if (data.createdAt) {
+                // If using serverTimestamp, toDate() might not be available immediately on write, but for admin read it should be fine
+                const date = data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt);
+                
+                const diffMs = now - date.getTime();
+                const hourIndex = 23 - Math.floor(diffMs / (1000 * 60 * 60));
+                
+                if (hourIndex >= 0 && hourIndex < 24) {
+                    buckets[hourIndex]++;
+                }
+            }
+        });
+        
+        return buckets;
+    } catch (e) {
+        console.error("Failed to fetch activity stats", e);
+        return new Array(24).fill(0); // Fallback empty chart
     }
 };
 

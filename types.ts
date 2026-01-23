@@ -9,6 +9,7 @@ export interface User {
   elo: number;
   rankTier: 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
   isAdmin?: boolean;
+  isBanned?: boolean;
 }
 
 export interface PlayerProfile {
