@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -464,11 +464,33 @@ const AppContent = () => {
   };
 
   const finalizeGameEnd = () => {
+    if (socket && socketGame) {
+        socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
+    }
     setGameResult(null);
     setActiveTable(null);
     setSocketGame(null);
     setOpponentDisconnected(false);
+    setRematchStatus('idle');
     setView('dashboard');
+  };
+
+  const handleRematchRequest = () => {
+      if (!user || !socket || !socketGame) return;
+      
+      const stake = socketGame.stake || 0;
+      
+      // Balance Check
+      if (user.balance < stake) {
+          alert(`Insufficient funds for rematch. You need ${stake} FCFA.`);
+          return;
+      }
+
+      setRematchStatus('requested');
+      socket.emit('game_action', { 
+          roomId: socketGame.roomId, 
+          action: { type: 'REMATCH_REQUEST' } 
+      });
   };
 
   const handleLogout = async () => {
