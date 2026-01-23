@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Shield, AlertTriangle, X, Circle, RotateCcw, Clock, Cpu, RefreshCw, Settings, ChevronDown, Wifi } from 'lucide-react';
+import { ArrowLeft, Shield, AlertTriangle, X, Circle, RotateCcw, Clock, Cpu, RefreshCw, Settings, ChevronDown, Wifi, Loader2 } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -284,6 +284,11 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
             {/* VS Divider */}
             <div className="flex flex-col items-center">
                 <div className="text-2xl font-black text-slate-700 italic select-none">VS</div>
+                {isP2P && !isMyTurn && !winner && !isDraw && (
+                    <div className="mt-2 flex items-center gap-1 text-[10px] text-slate-500 bg-black/20 px-2 py-1 rounded-full">
+                        <Loader2 size={10} className="animate-spin" /> Waiting...
+                    </div>
+                )}
             </div>
 
             {/* Player 2 (Right) */}
@@ -313,7 +318,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                         key={idx}
                         whileTap={{ scale: 0.95 }}
                         onClick={() => handleCellClick(idx)}
-                        disabled={cell !== null || winner !== null || isDraw}
+                        disabled={cell !== null || winner !== null || isDraw || (isP2P && !isMyTurn)}
                         className={`
                             w-24 h-24 rounded-xl flex items-center justify-center text-5xl relative overflow-hidden shadow-inner border border-white/5 transition-colors
                             ${cell === null && isMyTurn && !winner && !isDraw ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'}

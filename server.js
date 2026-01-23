@@ -26,9 +26,46 @@ const rooms = new Map(); // roomId -> { players: [], gameState: {}, ... }
 const queues = new Map(); // gameType_stake -> [ { socketId, userProfile } ]
 const userSockets = new Map(); // userId -> socketId
 const socketUsers = new Map(); // socketId -> userId
+const disconnectTimers = new Map(); // userId -> TimeoutID
 
 // --- HELPER FUNCTIONS ---
 const generateRoomId = () => `room_${Math.random().toString(36).substr(2, 9)}`;
+
+const calculatePayouts = (stake) => {
+    const totalPot = stake * 2;
+    const platformFee = Math.floor(totalPot * 0.10); // 10% Fee
+    const winnings = totalPot - platformFee;
+    return { totalPot, platformFee, winnings };
+};
+
+const endGame = (roomId, winnerId, reason) => {
+    const room = rooms.get(roomId);
+    if (!room || room.status === 'completed') return;
+
+    room.status = 'completed';
+    room.winner = winnerId;
+
+    const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
+
+    io.to(roomId).emit('game_over', { 
+        winner: winnerId,
+        reason: reason,
+        financials: {
+            totalPot,
+            platformFee,
+            winnings
+        }
+    });
+
+    // Cleanup Room Data after a delay (Extended for Rematch window)
+    setTimeout(() => {
+        const r = rooms.get(roomId);
+        // Only delete if still completed (not rematched)
+        if (r && r.status === 'completed') {
+            rooms.delete(roomId);
+        }
+    }, 60000); 
+};
 
 const createInitialGameState = (gameType, p1, p2) => {
     const common = {
@@ -58,7 +95,7 @@ const createInitialGameState = (gameType, p1, p2) => {
         case 'Cards':
             return {
                 ...common,
-                board: null, // Client initializes
+                board: null,
                 fen: null,
                 pgn: null,
                 pieces: null
@@ -75,6 +112,13 @@ io.on('connection', (socket) => {
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', ({ stake, userProfile, gameType, privateRoomId }) => {
         const userId = userProfile.id;
+        
+        // Handle rapid re-connections
+        if (disconnectTimers.has(userId)) {
+            clearTimeout(disconnectTimers.get(userId));
+            disconnectTimers.delete(userId);
+        }
+
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
@@ -84,6 +128,10 @@ io.on('connection', (socket) => {
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId) && room.status === 'active') {
                 socket.join(roomId);
+                
+                // Notify others that I'm back
+                socket.to(roomId).emit('opponent_reconnected', { userId });
+
                 socket.emit('match_found', {
                     roomId,
                     players: room.players,
@@ -91,16 +139,12 @@ io.on('connection', (socket) => {
                     stake: room.stake,
                     gameState: room.gameState,
                     turn: room.turn,
-                    profiles: room.profiles
+                    profiles: room.profiles,
+                    chat: room.chat
                 });
+                console.log(`User ${userId} reconnected to ${roomId}`);
                 return;
             }
-        }
-
-        // Handle Private Room
-        if (privateRoomId) {
-            // Implementation simplified for P2P queue focus
-            // In a real scenario, we'd check if room exists or create it waiting for specific peer
         }
 
         // Public Matchmaking Queue
@@ -129,21 +173,22 @@ io.on('connection', (socket) => {
                     [opponentId]: opponent.userProfile,
                     [userId]: userProfile
                 },
-                turn: opponentId, // Challenger (first in queue) starts usually, or random
+                turn: opponentId, 
                 status: 'active',
                 gameState: createInitialGameState(gameType, opponentId, userId),
-                chat: []
+                chat: [],
+                rematchVotes: new Set()
             };
 
             rooms.set(roomId, room);
 
             // Notify Players
-            const oppSocket = userSockets.get(opponentId);
+            const oppSocketId = userSockets.get(opponentId);
             
             // Join Socket Rooms
             socket.join(roomId);
-            if (io.sockets.sockets.get(oppSocket)) {
-                io.sockets.sockets.get(oppSocket).join(roomId);
+            if (io.sockets.sockets.get(oppSocketId)) {
+                io.sockets.sockets.get(oppSocketId).join(roomId);
             }
 
             // Emit Start
@@ -167,15 +212,23 @@ io.on('connection', (socket) => {
         }
     });
 
-    // 2. REJOIN
+    // 2. REJOIN EXPLICIT
     socket.on('rejoin_game', ({ userProfile }) => {
         const userId = userProfile.id;
+        
+        if (disconnectTimers.has(userId)) {
+            clearTimeout(disconnectTimers.get(userId));
+            disconnectTimers.delete(userId);
+        }
+
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId) && room.status === 'active') {
                 socket.join(roomId);
+                socket.to(roomId).emit('opponent_reconnected', { userId });
+                
                 socket.emit('match_found', {
                     roomId,
                     players: room.players,
@@ -186,7 +239,6 @@ io.on('connection', (socket) => {
                     profiles: room.profiles,
                     chat: room.chat
                 });
-                console.log(`User ${userId} rejoined ${roomId}`);
                 break;
             }
         }
@@ -202,98 +254,114 @@ io.on('connection', (socket) => {
 
         // --- FORFEIT / QUIT (Generic) ---
         if (action.type === 'FORFEIT') {
-            room.status = 'completed';
             const winner = room.players.find(id => id !== userId);
-            room.winner = winner;
-            io.to(roomId).emit('game_over', { winner });
+            endGame(roomId, winner, 'Opponent Forfeited');
             return;
         }
 
-        // --- DICE LOGIC (Server Authoritative) ---
+        // --- REMATCH LOGIC ---
+        if (action.type === 'REMATCH_REQUEST') {
+            if (!room.rematchVotes) room.rematchVotes = new Set();
+            room.rematchVotes.add(userId);
+
+            // Notify other player
+            socket.to(roomId).emit('rematch_status', { requestorId: userId, status: 'requested' });
+
+            // If both players accepted
+            if (room.rematchVotes.size === room.players.length) {
+                console.log(`Rematch accepted in room ${roomId}`);
+                
+                // Reset Room State
+                room.status = 'active';
+                room.winner = null;
+                room.rematchVotes.clear();
+                room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
+                // Keep chat history
+                
+                // Emit Match Found (this resets the client UI)
+                io.to(roomId).emit('match_found', {
+                    roomId,
+                    players: room.players,
+                    gameType: room.gameType,
+                    stake: room.stake,
+                    gameState: room.gameState,
+                    turn: room.turn,
+                    profiles: room.profiles,
+                    chat: room.chat
+                });
+            }
+            return;
+        }
+
+        if (action.type === 'REMATCH_DECLINE') {
+            if (room.rematchVotes) room.rematchVotes.delete(userId);
+            socket.to(roomId).emit('rematch_status', { requestorId: userId, status: 'declined' });
+            return;
+        }
+
+        // --- DICE LOGIC ---
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
-            if (room.turn !== userId) return; // Not your turn
+            if (room.turn !== userId) return; 
 
             const roll1 = Math.ceil(Math.random() * 6);
             const roll2 = Math.ceil(Math.random() * 6);
             
             room.gameState.roundRolls[userId] = [roll1, roll2];
             
-            // Notify roll
             io.to(roomId).emit('game_update', {
                 ...room,
                 gameState: room.gameState,
                 diceRolled: true,
-                diceValue: roll1 + roll2 // For UI display if needed
+                diceValue: roll1 + roll2 
             });
 
-            // Check if both rolled
             const p1 = room.players[0];
             const p2 = room.players[1];
             if (room.gameState.roundRolls[p1] && room.gameState.roundRolls[p2]) {
-                // Round Complete
                 setTimeout(() => {
                     const total1 = room.gameState.roundRolls[p1][0] + room.gameState.roundRolls[p1][1];
                     const total2 = room.gameState.roundRolls[p2][0] + room.gameState.roundRolls[p2][1];
 
                     if (total1 > total2) room.gameState.scores[p1]++;
                     else if (total2 > total1) room.gameState.scores[p2]++;
-                    // Tie: no points
 
                     room.gameState.roundState = 'scored';
-                    io.to(roomId).emit('game_update', {
-                        ...room,
-                        gameState: room.gameState
-                    });
+                    io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
 
-                    // Next Round logic (after delay)
                     setTimeout(() => {
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
-                            // Game Over
-                            room.status = 'completed';
-                            room.winner = room.gameState.scores[p1] >= 3 ? p1 : p2;
-                            io.to(roomId).emit('game_over', { winner: room.winner });
+                            const winner = room.gameState.scores[p1] >= 3 ? p1 : p2;
+                            endGame(roomId, winner, 'Score Limit Reached');
                         } else {
-                            // Reset Round
                             room.gameState.currentRound++;
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
-                            room.turn = room.gameState.currentRound % 2 !== 0 ? p1 : p2; // Alternate starts
-                            
+                            room.turn = room.gameState.currentRound % 2 !== 0 ? p1 : p2;
                             io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
                         }
                     }, 3000);
 
-                }, 2000); // Wait for roll animation
+                }, 2000);
             } else {
-                // Switch turn to other player to roll
                 room.turn = room.players.find(id => id !== userId);
                 io.to(roomId).emit('game_update', { ...room });
             }
         }
 
-        // --- CHECKERS & CHESS & TICTACTOE (Relay + Validation) ---
+        // --- CHECKERS & CHESS & TICTACTOE ---
         else if (action.type === 'MOVE') {
             if (room.turn !== userId && room.gameType !== 'Cards') return;
 
-            // Relay State
             if (action.newState) {
-                // For Chess/Checkers where client calculates state
                 room.gameState = { ...room.gameState, ...action.newState };
-                
-                // Update Timers
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
-                
-                // Update Turn
                 if (action.newState.turn) room.turn = action.newState.turn;
                 
-                // Check Winner
                 if (action.newState.winner) {
-                    room.status = 'completed';
-                    room.winner = action.newState.winner;
-                    io.to(roomId).emit('game_over', { winner: room.winner });
+                    endGame(roomId, action.newState.winner, 'Checkmate / Win Condition');
+                    return;
                 }
             } 
-            // For TicTacToe (Index based)
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
                const board = room.gameState.board;
                if (board[action.index] === null) {
@@ -301,7 +369,6 @@ io.on('connection', (socket) => {
                    board[action.index] = symbol;
                    room.turn = room.players.find(id => id !== userId);
                    
-                   // Simple Win Check
                    const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
                    let winner = null;
                    for(let line of lines) {
@@ -311,13 +378,10 @@ io.on('connection', (socket) => {
                    }
                    
                    if (winner) {
-                       room.status = 'completed';
-                       room.winner = winner;
-                       io.to(roomId).emit('game_over', { winner });
+                       endGame(roomId, winner, 'Line Complete');
+                       return;
                    } else if (!board.includes(null)) {
-                       // Draw
                        io.to(roomId).emit('game_update', { ...room, status: 'draw' });
-                       // Reset board for next round (simplified)
                        setTimeout(() => {
                            room.gameState.board = Array(9).fill(null);
                            io.to(roomId).emit('game_update', { ...room });
@@ -325,26 +389,22 @@ io.on('connection', (socket) => {
                    }
                }
             }
-
             io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
         }
 
-        // --- LUDO LOGIC (Hybrid) ---
+        // --- LUDO ---
         else if (room.gameType === 'Ludo') {
             if (action.type === 'ROLL') {
                 if (room.turn !== userId) return;
                 const diceVal = Math.ceil(Math.random() * 6);
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
-                
                 io.to(roomId).emit('game_update', { ...room, gameState: room.gameState });
             }
             else if (action.type === 'MOVE_PIECE') {
                 if (room.turn !== userId) return;
                 room.gameState.pieces = action.pieces;
                 room.gameState.diceRolled = false;
-                
-                // Bonus turn if 6, else switch
                 if (!action.bonusTurn) {
                     room.turn = room.players.find(id => id !== userId);
                 }
@@ -352,9 +412,8 @@ io.on('connection', (socket) => {
             }
         }
 
-        // --- CARD GAME (Kmer Cards) ---
+        // --- CARDS ---
         else if (room.gameType === 'Cards') {
-            // Simplified Relay
             io.to(roomId).emit('game_update', { ...room }); 
         }
 
@@ -368,19 +427,14 @@ io.on('connection', (socket) => {
             };
             if (!room.chat) room.chat = [];
             room.chat.push(msg);
-            // Limit history
             if (room.chat.length > 50) room.chat.shift();
-            
             io.to(roomId).emit('game_update', { ...room, chat: room.chat });
         }
 
-        // --- TIMEOUT ---
+        // --- TIMEOUT CLAIM ---
         else if (action.type === 'TIMEOUT_CLAIM') {
-            // Trust client for now, or implement server timer
-            room.status = 'completed';
-            const winner = room.players.find(id => id !== userId); // The OTHER player wins
-            room.winner = winner;
-            io.to(roomId).emit('game_over', { winner });
+            const winner = room.players.find(id => id !== userId);
+            endGame(roomId, winner, 'Time Expired');
         }
     });
 
@@ -390,10 +444,39 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id} (${userId})`);
         
         if (userId) {
+            // Find active room
+            for (const [roomId, room] of rooms.entries()) {
+                if (room.players.includes(userId) && room.status === 'active') {
+                    // Start Disconnect Timer
+                    console.log(`Starting 60s forfeit timer for ${userId}`);
+                    
+                    // Notify other player immediately
+                    io.to(roomId).emit('opponent_disconnected', { 
+                        disconnectedUserId: userId,
+                        timeoutSeconds: 60 
+                    });
+
+                    const timerId = setTimeout(() => {
+                        // If timer completes, user forfeited
+                        console.log(`Time expired for ${userId}, forfeiting game.`);
+                        const winner = room.players.find(id => id !== userId);
+                        endGame(roomId, winner, 'Opponent Disconnected');
+                        disconnectTimers.delete(userId);
+                    }, 60000); // 60 seconds
+
+                    disconnectTimers.set(userId, timerId);
+                    break;
+                }
+                // Also notify if game is completed but players are in rematch phase
+                if (room.players.includes(userId) && room.status === 'completed') {
+                    io.to(roomId).emit('rematch_status', { requestorId: userId, status: 'declined' });
+                }
+            }
+
             userSockets.delete(userId);
             socketUsers.delete(socket.id);
             
-            // Optional: Remove from queues
+            // Remove from matchmaking queues
             queues.forEach((queue, key) => {
                 const idx = queue.findIndex(i => i.userProfile.id === userId);
                 if (idx > -1) queue.splice(idx, 1);

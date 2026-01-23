@@ -29,7 +29,7 @@ import {
   runTransaction,
   deleteDoc
 } from "firebase/firestore";
-import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge } from "../types";
+import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
@@ -338,9 +338,6 @@ export const createBotMatch = async (user: User, gameType: string): Promise<stri
 
     // If local user, return fake ID, data will be mocked by components
     if (user.id.startsWith('google-user-') || user.id.startsWith('guest-')) {
-        // We create a "fake" game object in memory effectively by returning a special ID
-        // The components usually fetch game data. We need to handle that.
-        // Actually, for robust local play, we might need to rely on the fallback in getGame below.
         return `bot-match-${Date.now()}`;
     }
 
@@ -642,6 +639,48 @@ export const getSystemLogs = async () => {
         });
     } catch (e) {
         return [];
+    }
+};
+
+// --- BUG REPORTS ---
+
+export const submitBugReport = async (report: Omit<BugReport, 'id' | 'timestamp' | 'status'>) => {
+    try {
+        // If guest/simulated, don't try to save to firestore as it might fail rules if auth is weird
+        // But for ReportBug flow, we want to try.
+        await addDoc(collection(db, "bug_reports"), {
+            ...report,
+            status: 'open',
+            timestamp: serverTimestamp()
+        });
+        return true;
+    } catch (e) {
+        console.error("Bug report submission failed", e);
+        return false;
+    }
+};
+
+export const getBugReports = async (): Promise<BugReport[]> => {
+    try {
+        const q = query(collection(db, "bug_reports"), orderBy("timestamp", "desc"));
+        const snapshot = await getDocs(q);
+        return snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        } as BugReport));
+    } catch (e) {
+        console.error("Failed to fetch bugs", e);
+        return [];
+    }
+};
+
+export const resolveBugReport = async (id: string) => {
+    try {
+        await updateDoc(doc(db, "bug_reports", id), {
+            status: 'resolved'
+        });
+    } catch (e) {
+        console.error("Failed to resolve bug", e);
     }
 };
 

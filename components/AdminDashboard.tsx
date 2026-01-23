@@ -1,15 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { User } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock } from 'lucide-react';
+import { User, BugReport } from '../types';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'system'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'reports' | 'system'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
   
   // -- STATE MANAGEMENT --
@@ -25,6 +25,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   // Logs State
   const [logs, setLogs] = useState<any[]>([]);
+
+  // Bug Reports State
+  const [bugReports, setBugReports] = useState<BugReport[]>([]);
+  const [loadingBugs, setLoadingBugs] = useState(false);
 
   // Load Real Data
   useEffect(() => {
@@ -66,6 +70,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       fetchData();
   }, []);
 
+  // Fetch bugs when tab changes
+  useEffect(() => {
+      if (activeTab === 'reports') {
+          setLoadingBugs(true);
+          getBugReports().then(reports => {
+              setBugReports(reports);
+              setLoadingBugs(false);
+          });
+      }
+  }, [activeTab]);
+
   // -- ACTIONS --
 
   const addLog = (action: string, target: string, type: string) => {
@@ -84,6 +99,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       setMaintenanceMode(newState);
       localStorage.setItem('vantage_maintenance', String(newState));
       addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
+  };
+
+  const handleResolveBug = async (id: string) => {
+      await resolveBugReport(id);
+      setBugReports(prev => prev.map(bug => bug.id === id ? { ...bug, status: 'resolved' } : bug));
+      addLog("Bug Resolved", id, "info");
   };
 
   const formatNumber = (num: number) => {
@@ -114,7 +135,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                    <div className="px-2 py-0.5 bg-red-500/20 border border-red-500/50 rounded text-[10px] font-bold text-red-400 uppercase tracking-widest">
                        Admin Access
                    </div>
-                   <span className="text-slate-500 text-xs">v1.4.2</span>
+                   <span className="text-slate-500 text-xs">v1.4.3</span>
                </div>
                <h1 className="text-3xl font-display font-bold text-white">Command Center</h1>
            </div>
@@ -129,7 +150,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
         {/* Admin Navigation */}
         <div className="flex gap-4 mb-8 border-b border-white/10">
-            {['overview', 'users', 'system'].map(tab => (
+            {['overview', 'users', 'reports', 'system'].map(tab => (
                 <button
                     key={tab}
                     onClick={() => setActiveTab(tab as any)}
@@ -231,6 +252,90 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             </AnimatePresence>
                         </div>
                     </div>
+                </div>
+            </div>
+        )}
+
+        {/* REPORTS TAB */}
+        {activeTab === 'reports' && (
+            <div className="glass-panel rounded-2xl border border-white/5 overflow-hidden min-h-[500px]">
+                <div className="p-4 border-b border-white/5 bg-royal-900/50 flex items-center justify-between">
+                    <h3 className="font-bold text-white flex items-center gap-2">
+                        <Bug size={18} className="text-yellow-500" /> Bug Reports
+                    </h3>
+                    <button 
+                        onClick={() => { setLoadingBugs(true); getBugReports().then(b => { setBugReports(b); setLoadingBugs(false); }); }}
+                        className="p-2 bg-royal-800 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+                    >
+                        <RefreshCw size={16} className={loadingBugs ? "animate-spin" : ""} />
+                    </button>
+                </div>
+                <div className="overflow-x-auto">
+                    {loadingBugs ? (
+                        <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
+                            <RefreshCw className="animate-spin" size={16} /> Loading reports...
+                        </div>
+                    ) : bugReports.length === 0 ? (
+                        <div className="p-12 text-center text-slate-500">
+                            No bug reports found. Good job!
+                        </div>
+                    ) : (
+                        <table className="w-full text-left">
+                            <thead className="bg-royal-950 text-xs uppercase text-slate-500">
+                                <tr>
+                                    <th className="p-4">Severity</th>
+                                    <th className="p-4">Reported By</th>
+                                    <th className="p-4">Description</th>
+                                    <th className="p-4">Status</th>
+                                    <th className="p-4 text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-white/5">
+                                {bugReports.map((bug) => (
+                                    <tr key={bug.id} className={`hover:bg-white/5 transition-colors ${bug.status === 'resolved' ? 'opacity-50' : ''}`}>
+                                        <td className="p-4">
+                                            <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${
+                                                bug.severity === 'critical' ? 'bg-red-500 text-white' :
+                                                bug.severity === 'medium' ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' :
+                                                'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                                            }`}>
+                                                {bug.severity}
+                                            </span>
+                                        </td>
+                                        <td className="p-4">
+                                            <div className="text-sm font-bold text-white">{bug.userName}</div>
+                                            <div className="text-xs text-slate-500 font-mono">{bug.userId.substring(0,8)}...</div>
+                                        </td>
+                                        <td className="p-4 max-w-md">
+                                            <div className="text-sm text-slate-300 line-clamp-2">{bug.description}</div>
+                                            {bug.reproduceSteps && (
+                                                <div className="text-[10px] text-slate-500 mt-1">Steps provided</div>
+                                            )}
+                                        </td>
+                                        <td className="p-4">
+                                            <span className={`flex items-center gap-1 text-xs font-bold ${
+                                                bug.status === 'resolved' ? 'text-green-500' : 'text-yellow-500'
+                                            }`}>
+                                                {bug.status === 'resolved' ? <CheckCircle size={12} /> : <AlertCircle size={12} />}
+                                                {bug.status.toUpperCase()}
+                                            </span>
+                                        </td>
+                                        <td className="p-4 text-right">
+                                            {bug.status === 'open' && (
+                                                <button 
+                                                    onClick={() => handleResolveBug(bug.id)}
+                                                    className="p-2 bg-green-500/10 hover:bg-green-500/20 text-green-500 rounded-lg border border-green-500/30 transition-colors"
+                                                    title="Mark as Resolved"
+                                                >
+                                                    <CheckSquare size={16} />
+                                                </button>
+                                            )}
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
                 </div>
             </div>
         )}

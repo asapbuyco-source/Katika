@@ -86,3 +86,14 @@ export interface ForumPost {
   timestamp: any; // Firestore timestamp
   likes: number;
 }
+
+export interface BugReport {
+  id: string;
+  userId: string;
+  userName: string;
+  severity: 'low' | 'medium' | 'critical';
+  description: string;
+  reproduceSteps?: string;
+  status: 'open' | 'resolved';
+  timestamp: any;
+}

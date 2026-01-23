@@ -1,27 +1,52 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, XCircle, Home, RotateCcw, Coins, ShieldAlert, ArrowRight } from 'lucide-react';
+import { Trophy, XCircle, Home, RotateCcw, Coins, ShieldAlert, ArrowRight, Wallet, Percent, Users, Loader2 } from 'lucide-react';
 
 interface GameResultOverlayProps {
   result: 'win' | 'loss' | 'quit';
-  amount: number;
+  amount: number; // This is now the NET winnings if win
+  financials?: {
+      totalPot: number;
+      platformFee: number;
+      winnings: number;
+  };
   onContinue: () => void;
+  // Rematch Props
+  onRematch?: () => void;
+  rematchStatus?: 'idle' | 'requested' | 'opponent_requested' | 'declined';
+  stake?: number;
+  userBalance?: number;
 }
 
-export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ result, amount, onContinue }) => {
+export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ 
+    result, 
+    amount, 
+    financials, 
+    onContinue,
+    onRematch,
+    rematchStatus = 'idle',
+    stake = 0,
+    userBalance = 0
+}) => {
   const [displayAmount, setDisplayAmount] = useState(0);
+
+  // If financials provided, use those, else use amount prop
+  const netAmount = financials ? financials.winnings : amount;
+  const fee = financials ? financials.platformFee : 0;
+  const pot = financials ? financials.totalPot : 0;
 
   useEffect(() => {
     // Animate the number counting up
     const duration = 1500;
     const steps = 60;
-    const increment = amount / steps;
+    const target = result === 'win' ? netAmount : 0;
+    const increment = target / steps;
     let current = 0;
     
     const timer = setInterval(() => {
       current += increment;
-      if ((amount > 0 && current >= amount) || (amount < 0 && current <= amount)) {
-        setDisplayAmount(amount);
+      if (current >= target) {
+        setDisplayAmount(target);
         clearInterval(timer);
       } else {
         setDisplayAmount(Math.floor(current));
@@ -29,7 +54,7 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ result, am
     }, duration / steps);
 
     return () => clearInterval(timer);
-  }, [amount]);
+  }, [netAmount, result]);
 
   // Confetti Particles
   const particles = Array.from({ length: 50 });
@@ -116,7 +141,24 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ result, am
                 </p>
 
                 {/* Money Animation */}
-                {amount !== 0 && (
+                {result === 'win' && financials ? (
+                    <div className="mb-8 w-full bg-royal-950/50 rounded-2xl p-4 border border-white/10">
+                        <div className="flex justify-between items-center text-xs text-slate-400 mb-2">
+                            <span>Total Pot</span>
+                            <span className="font-mono">{pot.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs text-red-400 mb-4 pb-2 border-b border-white/10">
+                            <span className="flex items-center gap-1"><Percent size={10} /> Platform Fee (10%)</span>
+                            <span className="font-mono">-{fee.toLocaleString()}</span>
+                        </div>
+                        <div className="flex flex-col items-center">
+                            <div className="text-[10px] font-bold text-green-400 uppercase tracking-widest mb-1">Net Winnings</div>
+                            <div className="text-3xl font-mono font-bold text-white text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-600">
+                                {displayAmount.toLocaleString()} <span className="text-xs text-slate-500">FCFA</span>
+                            </div>
+                        </div>
+                    </div>
+                ) : amount !== 0 && (
                     <div className="mb-8 w-full">
                         <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
                             {result === 'win' ? 'Winnings Added' : 'Stake Lost'}
@@ -127,22 +169,63 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ result, am
                         `}>
                             {result === 'win' ? <Coins size={24} /> : <ShieldAlert size={24} />}
                             <span>
-                                {displayAmount > 0 ? '+' : ''}{displayAmount.toLocaleString()} FCFA
+                                {result === 'win' ? '+' : ''}{result === 'win' ? displayAmount.toLocaleString() : amount.toLocaleString()} FCFA
                             </span>
                         </div>
                     </div>
                 )}
 
                 {/* Actions */}
-                <button 
-                    onClick={onContinue}
-                    className={`
-                        w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95
-                        ${result === 'win' ? 'bg-gold-500 text-royal-950 hover:bg-gold-400 shadow-gold-500/20' : 'bg-white/10 text-white hover:bg-white/20'}
-                    `}
-                >
-                    {result === 'win' ? 'Claim Winnings' : 'Return to Lobby'} <ArrowRight size={20} />
-                </button>
+                <div className="w-full space-y-3">
+                    {/* REMATCH BUTTON */}
+                    {onRematch && (
+                        <div className="w-full">
+                            {rematchStatus === 'declined' ? (
+                                <div className="text-red-400 text-xs font-bold bg-red-500/10 p-2 rounded-lg mb-2 border border-red-500/20">
+                                    Opponent Declined Rematch
+                                </div>
+                            ) : null}
+                            
+                            <button 
+                                onClick={onRematch}
+                                disabled={rematchStatus === 'requested' || rematchStatus === 'declined'}
+                                className={`
+                                    w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 border
+                                    ${rematchStatus === 'opponent_requested' 
+                                        ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/30 border-transparent animate-pulse' 
+                                        : 'bg-white/5 text-gold-400 border-gold-500/30 hover:bg-gold-500/10'}
+                                    ${rematchStatus === 'requested' ? 'opacity-70 cursor-not-allowed' : ''}
+                                `}
+                            >
+                                {rematchStatus === 'requested' ? (
+                                    <><Loader2 size={18} className="animate-spin" /> Waiting for Opponent...</>
+                                ) : rematchStatus === 'opponent_requested' ? (
+                                    <><RotateCcw size={18} /> Accept Rematch</>
+                                ) : (
+                                    <><RotateCcw size={18} /> Request Rematch</>
+                                )}
+                            </button>
+                            {rematchStatus !== 'requested' && stake > 0 && (
+                                <div className={`text-[10px] mt-1 ${userBalance >= stake ? 'text-slate-500' : 'text-red-400'}`}>
+                                    {userBalance >= stake 
+                                        ? `Stake: ${stake} FCFA (Available: ${userBalance})` 
+                                        : `Insufficient funds for rematch (Need ${stake})`
+                                    }
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <button 
+                        onClick={onContinue}
+                        className={`
+                            w-full py-4 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95
+                            ${result === 'win' ? 'bg-gold-500 text-royal-950 hover:bg-gold-400 shadow-gold-500/20' : 'bg-white/10 text-white hover:bg-white/20'}
+                        `}
+                    >
+                        {result === 'win' ? 'Claim Winnings' : 'Return to Lobby'} <ArrowRight size={20} />
+                    </button>
+                </div>
              </div>
         </div>
       </motion.div>

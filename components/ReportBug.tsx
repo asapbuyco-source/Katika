@@ -1,29 +1,38 @@
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Bug, Paperclip, Send, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { playSFX } from '../services/sound';
+import { submitBugReport } from '../services/firebase';
+import { User } from '../types';
 
 interface ReportBugProps {
   onBack: () => void;
+  user?: User | null;
 }
 
-export const ReportBug: React.FC<ReportBugProps> = ({ onBack }) => {
+export const ReportBug: React.FC<ReportBugProps> = ({ onBack, user }) => {
   const [step, setStep] = useState<'form' | 'submitting' | 'success'>('form');
   const [severity, setSeverity] = useState('low');
   const [description, setDescription] = useState('');
   const [reproduce, setReproduce] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       playSFX('click');
       setStep('submitting');
       
-      // Simulate API call
-      setTimeout(() => {
-          setStep('success');
-          playSFX('win');
-      }, 2000);
+      const reportData = {
+          userId: user?.id || 'guest',
+          userName: user?.name || 'Guest User',
+          severity: severity as any,
+          description,
+          reproduceSteps: reproduce
+      };
+
+      await submitBugReport(reportData);
+      
+      setStep('success');
+      playSFX('win');
   };
 
   return (
@@ -120,7 +129,7 @@ export const ReportBug: React.FC<ReportBugProps> = ({ onBack }) => {
                         >
                             <Loader2 size={48} className="text-gold-400 animate-spin mb-4" />
                             <h3 className="text-lg font-bold text-white">Sending Report...</h3>
-                            <p className="text-slate-400 text-sm">Uploading logs and details</p>
+                            <p className="text-slate-400 text-sm">Uploading details to admin team</p>
                         </motion.div>
                     )}
 
