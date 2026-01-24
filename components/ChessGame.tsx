@@ -28,7 +28,7 @@ const formatTime = (seconds: number) => {
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
-  const [viewIndex, setViewIndex] = useState<number>(-1);
+  const [viewIndex, setViewIndex] = useState<number>(0);
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
@@ -47,21 +47,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const moveHistory = game.history();
   const displayGame = useMemo(() => {
       // If viewing latest, show current game state
-      if (viewIndex === moveHistory.length - 1) return game;
+      if (viewIndex === moveHistory.length) return game;
       
       // If viewing start
-      if (viewIndex === -1) return new Chess();
+      if (viewIndex === 0) return new Chess();
       
       // Reconstruct history
       const tempGame = new Chess();
-      for (let i = 0; i <= viewIndex; i++) {
+      for (let i = 0; i < viewIndex; i++) {
           tempGame.move(moveHistory[i]);
       }
       return tempGame;
   }, [game, viewIndex, moveHistory]);
 
   const board = displayGame.board();
-  const isViewingLatest = viewIndex === moveHistory.length - 1;
+  const isViewingLatest = viewIndex === moveHistory.length;
 
   // Local Timer Logic
   useEffect(() => {
@@ -109,12 +109,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               } catch (e) { console.warn("FEN load failed"); }
           }
           
-          const wasLatest = viewIndex === game.history().length - 1;
+          const wasLatest = viewIndex === game.history().length;
           setGame(newGame);
           
           // Auto-scroll to latest move if user was already watching live
-          if (wasLatest || viewIndex === -1) {
-              setViewIndex(newGame.history().length - 1);
+          if (wasLatest || viewIndex === 0) {
+              setViewIndex(newGame.history().length);
           }
           
           checkGameOver(newGame);
@@ -195,7 +195,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               newGame.loadPgn(game.pgn());
               
               setGame(newGame);
-              setViewIndex(newGame.history().length - 1);
+              setViewIndex(newGame.history().length);
               setSelectedSquare(null);
               setOptionSquares({});
               
@@ -237,7 +237,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const onSquareClick = (square: Square) => {
     if (isGameOver) return;
-    if (!isViewingLatest) { setViewIndex(moveHistory.length - 1); return; }
+    if (!isViewingLatest) { setViewIndex(moveHistory.length); return; }
 
     if (selectedSquare === square) { setSelectedSquare(null); setOptionSquares({}); return; }
 
@@ -302,7 +302,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       const newGame = new Chess();
       newGame.loadPgn(game.pgn());
       setGame(newGame);
-      setViewIndex(newGame.history().length - 1);
+      setViewIndex(newGame.history().length);
       
       if (bestMove.captured) playSFX('capture'); else playSFX('move');
       checkGameOver(newGame);
@@ -485,9 +485,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         const isKingInCheck = visualPiece?.type === 'k' && visualPiece.color === displayGame.turn() && displayGame.inCheck();
                         
                         let isLastMove = false;
-                        if (viewIndex >= 0 && moveHistory?.[viewIndex]) {
+                        if (isViewingLatest && moveHistory.length > 0) {
                             const hist = displayGame.history({ verbose: true });
-                            const lastMoveDetails = hist?.[viewIndex];
+                            const lastMoveDetails = hist?.[hist.length - 1];
                             if (lastMoveDetails && (lastMoveDetails.to === square || lastMoveDetails.from === square)) {
                                 isLastMove = true;
                             }
@@ -546,15 +546,15 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         {/* History Controls */}
         <div className="flex items-center justify-between w-full max-w-sm gap-2 bg-royal-800/50 p-2 rounded-xl border border-white/5">
             <button 
-                onClick={() => setViewIndex(-1)} 
-                disabled={viewIndex === -1} 
+                onClick={() => setViewIndex(0)} 
+                disabled={viewIndex === 0} 
                 className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
             >
                 <ChevronsLeft size={20} />
             </button>
             <button 
-                onClick={() => setViewIndex(v => Math.max(-1, v - 1))} 
-                disabled={viewIndex === -1} 
+                onClick={() => setViewIndex(v => Math.max(0, v - 1))} 
+                disabled={viewIndex === 0} 
                 className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
             >
                 <ChevronLeft size={20} />
@@ -563,19 +563,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="flex flex-col items-center">
                 <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Moves</span>
                 <span className="text-sm font-mono text-white font-bold">
-                    {viewIndex + 1} <span className="text-slate-500">/</span> {moveHistory.length}
+                    {viewIndex} <span className="text-slate-500">/</span> {moveHistory.length}
                 </span>
             </div>
 
             <button 
-                onClick={() => setViewIndex(v => Math.min(moveHistory.length - 1, v + 1))} 
+                onClick={() => setViewIndex(v => Math.min(moveHistory.length, v + 1))} 
                 disabled={isViewingLatest} 
                 className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
             >
                 <ChevronRight size={20} />
             </button>
             <button 
-                onClick={() => setViewIndex(moveHistory.length - 1)} 
+                onClick={() => setViewIndex(moveHistory.length)} 
                 disabled={isViewingLatest} 
                 className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
             >

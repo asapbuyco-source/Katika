@@ -44,8 +44,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
   useEffect(() => {
       if (isP2P && socketGame) {
-          // Fix: Access board from gameState
-          const serverBoard = socketGame.gameState?.board || socketGame.board;
+          // Fix: Access board from gameState only (server schema convention)
+          const serverBoard = socketGame.gameState?.board;
           if (serverBoard) setBoard(serverBoard);
           
           if (socketGame.turn) setIsXNext(socketGame.turn === socketGame.players[0]);

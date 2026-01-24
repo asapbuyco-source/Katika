@@ -27,9 +27,30 @@ const queues = new Map(); // gameType_stake -> [ { socketId, userProfile } ]
 const userSockets = new Map(); // userId -> socketId
 const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
+const rateLimits = new Map(); // userId -> { count, resetTime }
 
 // --- HELPER FUNCTIONS ---
 const generateRoomId = () => `room_${Math.random().toString(36).substr(2, 9)}`;
+
+const sanitize = (str) => {
+  if (typeof str !== 'string') return '';
+  return str.replace(/[<>]/g, '').slice(0, 500);
+};
+
+const checkRateLimit = (userId) => {
+  const now = Date.now();
+  const limit = rateLimits.get(userId);
+  
+  if (!limit || now > limit.resetTime) {
+    rateLimits.set(userId, { count: 1, resetTime: now + 1000 });
+    return true;
+  }
+  
+  if (limit.count >= 10) return false; // Max 10 actions/second
+  
+  limit.count++;
+  return true;
+};
 
 const calculatePayouts = (stake) => {
     const totalPot = stake * 2;
@@ -81,6 +102,7 @@ const createInitialGameState = (gameType, p1, p2) => {
         startTime: Date.now(),
         lastMoveTime: Date.now(),
         timers: { [p1]: 600, [p2]: 600 }, // 10 mins default
+        lastUpdate: Date.now()
     };
 
     switch (gameType) {
@@ -297,6 +319,14 @@ io.on('connection', (socket) => {
 
         const userId = socketUsers.get(socket.id);
         if (!userId || !room.players.includes(userId)) return;
+
+        if (!checkRateLimit(userId)) {
+            socket.emit('error', { message: 'Rate limit exceeded' });
+            return;
+        }
+
+        // Update timestamp
+        if (room.gameState) room.gameState.lastUpdate = Date.now();
 
         // --- FORFEIT / QUIT (Generic) ---
         if (action.type === 'FORFEIT') {
@@ -517,10 +547,11 @@ io.on('connection', (socket) => {
 
         // --- CHAT ---
         else if (action.type === 'CHAT') {
+            const sanitizedMsg = sanitize(action.message);
             const msg = {
                 id: Date.now().toString(),
                 senderId: userId,
-                message: action.message,
+                message: sanitizedMsg,
                 timestamp: Date.now()
             };
             if (!room.chat) room.chat = [];
