@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle, BookOpen, X } from 'lucide-react';
+import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle, BookOpen, X, Clock } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -19,6 +19,12 @@ interface ChessGameProps {
 }
 
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+};
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
@@ -56,6 +62,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const board = displayGame.board();
   const isViewingLatest = viewIndex === moveHistory.length - 1;
+
+  // Local Timer Logic
+  useEffect(() => {
+      if (isGameOver) return;
+      const interval = setInterval(() => {
+          const activeColor = game.turn(); // 'w' or 'b'
+          setTimeRemaining(prev => {
+              if (prev[activeColor] <= 0) {
+                  // Timer hit zero
+                  return prev;
+              }
+              return { ...prev, [activeColor]: Math.max(0, prev[activeColor] - 1) };
+          });
+      }, 1000);
+      return () => clearInterval(interval);
+  }, [game, isGameOver]);
 
   useEffect(() => {
       if (!isP2P && table.guest?.id === 'bot') {
@@ -98,6 +120,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           checkGameOver(newGame);
 
           if (socketGame.gameState && socketGame.gameState.timers && socketGame.players) {
+              // Sync timer from server (Players[0] is White, Players[1] is Black)
               setTimeRemaining({
                   w: socketGame.gameState.timers[socketGame.players[0]] || 600,
                   b: socketGame.gameState.timers[socketGame.players[1]] || 600
@@ -186,8 +209,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                       winnerId = user.id;
                   }
                   const updatedTimers = {
-                      [socketGame.players[0]]: timeRemaining.w,
-                      [socketGame.players[1]]: timeRemaining.b
+                      [socketGame.players[0]]: timeRemaining.w, // Map White time to P1 ID
+                      [socketGame.players[1]]: timeRemaining.b  // Map Black time to P2 ID
                   };
                   socket.emit('game_action', {
                       roomId: socketGame.roomId,
@@ -300,6 +323,18 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       );
   };
 
+  // Determine opponent details for display
+  const opponentColor = myColor === 'w' ? 'b' : 'w';
+  const getOpponentProfile = () => {
+      if (!isP2P) return { name: "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" };
+      if (socketGame?.profiles) {
+          const oppId = socketGame.players.find((id: string) => id !== user.id);
+          return socketGame.profiles[oppId] || { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
+      }
+      return { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
+  };
+  const opponent = getOpponentProfile();
+
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
         {/* Promotion Modal */}
@@ -400,9 +435,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
        </div>
 
        {/* Turn Indicator */}
-       <div className="mb-4 flex flex-col items-center justify-center">
+       <div className="mb-2 flex flex-col items-center justify-center">
             <motion.div
-                key={game.turn()} // Animate on change
+                key={game.turn()} 
                 initial={{ scale: 0.9 }}
                 animate={{ scale: 1 }}
                 className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest shadow-lg border transition-colors duration-300 ${
@@ -414,11 +449,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 {game.turn() === myColor ? "Your Turn" : "Opponent's Turn"}
                 <span className="ml-2 text-xs opacity-75">({game.turn() === 'w' ? 'White' : 'Black'})</span>
             </motion.div>
-            {!isViewingLatest && (
-                <div className="mt-2 text-[10px] text-gold-400 font-mono bg-gold-500/10 px-3 py-1 rounded-full animate-pulse border border-gold-500/20">
-                    VIEWING HISTORY - BOARD LOCKED
+       </div>
+
+       {/* OPPONENT BAR */}
+       <div className="w-full max-w-[600px] flex justify-between items-end mb-2 px-2">
+            <div className="flex items-center gap-3">
+                <img src={opponent.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="Opponent" />
+                <div className="flex flex-col">
+                    <span className="text-sm font-bold text-white">{opponent.name}</span>
+                    <span className="text-[10px] text-slate-400 font-bold">{opponentColor === 'w' ? 'White' : 'Black'}</span>
                 </div>
-            )}
+            </div>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === opponentColor ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
+                <Clock size={16} />
+                <span className="font-mono font-bold text-lg">{formatTime(timeRemaining[opponentColor])}</span>
+            </div>
        </div>
 
        {/* Board */}
@@ -483,8 +528,23 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             </div>
        </div>
 
+       {/* PLAYER BAR (ME) */}
+       <div className="w-full max-w-[600px] flex justify-between items-start mt-2 mb-4 px-2">
+            <div className="flex items-center gap-3">
+                <img src={user.avatar} className="w-10 h-10 rounded-full border border-gold-500" alt="Me" />
+                <div className="flex flex-col">
+                    <span className="text-sm font-bold text-white">You</span>
+                    <span className="text-[10px] text-slate-400 font-bold">{myColor === 'w' ? 'White' : 'Black'}</span>
+                </div>
+            </div>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === myColor ? 'bg-gold-500/20 border-gold-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
+                <Clock size={16} />
+                <span className="font-mono font-bold text-lg">{formatTime(timeRemaining[myColor])}</span>
+            </div>
+       </div>
+
         {/* History Controls */}
-        <div className="mt-4 flex items-center justify-between w-full max-w-sm gap-2 bg-royal-800/50 p-2 rounded-xl border border-white/5">
+        <div className="flex items-center justify-between w-full max-w-sm gap-2 bg-royal-800/50 p-2 rounded-xl border border-white/5">
             <button 
                 onClick={() => setViewIndex(-1)} 
                 disabled={viewIndex === -1} 
@@ -522,6 +582,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 <ChevronsRight size={20} />
             </button>
         </div>
+
+        {!isViewingLatest && (
+            <div className="mt-4 text-[10px] text-gold-400 font-mono bg-gold-500/10 px-3 py-1 rounded-full animate-pulse border border-gold-500/20">
+                VIEWING HISTORY - BOARD LOCKED
+            </div>
+        )}
 
         {isP2P && socketGame && (
             <GameChat 
