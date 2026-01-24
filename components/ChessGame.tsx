@@ -1,5 +1,6 @@
+
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle, BookOpen, X } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -26,6 +27,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
   const [showForfeitModal, setShowForfeitModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [isBotGame, setIsBotGame] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
@@ -38,8 +40,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const moveHistory = game.history();
   const displayGame = useMemo(() => {
+      // If viewing latest, show current game state
       if (viewIndex === moveHistory.length - 1) return game;
+      
+      // If viewing start
       if (viewIndex === -1) return new Chess();
+      
+      // Reconstruct history
       const tempGame = new Chess();
       for (let i = 0; i <= viewIndex; i++) {
           tempGame.move(moveHistory[i]);
@@ -65,21 +72,25 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           const newGame = new Chess();
           let loaded = false;
 
-          // Prefer FEN for state accuracy to avoid history lag
-          if (socketGame.gameState && socketGame.gameState.fen) {
+          // Priority 1: Load PGN to preserve history
+          if (socketGame.gameState && socketGame.gameState.pgn) {
+              try {
+                  newGame.loadPgn(socketGame.gameState.pgn);
+                  loaded = true;
+              } catch (e) { console.warn("PGN load failed, falling back to FEN"); }
+          }
+
+          // Priority 2: Load FEN if PGN unavailable (History will be lost, but state is correct)
+          if (!loaded && socketGame.gameState && socketGame.gameState.fen) {
               try {
                   newGame.load(socketGame.gameState.fen);
-                  loaded = true;
               } catch (e) { console.warn("FEN load failed"); }
           }
           
-          if (!loaded && socketGame.gameState && socketGame.gameState.pgn) {
-              newGame.loadPgn(socketGame.gameState.pgn);
-          }
-
           const wasLatest = viewIndex === game.history().length - 1;
           setGame(newGame);
           
+          // Auto-scroll to latest move if user was already watching live
           if (wasLatest || viewIndex === -1) {
               setViewIndex(newGame.history().length - 1);
           }
@@ -294,10 +305,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         {/* Promotion Modal */}
         <AnimatePresence>
             {pendingPromotion && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
                     <motion.div 
                         initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-                        className="bg-royal-900 border-2 border-gold-500 rounded-2xl p-6 shadow-2xl relative z-[60]"
+                        className="bg-royal-900 border-2 border-gold-500 rounded-2xl p-6 shadow-2xl relative"
                     >
                         <h3 className="text-white font-bold text-center mb-4 uppercase tracking-widest">Promote Pawn</h3>
                         <div className="flex gap-4">
@@ -316,7 +327,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             )}
         </AnimatePresence>
 
-        {/* Forfeit Modal - Restored */}
+        {/* Forfeit Modal */}
         <AnimatePresence>
           {showForfeitModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
@@ -338,11 +349,49 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           )}
        </AnimatePresence>
 
+       {/* Rules Modal */}
+       <AnimatePresence>
+          {showRulesModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowRulesModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2"><BookOpen size={20} className="text-gold-400"/> Chess Rules</h2>
+                          <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                      </div>
+                      <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Objective</h3>
+                              <p>Checkmate the opponent's King. If the King is under attack (Check) and cannot escape, it is Checkmate.</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Time Control</h3>
+                              <p>Each player has 10 minutes. If your time runs out, you lose (unless opponent has insufficient material).</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Special Moves</h3>
+                              <ul className="list-disc pl-4 space-y-1">
+                                  <li><strong>Castling:</strong> Move King two squares towards a Rook, and Rook jumps over. Allowed if neither piece moved and path is clear/safe.</li>
+                                  <li><strong>En Passant:</strong> A special pawn capture that can occur immediately after a pawn moves two squares forward from its starting position.</li>
+                                  <li><strong>Promotion:</strong> When a pawn reaches the opposite end, it must be promoted (usually to a Queen).</li>
+                              </ul>
+                          </section>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
         {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
-            <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
-                <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
-            </button>
+            <div className="flex items-center gap-2">
+                <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
+                    <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
+                </button>
+                <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
+                    <BookOpen size={18} />
+                </button>
+            </div>
             <div className="flex flex-col items-center">
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
@@ -391,7 +440,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         const isKingInCheck = visualPiece?.type === 'k' && visualPiece.color === displayGame.turn() && displayGame.inCheck();
                         
                         let isLastMove = false;
-                        if (viewIndex >= 0) {
+                        if (viewIndex >= 0 && moveHistory?.[viewIndex]) {
                             const hist = displayGame.history({ verbose: true });
                             const lastMoveDetails = hist?.[viewIndex];
                             if (lastMoveDetails && (lastMoveDetails.to === square || lastMoveDetails.from === square)) {
