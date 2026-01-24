@@ -4,8 +4,11 @@ service cloud.firestore {
     // Users can only read/write their own profile
     match /users/{userId} {
       allow read: if request.auth != null;
-      allow write: if request.auth.uid == userId && 
-                      request.resource.data.balance == resource.data.balance; // Prevent balance manipulation
+      // Allow user to update their own profile (avatar/name/email), but NOT balance or rank
+      allow update: if request.auth.uid == userId && 
+                      request.resource.data.balance == resource.data.balance &&
+                      request.resource.data.rankTier == resource.data.rankTier &&
+                      request.resource.data.elo == resource.data.elo;
       
       match /transactions/{txId} {
         allow read: if request.auth.uid == userId;
@@ -40,6 +43,12 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow create: if request.auth != null;
       allow update: if request.auth.uid == resource.data.targetId;
+    }
+    
+    // System Settings (Read-only for users)
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
     }
   }
 }

@@ -1,12 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { User, BugReport } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle } from 'lucide-react';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, subscribeToGameMaintenance, updateGameMaintenance } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
 }
+
+const GAME_TYPES = [
+    { id: 'Dice', name: 'Dice Duel' },
+    { id: 'TicTacToe', name: 'XO Clash' },
+    { id: 'Cards', name: 'Kmer Cards' },
+    { id: 'Checkers', name: 'Checkers Pro' },
+    { id: 'Chess', name: 'Master Chess' }
+];
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'reports' | 'system'>('overview');
@@ -18,6 +26,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
   // System State
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [gameMaintenance, setGameMaintenance] = useState<Record<string, boolean>>({});
   const [activeMatchesCount, setActiveMatchesCount] = useState(0); 
   const [networkTraffic, setNetworkTraffic] = useState<number[]>(Array(24).fill(0));
   const [totalSystemFunds, setTotalSystemFunds] = useState(0);
@@ -35,6 +44,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       const isMaint = localStorage.getItem('vantage_maintenance') === 'true';
       setMaintenanceMode(isMaint);
       
+      // Subscribe to game maintenance status
+      const unsubscribeMaintenance = subscribeToGameMaintenance((status) => {
+          setGameMaintenance(status);
+      });
+
       const fetchData = async () => {
           setLoadingUsers(true);
           try {
@@ -68,6 +82,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           setLoadingUsers(false);
       };
       fetchData();
+
+      return () => unsubscribeMaintenance();
   }, []);
 
   // Fetch bugs when tab changes
@@ -99,6 +115,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       setMaintenanceMode(newState);
       localStorage.setItem('vantage_maintenance', String(newState));
       addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
+  };
+
+  const handleGameToggle = async (gameId: string) => {
+      const currentStatus = gameMaintenance[gameId] || false;
+      const newStatus = !currentStatus;
+      await updateGameMaintenance(gameId, newStatus);
+      addLog("Game Status Update", `${gameId}: ${newStatus ? 'Maintenance' : 'Active'}`, "info");
   };
 
   const handleResolveBug = async (id: string) => {
@@ -430,51 +453,85 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         {/* SYSTEM TAB */}
         {activeTab === 'system' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* Game Maintenance Controls */}
                 <div className="glass-panel p-6 rounded-2xl border border-white/5">
                     <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                        <Server size={18} className="text-gold-400" /> Server Controls
+                        <Gamepad2 size={18} className="text-purple-400" /> Game Availability
                     </h3>
                     
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
-                            <div>
-                                <div className="font-bold text-white">Maintenance Mode</div>
-                                <div className="text-xs text-slate-500">Disable matchmaking for updates</div>
+                    <div className="space-y-3">
+                        {GAME_TYPES.map(game => (
+                            <div key={game.id} className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                <div>
+                                    <div className="font-bold text-white text-sm">{game.name}</div>
+                                    <div className={`text-xs flex items-center gap-1.5 ${gameMaintenance[game.id] ? 'text-red-400' : 'text-green-400'}`}>
+                                        <div className={`w-1.5 h-1.5 rounded-full ${gameMaintenance[game.id] ? 'bg-red-500' : 'bg-green-500 animate-pulse'}`}></div>
+                                        {gameMaintenance[game.id] ? 'Maintenance' : 'Active'}
+                                    </div>
+                                </div>
+                                <button 
+                                    onClick={() => handleGameToggle(game.id)}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${!gameMaintenance[game.id] ? 'bg-green-500' : 'bg-red-500'}`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${!gameMaintenance[game.id] ? 'translate-x-6' : 'translate-x-1'}`}
+                                    />
+                                </button>
                             </div>
-                            <button 
-                                onClick={handleMaintenanceToggle}
-                                className={`w-12 h-6 rounded-full relative transition-colors ${maintenanceMode ? 'bg-gold-500' : 'bg-royal-800'}`}
-                            >
-                                <div className={`absolute left-1 top-1 w-4 h-4 rounded-full transition-all ${maintenanceMode ? 'bg-white translate-x-6' : 'bg-slate-500 translate-x-0'}`}></div>
-                            </button>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
-                            <div>
-                                <div className="font-bold text-white">Flush Cache</div>
-                                <div className="text-xs text-slate-500">Reset global game states</div>
-                            </div>
-                            <button 
-                                onClick={() => addLog("Cache", "Flushed", "info")}
-                                className="p-2 bg-royal-800 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
-                            >
-                                <RefreshCw size={16} />
-                            </button>
-                        </div>
+                        ))}
                     </div>
                 </div>
 
-                <div className="glass-panel p-6 rounded-2xl border border-white/5">
-                    <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                        <Lock size={18} className="text-blue-400" /> Admin Permissions
-                    </h3>
-                    <div className="p-4 bg-royal-900/50 rounded-xl border border-white/5 mb-4">
-                        <div className="text-sm font-bold text-white mb-2">Current Session</div>
-                        <div className="flex items-center gap-2 text-xs text-green-400 mb-2">
-                            <CheckCircle size={12} /> Encrypted (SSL)
+                <div className="space-y-6">
+                    <div className="glass-panel p-6 rounded-2xl border border-white/5">
+                        <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                            <Server size={18} className="text-gold-400" /> System Controls
+                        </h3>
+                        
+                        <div className="space-y-4">
+                            <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                <div>
+                                    <div className="font-bold text-white">Global Maintenance</div>
+                                    <div className="text-xs text-slate-500">Disable all matchmaking</div>
+                                </div>
+                                <button 
+                                    onClick={handleMaintenanceToggle}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${maintenanceMode ? 'bg-red-500' : 'bg-slate-700'}`}
+                                >
+                                    <span
+                                        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${maintenanceMode ? 'translate-x-6' : 'translate-x-1'}`}
+                                    />
+                                </button>
+                            </div>
+
+                            <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                <div>
+                                    <div className="font-bold text-white">Flush Cache</div>
+                                    <div className="text-xs text-slate-500">Reset global game states</div>
+                                </div>
+                                <button 
+                                    onClick={() => addLog("Cache", "Flushed", "info")}
+                                    className="p-2 bg-royal-800 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+                                >
+                                    <RefreshCw size={16} />
+                                </button>
+                            </div>
                         </div>
-                        <div className="text-xs text-slate-500 font-mono">
-                            Auth: Firebase Token
+                    </div>
+
+                    <div className="glass-panel p-6 rounded-2xl border border-white/5">
+                        <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                            <Lock size={18} className="text-blue-400" /> Admin Permissions
+                        </h3>
+                        <div className="p-4 bg-royal-900/50 rounded-xl border border-white/5 mb-4">
+                            <div className="text-sm font-bold text-white mb-2">Current Session</div>
+                            <div className="flex items-center gap-2 text-xs text-green-400 mb-2">
+                                <CheckCircle size={12} /> Encrypted (SSL)
+                            </div>
+                            <div className="text-xs text-slate-500 font-mono">
+                                Auth: Firebase Token
+                            </div>
                         </div>
                     </div>
                 </div>

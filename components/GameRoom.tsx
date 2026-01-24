@@ -1,3 +1,4 @@
+// ... (imports)
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -7,14 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 
-interface GameRoomProps {
-  table: Table;
-  user: User;
-  onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
-  socket?: Socket | null;
-  socketGame?: any;
-}
-
+// ... (Piece, PlayerColor, SAFE_ZONES, getPiecePosition)
 type PlayerColor = 'Red' | 'Yellow';
 interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
 
@@ -58,6 +52,14 @@ const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) 
     }
 };
 
+interface GameRoomProps {
+  table: Table;
+  user: User;
+  onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+  socket?: Socket | null;
+  socketGame?: any;
+}
+
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [currentTurn, setCurrentTurn] = useState<PlayerColor>('Red');
@@ -71,7 +73,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
   // Initialize Pieces
   useEffect(() => {
-      // If synced state is empty or local play, init
       if ((!isP2P || (isP2P && socketGame?.gameState?.pieces?.length === 0)) && pieces.length === 0) {
           const initPieces: Piece[] = [];
           for(let i=0; i<4; i++) initPieces.push({ id: i, color: 'Red', step: -1 });
@@ -118,6 +119,21 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
       if (currentTurn !== myColor || !diceRolled || !diceValue) return;
       if (p.color !== myColor) return;
       
+      // Send intention to server
+      if (socket) {
+          socket.emit('game_action', {
+              roomId: socketGame.roomId,
+              action: { 
+                  type: 'MOVE_PIECE', 
+                  pieceId: p.id
+              } 
+          });
+          setLastMovedPieceId(p.id);
+          playSFX('move');
+          return;
+      }
+
+      // Local Logic (Offline/Bot)
       if (p.step === -1 && diceValue !== 6) {
           playSFX('error');
           return;
@@ -158,29 +174,18 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
       setLastMovedPieceId(p.id);
       
       const bonusTurn = diceValue === 6 || captured;
-
-      if (socket) {
-          socket.emit('game_action', {
-              roomId: socketGame.roomId,
-              action: { 
-                  type: 'MOVE_PIECE', 
-                  pieces: newPieces, 
-                  bonusTurn: bonusTurn 
-              } 
-          });
-      } else {
-          setPieces(newPieces);
-          setDiceRolled(false);
-          setDiceValue(null);
-          if (!bonusTurn) {
-              setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
-          }
+      setPieces(newPieces);
+      setDiceRolled(false);
+      setDiceValue(null);
+      if (!bonusTurn) {
+          setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
       }
       playSFX('move');
   };
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        {/* ... (Keep UI) ... */}
         {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
             <button onClick={handleQuit} className="flex items-center gap-2 text-slate-400 hover:text-white">

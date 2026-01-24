@@ -5,8 +5,10 @@ const FAPSHI_API_KEY = "FAK_TEST_cb0744684a45502c5ec0";
 const FAPSHI_USER_TOKEN = "8d4b58dd-eeae-4eee-8708-c02f366a7d14";
 const BASE_URL = "https://live.fapshi.com/initiate-pay"; 
 
-const IS_PRODUCTION = (import.meta as any).env.PROD;
-const USE_SIMULATION = (import.meta as any).env.VITE_PAYMENT_SIMULATION === 'true';
+// Safe environment access to prevent runtime crashes if env is missing
+const env = (import.meta as any).env || {};
+const IS_PRODUCTION = env.PROD;
+const USE_SIMULATION = env.VITE_PAYMENT_SIMULATION === 'true';
 
 if (IS_PRODUCTION && !FAPSHI_API_KEY) {
   // In a real app this would likely log to an error reporting service

@@ -1,4 +1,4 @@
-
+// ... (imports)
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle, BookOpen, X, Clock } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -27,6 +27,7 @@ const formatTime = (seconds: number) => {
 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  // ... (Keep existing state)
   const [game, setGame] = useState(new Chess());
   const [viewIndex, setViewIndex] = useState<number>(0);
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
@@ -46,13 +47,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const moveHistory = game.history();
   const displayGame = useMemo(() => {
-      // If viewing latest, show current game state
       if (viewIndex === moveHistory.length) return game;
-      
-      // If viewing start
       if (viewIndex === 0) return new Chess();
-      
-      // Reconstruct history
       const tempGame = new Chess();
       for (let i = 0; i < viewIndex; i++) {
           tempGame.move(moveHistory[i]);
@@ -63,16 +59,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const board = displayGame.board();
   const isViewingLatest = viewIndex === moveHistory.length;
 
-  // Local Timer Logic
+  // ... (Keep Timer logic) ...
   useEffect(() => {
       if (isGameOver) return;
       const interval = setInterval(() => {
-          const activeColor = game.turn(); // 'w' or 'b'
+          const activeColor = game.turn(); 
           setTimeRemaining(prev => {
-              if (prev[activeColor] <= 0) {
-                  // Timer hit zero
-                  return prev;
-              }
+              if (prev[activeColor] <= 0) return prev;
               return { ...prev, [activeColor]: Math.max(0, prev[activeColor] - 1) };
           });
       }, 1000);
@@ -99,33 +92,23 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               try {
                   newGame.loadPgn(socketGame.gameState.pgn);
                   loaded = true;
-              } catch (e) { console.warn("PGN load failed, falling back to FEN"); }
+              } catch (e) { console.warn("PGN load failed"); }
           }
 
-          // Priority 2: Load FEN if PGN unavailable (History will be lost, but state is correct)
+          // Priority 2: Load FEN 
           if (!loaded && socketGame.gameState && socketGame.gameState.fen) {
               try {
                   newGame.load(socketGame.gameState.fen);
               } catch (e) { console.warn("FEN load failed"); }
           }
           
-          const wasLatest = viewIndex === game.history().length;
           setGame(newGame);
           
-          // Auto-scroll to latest move if user was already watching live
-          if (wasLatest || viewIndex === 0) {
+          if (viewIndex === 0 || viewIndex === game.history().length) {
               setViewIndex(newGame.history().length);
           }
           
           checkGameOver(newGame);
-
-          if (socketGame.gameState && socketGame.gameState.timers && socketGame.players) {
-              // Sync timer from server (Players[0] is White, Players[1] is Black)
-              setTimeRemaining({
-                  w: socketGame.gameState.timers[socketGame.players[0]] || 600,
-                  b: socketGame.gameState.timers[socketGame.players[1]] || 600
-              });
-          }
 
           if (socketGame.winner && !isGameOver) {
               setIsGameOver(true);
@@ -145,11 +128,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               setEndGameReason(isWinner ? "Checkmate! You Won!" : "Checkmate! You Lost.");
               playSFX(isWinner ? 'win' : 'loss');
               
-              if (isP2P && socketGame) {
-                  const winnerId = winnerColor === 'w' ? socketGame.players[0] : socketGame.players[1];
-                  if (winnerId === user.id) onGameEnd('win');
-                  else onGameEnd('loss');
-              } else {
+              if (!isP2P) { 
                   onGameEnd(isWinner ? 'win' : 'loss');
               }
           } else {
@@ -203,26 +182,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               checkGameOver(newGame);
 
               if (isP2P && socket && socketGame) {
-                  const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
-                  let winnerId = null;
-                  if (newGame.isGameOver() && newGame.isCheckmate()) {
-                      winnerId = user.id;
-                  }
-                  const updatedTimers = {
-                      [socketGame.players[0]]: timeRemaining.w, // Map White time to P1 ID
-                      [socketGame.players[1]]: timeRemaining.b  // Map Black time to P2 ID
-                  };
                   socket.emit('game_action', {
                       roomId: socketGame.roomId,
                       action: {
                           type: 'MOVE',
-                          newState: {
-                              fen: newGame.fen(),
-                              pgn: newGame.pgn(),
-                              turn: nextUserId,
-                              winner: winnerId,
-                              timers: updatedTimers
-                          }
+                          fen: newGame.fen(),
+                          pgn: newGame.pgn(),
+                          move: { from, to, promotion: promotion || 'q' } // Explicit move details for server relay
                       }
                   });
               } else if (isBotGame && !newGame.isGameOver()) {
@@ -323,7 +289,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       );
   };
 
-  // Determine opponent details for display
   const opponentColor = myColor === 'w' ? 'b' : 'w';
   const getOpponentProfile = () => {
       if (!isP2P) return { name: "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" };
@@ -337,6 +302,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        {/* ... (Keep UI rendering: Modals, Header, Board, Chat) ... */}
         {/* Promotion Modal */}
         <AnimatePresence>
             {pendingPromotion && (
@@ -362,6 +328,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             )}
         </AnimatePresence>
 
+        {/* ... (Keep Forfeit/Rules Modal, Header, Turn Indicator, Player Bars, Board, History Controls, Chat) ... */}
         {/* Forfeit Modal */}
         <AnimatePresence>
           {showForfeitModal && (
@@ -402,14 +369,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                           <section>
                               <h3 className="text-white font-bold mb-1">Time Control</h3>
                               <p>Each player has 10 minutes. If your time runs out, you lose (unless opponent has insufficient material).</p>
-                          </section>
-                          <section>
-                              <h3 className="text-white font-bold mb-1">Special Moves</h3>
-                              <ul className="list-disc pl-4 space-y-1">
-                                  <li><strong>Castling:</strong> Move King two squares towards a Rook, and Rook jumps over. Allowed if neither piece moved and path is clear/safe.</li>
-                                  <li><strong>En Passant:</strong> A special pawn capture that can occur immediately after a pawn moves two squares forward from its starting position.</li>
-                                  <li><strong>Promotion:</strong> When a pawn reaches the opposite end, it must be promoted (usually to a Queen).</li>
-                              </ul>
                           </section>
                       </div>
                   </motion.div>
@@ -582,12 +541,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 <ChevronsRight size={20} />
             </button>
         </div>
-
-        {!isViewingLatest && (
-            <div className="mt-4 text-[10px] text-gold-400 font-mono bg-gold-500/10 px-3 py-1 rounded-full animate-pulse border border-gold-500/20">
-                VIEWING HISTORY - BOARD LOCKED
-            </div>
-        )}
 
         {isP2P && socketGame && (
             <GameChat 
