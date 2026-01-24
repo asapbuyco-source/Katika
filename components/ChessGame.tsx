@@ -130,6 +130,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         setOptionSquares({});
         return false;
     }
+    const sourcePiece = game.get(square);
+    if (!sourcePiece) return false;
+
     const moves = game.moves({ square, verbose: true });
     if (moves.length === 0) {
       setOptionSquares({});
@@ -137,8 +140,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     }
     const newSquares: any = {};
     moves.map((move: any) => {
+      const targetPiece = game.get(move.to);
       newSquares[move.to] = {
-        background: game.get(move.to) && game.get(move.to).color !== game.get(square).color
+        background: targetPiece && targetPiece.color !== sourcePiece.color
             ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
             : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
       };
@@ -206,19 +210,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const moveOptions = Object.keys(optionSquares);
     if (selectedSquare && moveOptions.includes(square)) {
         const piece = game.get(selectedSquare);
-        const isPawn = piece?.type === 'p';
-        const isLastRank = (piece.color === 'w' && square[1] === '8') || (piece.color === 'b' && square[1] === '1');
-        
-        if (isPawn && isLastRank) {
-            setPendingPromotion({ from: selectedSquare, to: square });
-            return;
+        if (piece) {
+            const isPawn = piece.type === 'p';
+            const isLastRank = (piece.color === 'w' && square[1] === '8') || (piece.color === 'b' && square[1] === '1');
+            
+            if (isPawn && isLastRank) {
+                setPendingPromotion({ from: selectedSquare, to: square });
+                return;
+            }
         }
         executeMove(selectedSquare, square);
         return;
     }
 
-    if (game.get(square)) {
-        if (game.get(square).color !== myColor) return;
+    const clickedPiece = game.get(square);
+    if (clickedPiece) {
+        if (clickedPiece.color !== myColor) return;
         if (game.turn() !== myColor) return;
         setSelectedSquare(square);
         getMoveOptions(square);
