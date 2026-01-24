@@ -1,6 +1,8 @@
 
 export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings';
 
+export type ProfileTab = 'overview' | 'history' | 'settings';
+
 export interface User {
   id: string;
   name: string;

@@ -310,7 +310,7 @@ io.on('connection', (socket) => {
             
             io.to(roomId).emit('game_update', {
                 ...room,
-                roomId: roomId, // FIX: Ensure roomId is sent
+                roomId: roomId, 
                 gameState: room.gameState,
                 diceRolled: true,
                 diceValue: roll1 + roll2 

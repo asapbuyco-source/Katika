@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ArrowLeft, Shield, Trophy, AlertTriangle, Crown, Brain, Clock, ScrollText, ShieldAlert, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Play, RotateCcw } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -7,7 +6,8 @@ import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-import { Chess, Square, Move } from 'chess.js';
+import { Chess } from 'chess.js';
+import type { Square, Move } from 'chess.js';
 
 interface ChessGameProps {
   table: Table;

@@ -413,7 +413,8 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
            ))}
        </div>
 
-       <AnimatePresence mode="wait">
+       {/* Removed mode="wait" from AnimatePresence to prevent tab switching hangs */}
+       <AnimatePresence>
            <motion.div 
               key={activeTab}
               variants={containerVariants}

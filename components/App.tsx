@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -203,9 +203,10 @@ const AppContent = () => {
       }
   }, [currentView]);
 
-  // 1. Initialize Socket Connection
+  // 1. Initialize Socket Connection (Singleton Logic)
   useEffect(() => {
-    const SOCKET_URL = "https://katika-production.up.railway.app";
+    // Use Environment Variable or Fallback
+    const SOCKET_URL = (import.meta as any).env?.VITE_SOCKET_URL || "https://katika-production.up.railway.app";
     
     const timerInterval = setInterval(() => {
         setConnectionTime(prev => prev + 1);
@@ -231,57 +232,88 @@ const AppContent = () => {
     newSocket.on('disconnect', (reason) => setIsConnected(false));
     newSocket.on('connect_error', (err) => setConnectionError(err.message));
 
-    newSocket.on('match_found', (gameState) => {
-        setSocketGame(gameState);
-        setIsWaitingForSocketMatch(false);
-        setBypassConnection(false);
-        setOpponentDisconnected(false);
-        // Clear old results if this is a rematch or new game
-        setGameResult(null);
-        setRematchStatus('idle');
-        setView('game');
-    });
-
-    newSocket.on('waiting_for_opponent', () => setIsWaitingForSocketMatch(true));
-    newSocket.on('game_update', (gameState) => {
-        // Ensure robustness: If roomId missing in update but present in previous state, preserve it
-        setSocketGame((prev: any) => ({
-            ...(prev || {}),
-            ...gameState,
-            roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined)
-        }));
-    });
-
-    newSocket.on('opponent_disconnected', () => {
-        setOpponentDisconnected(true);
-        // If disconnection happens during rematch phase
-        setRematchStatus('declined');
-        playSFX('error');
-    });
-
-    newSocket.on('opponent_reconnected', () => {
-        setOpponentDisconnected(false);
-        playSFX('notification');
-    });
-
-    newSocket.on('rematch_status', ({ requestorId, status }: { requestorId: string, status: string }) => {
-        if (status === 'requested') {
-            if (requestorId !== user?.id) {
-                setRematchStatus('opponent_requested');
-                playSFX('notification');
-            }
-        } else if (status === 'declined') {
-            setRematchStatus('declined');
-        }
-    });
-
     setSocket(newSocket);
 
     return () => {
         clearInterval(timerInterval);
         newSocket.close();
     };
-  }, []); // Remove user dependency to avoid socket reconnection on user update
+  }, []); 
+
+  // 1.1 Attach Game Listeners (Depends on socket & user to ensure fresh closure)
+  useEffect(() => {
+      if (!socket) return;
+
+      const handleMatchFound = (gameState: any) => {
+          setSocketGame(gameState);
+          setIsWaitingForSocketMatch(false);
+          setBypassConnection(false);
+          setOpponentDisconnected(false);
+          // Clear old results if this is a rematch or new game
+          setGameResult(null);
+          setRematchStatus('idle');
+          setView('game');
+      };
+
+      const handleGameUpdate = (gameState: any) => {
+          // Robust state merging: Prioritize incoming roomId, fallback to id, then previous state
+          setSocketGame((prev: any) => ({
+              ...(prev || {}),
+              ...gameState,
+              roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined),
+              id: gameState.id || gameState.roomId || (prev ? prev.id : undefined)
+          }));
+      };
+
+      const handleOpponentDisconnected = () => {
+          setOpponentDisconnected(true);
+          setRematchStatus('declined');
+          playSFX('error');
+      };
+
+      const handleRematchStatus = ({ requestorId, status }: { requestorId: string, status: string }) => {
+          if (status === 'requested') {
+              // Now 'user' is fresh because this effect depends on [user]
+              if (requestorId !== user?.id) {
+                  setRematchStatus('opponent_requested');
+                  playSFX('notification');
+              }
+          } else if (status === 'declined') {
+              setRematchStatus('declined');
+          }
+      };
+
+      const handleGameOver = ({ winner, financials }: { winner: string, financials?: any }) => {
+          setOpponentDisconnected(false);
+          if (user && winner === user.id) {
+              setGameResult({ 
+                  result: 'win', 
+                  amount: financials ? financials.winnings : 0,
+                  financials: financials 
+              }); 
+          } else {
+              setGameResult({ result: 'loss', amount: 0 });
+          }
+      };
+
+      socket.on('match_found', handleMatchFound);
+      socket.on('waiting_for_opponent', () => setIsWaitingForSocketMatch(true));
+      socket.on('game_update', handleGameUpdate);
+      socket.on('opponent_disconnected', handleOpponentDisconnected);
+      socket.on('opponent_reconnected', () => { setOpponentDisconnected(false); playSFX('notification'); });
+      socket.on('rematch_status', handleRematchStatus);
+      socket.on('game_over', handleGameOver);
+
+      return () => {
+          socket.off('match_found', handleMatchFound);
+          socket.off('waiting_for_opponent');
+          socket.off('game_update', handleGameUpdate);
+          socket.off('opponent_disconnected', handleOpponentDisconnected);
+          socket.off('opponent_reconnected');
+          socket.off('rematch_status', handleRematchStatus);
+          socket.off('game_over', handleGameOver);
+      };
+  }, [socket, user]); // Re-bind when user or socket changes
 
   // 1.5 Automatic Rejoin
   useEffect(() => {
@@ -310,27 +342,6 @@ const AppContent = () => {
           setBypassConnection(true);
       }
   }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
-
-  // Handle Game Over
-  useEffect(() => {
-      if (!socket) return;
-      
-      const handleGameOver = ({ winner, financials }: { winner: string, financials?: any }) => {
-          setOpponentDisconnected(false);
-          if (user && winner === user.id) {
-              setGameResult({ 
-                  result: 'win', 
-                  amount: financials ? financials.winnings : 0,
-                  financials: financials 
-              }); 
-          } else {
-              setGameResult({ result: 'loss', amount: 0 });
-          }
-      };
-
-      socket.on('game_over', handleGameOver);
-      return () => { socket.off('game_over', handleGameOver); };
-  }, [socket, user]);
 
 
   // 5. Firebase Auth
@@ -517,7 +528,7 @@ const AppContent = () => {
       const opponentId = game.players.find((id: string) => id !== user.id);
       const hostProfile = game.profiles ? game.profiles[opponentId] : { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' };
       return {
-          id: game.roomId,
+          id: game.roomId || game.id, // Prefer roomId, fallback to id
           gameType: game.gameType,
           stake: game.stake,
           players: 2,
@@ -588,21 +599,22 @@ const AppContent = () => {
             else setView('landing');
             window.location.reload();
         }}>
+            {/* Added mode="wait" back to fix navigation animations */}
             <AnimatePresence mode="wait">
             {currentView === 'landing' && (
-                <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'auth' && (
-                <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'dashboard' && user && (
-                <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Dashboard 
                     user={user} 
                     setView={setView} 
@@ -613,7 +625,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'lobby' && user && (
-                <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Lobby 
                     user={user} 
                     setView={setView} 
@@ -625,7 +637,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'matchmaking' && matchmakingConfig && user && (
-                <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <MatchmakingScreen
                     user={user}
                     gameType={matchmakingConfig.gameType}
@@ -638,7 +650,7 @@ const AppContent = () => {
             )}
 
             {currentView === 'game' && user && (activeTable || socketGame) && (
-                <motion.div key="game" className="h-full" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
                     {/* Game-specific rendering */}
                     {(activeTable?.gameType === 'Checkers' || socketGame?.gameType === 'Checkers') ? (
                         <CheckersGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
@@ -657,55 +669,55 @@ const AppContent = () => {
             )}
 
             {currentView === 'profile' && user && (
-                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="w-full min-h-full">
                 <Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({...user, ...u})} onNavigate={setView} />
                 </motion.div>
             )}
 
             {currentView === 'finance' && user && (
-                <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Finance user={user} onTopUp={() => {}} />
                 </motion.div>
             )}
 
             {currentView === 'how-it-works' && (
-                <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />
                 </motion.div>
             )}
 
             {currentView === 'admin' && user && user.isAdmin && (
-                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <AdminDashboard user={user} />
                 </motion.div>
             )}
 
             {currentView === 'help-center' && (
-                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'report-bug' && (
-                <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <ReportBug onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'terms' && (
-                <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'privacy' && (
-                <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} />
                 </motion.div>
             )}
 
             {currentView === 'forum' && user && (
-                <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+                <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <Forum user={user} />
                 </motion.div>
             )}
