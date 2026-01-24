@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, Shield } from 'lucide-react';
+import { ArrowLeft, Crown, Shield, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -242,6 +242,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       setPendingPromotion(null);
   };
 
+  const handleQuit = () => {
+      if (isP2P && socket) {
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+      }
+      onGameEnd('quit');
+  };
+
   const makeBotMove = () => {
       const moves = game.moves({ verbose: true });
       if (game.isGameOver() || moves.length === 0) return;
@@ -284,6 +291,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        {/* Promotion Modal */}
         <AnimatePresence>
             {pendingPromotion && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
@@ -308,6 +316,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             )}
         </AnimatePresence>
 
+        {/* Forfeit Modal - Restored */}
+        <AnimatePresence>
+          {showForfeitModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowForfeitModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-[#1a1a1a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <AlertTriangle className="text-red-500 mb-4" size={32} />
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
+                          </p>
+                      </div>
+                      <div className="flex gap-3">
+                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
+                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Forfeit</button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
+        {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
             <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
@@ -317,6 +348,28 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
             </div>
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+       </div>
+
+       {/* Turn Indicator */}
+       <div className="mb-4 flex flex-col items-center justify-center">
+            <motion.div
+                key={game.turn()} // Animate on change
+                initial={{ scale: 0.9 }}
+                animate={{ scale: 1 }}
+                className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest shadow-lg border transition-colors duration-300 ${
+                    game.turn() === myColor 
+                    ? 'bg-gold-500 text-royal-950 border-gold-400' 
+                    : 'bg-royal-800 text-slate-400 border-white/10'
+                }`}
+            >
+                {game.turn() === myColor ? "Your Turn" : "Opponent's Turn"}
+                <span className="ml-2 text-xs opacity-75">({game.turn() === 'w' ? 'White' : 'Black'})</span>
+            </motion.div>
+            {!isViewingLatest && (
+                <div className="mt-2 text-[10px] text-gold-400 font-mono bg-gold-500/10 px-3 py-1 rounded-full animate-pulse border border-gold-500/20">
+                    VIEWING HISTORY - BOARD LOCKED
+                </div>
+            )}
        </div>
 
        {/* Board */}
@@ -380,6 +433,46 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 )}
             </div>
        </div>
+
+        {/* History Controls */}
+        <div className="mt-4 flex items-center justify-between w-full max-w-sm gap-2 bg-royal-800/50 p-2 rounded-xl border border-white/5">
+            <button 
+                onClick={() => setViewIndex(-1)} 
+                disabled={viewIndex === -1} 
+                className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
+            >
+                <ChevronsLeft size={20} />
+            </button>
+            <button 
+                onClick={() => setViewIndex(v => Math.max(-1, v - 1))} 
+                disabled={viewIndex === -1} 
+                className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
+            >
+                <ChevronLeft size={20} />
+            </button>
+            
+            <div className="flex flex-col items-center">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-widest">Moves</span>
+                <span className="text-sm font-mono text-white font-bold">
+                    {viewIndex + 1} <span className="text-slate-500">/</span> {moveHistory.length}
+                </span>
+            </div>
+
+            <button 
+                onClick={() => setViewIndex(v => Math.min(moveHistory.length - 1, v + 1))} 
+                disabled={isViewingLatest} 
+                className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
+            >
+                <ChevronRight size={20} />
+            </button>
+            <button 
+                onClick={() => setViewIndex(moveHistory.length - 1)} 
+                disabled={isViewingLatest} 
+                className="p-3 hover:bg-white/10 rounded-lg disabled:opacity-30 transition-colors text-slate-300 hover:text-white"
+            >
+                <ChevronsRight size={20} />
+            </button>
+        </div>
 
         {isP2P && socketGame && (
             <GameChat 
