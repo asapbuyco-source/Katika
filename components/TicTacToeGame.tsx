@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -43,7 +44,10 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.board) setBoard(socketGame.board);
+          // Fix: Access board from gameState
+          const serverBoard = socketGame.gameState?.board || socketGame.board;
+          if (serverBoard) setBoard(serverBoard);
+          
           if (socketGame.turn) setIsXNext(socketGame.turn === socketGame.players[0]);
           
           if (socketGame.winner) {
@@ -64,7 +68,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
               addLog("Draw! Rematch...", "scanning");
           } else {
               // Reset
-              if (socketGame.board.every((c: any) => c === null) && (winner || isDraw)) {
+              if (serverBoard && serverBoard.every((c: any) => c === null) && (winner || isDraw)) {
                   setWinner(null);
                   setIsDraw(false);
                   setIsXNext(true); 
