@@ -484,6 +484,9 @@ io.on('connection', (socket) => {
                     // Update suit
                     room.gameState.activeSuit = action.suit;
                     
+                    // Emit update BEFORE ending game so client sees empty hand
+                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+
                     // Win Check
                     if (hand.length === 0) {
                         endGame(roomId, userId, 'Hand Cleared');

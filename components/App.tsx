@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -45,7 +45,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -256,6 +256,10 @@ const AppContent = () => {
       };
 
       const handleGameUpdate = (gameState: any) => {
+          // Guard: Only update if we are in game mode or waiting for one
+          // This prevents stray updates from resurrecting game state after user leaves
+          if (viewRef.current !== 'game' && viewRef.current !== 'matchmaking') return;
+
           // Robust state merging: Prioritize incoming roomId, fallback to id, then previous state
           setSocketGame((prev: any) => ({
               ...(prev || {}),
@@ -599,8 +603,8 @@ const AppContent = () => {
             else setView('landing');
             window.location.reload();
         }}>
-            {/* Added mode="wait" back to fix navigation animations */}
-            <AnimatePresence mode="wait">
+            {/* Removed mode="wait" to prevent exit animations from blocking new route mounting */}
+            <AnimatePresence>
             {currentView === 'landing' && (
                 <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
                 <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />
