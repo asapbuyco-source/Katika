@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ArrowLeft, Crown, Clock } from 'lucide-react';
+
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ArrowLeft, Crown, Clock, BookOpen, X, AlertTriangle } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -37,13 +38,6 @@ const formatTime = (seconds: number) => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
-
-const TimerDisplay = ({ time, isActive }: { time: number, isActive: boolean }) => (
-    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors duration-300 ${isActive ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' : 'bg-black/30 border-white/10 text-slate-500'} ${time < 30 && isActive ? 'text-red-600 border-red-600' : ''}`}>
-        <Clock size={14} className={isActive ? 'animate-pulse' : ''} />
-        <span className="font-mono font-bold text-lg leading-none pt-0.5">{formatTime(time)}</span>
-    </div>
-);
 
 const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn, rotate }: any) => {
   const isMe = piece?.player === 'me';
@@ -104,6 +98,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [mustJumpFrom, setMustJumpFrom] = useState<string | null>(null);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
   const [isGameOver, setIsGameOver] = useState(false);
   
@@ -383,28 +378,84 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const pieceMap = useMemo(() => new Map(pieces.map(p => [`${p.r},${p.c}`, p])), [pieces]);
   const validMoveMap = useMemo(() => new Map(validMoves.map(m => [`${m.r},${m.c}`, m])), [validMoves]);
 
+  // Determine opponent profile
+  const getOpponentProfile = () => {
+      if (!isP2P) return { name: "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" };
+      if (socketGame?.profiles) {
+          const oppId = socketGame.players.find((id: string) => id !== user.id);
+          return socketGame.profiles[oppId] || { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
+      }
+      return { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
+  };
+  const opponent = getOpponentProfile();
+
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        {/* Forfeit Modal */}
         <AnimatePresence>
           {showForfeitModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowForfeitModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
                   <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-[#1a1a1a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-                      <h2 className="text-xl font-black text-white mb-2 uppercase italic text-center">Forfeit?</h2>
-                      <p className="text-sm text-slate-400 text-center mb-6">You will lose your entire stake.</p>
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <AlertTriangle className="text-red-500 mb-4" size={32} />
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
+                          </p>
+                      </div>
                       <div className="flex gap-3">
                           <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
-                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Quit</button>
+                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Forfeit</button>
                       </div>
                   </motion.div>
               </div>
           )}
        </AnimatePresence>
 
+       {/* Rules Modal */}
+       <AnimatePresence>
+          {showRulesModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowRulesModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2"><BookOpen size={20} className="text-gold-400"/> Checkers Rules</h2>
+                          <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                      </div>
+                      <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Objective</h3>
+                              <p>Capture all of your opponent's pieces or block them so they cannot move. If a player has no pieces left or no valid moves, they lose.</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Movement</h3>
+                              <p>Pieces move forward diagonally to an adjacent unoccupied square. Kings can move forward and backward diagonally.</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Capturing</h3>
+                              <p>If an adjacent square contains an opponent's piece, and the square immediately beyond it is empty, you must jump over it to capture. <strong className="text-red-400">Jumps are mandatory!</strong></p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">King Promotion</h3>
+                              <p>When a piece reaches the farthest row on the opposite side, it becomes a King.</p>
+                          </section>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
+        {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
-            <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
-                <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
-            </button>
+            <div className="flex items-center gap-2">
+                <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white">
+                    <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
+                </button>
+                <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
+                    <BookOpen size={18} />
+                </button>
+            </div>
             <div className="flex flex-col items-center">
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
@@ -412,7 +463,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
-        <div className="mb-4 flex items-center justify-center">
+        {/* Turn Indicator */}
+        <div className="mb-2 flex flex-col items-center justify-center">
             <motion.div 
                 key={turn}
                 initial={{ scale: 0.8, opacity: 0 }}
@@ -427,21 +479,26 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             </motion.div>
         </div>
 
-       <div className="flex flex-col md:flex-row items-center justify-center gap-8 w-full max-w-5xl">
-           <div className="order-1 flex md:flex-col items-center gap-4 md:w-32">
-               <div className={`relative transition-all duration-300 ${turn === 'opponent' ? 'scale-110 ring-4 ring-red-500/50 rounded-2xl' : 'opacity-70'}`}>
-                   <img src={table.host?.avatar || "https://i.pravatar.cc/150"} className="w-16 h-16 rounded-2xl border-2 border-red-500 shadow-[0_0_20px_red]" />
-                   {turn === 'opponent' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse whitespace-nowrap">Thinking...</div>}
-               </div>
-               <TimerDisplay time={timeRemaining.opponent} isActive={turn === 'opponent'} />
-               <div className="flex gap-1 mt-2">
-                   {Array.from({length: capturedCount.opponent}).map((_, i) => (
-                       <div key={i} className="w-3 h-3 rounded-full bg-gold-500 border border-black/20" />
-                   ))}
-               </div>
-           </div>
+        {/* OPPONENT BAR */}
+        <div className="w-full max-w-[500px] flex justify-between items-end mb-2 px-2">
+            <div className="flex items-center gap-3">
+                <img src={opponent.avatar} className="w-10 h-10 rounded-full border border-red-500" alt="Opponent" />
+                <div className="flex flex-col">
+                    <span className="text-sm font-bold text-white">{opponent.name}</span>
+                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                        Captured: <span className="text-white">{capturedCount.opponent}</span>
+                    </span>
+                </div>
+            </div>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${turn === 'opponent' ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
+                <Clock size={16} />
+                <span className="font-mono font-bold text-lg">{formatTime(timeRemaining.opponent)}</span>
+            </div>
+       </div>
 
-           <div className={`order-2 w-full max-w-[500px] aspect-square relative bg-[#1a103c] rounded-xl shadow-2xl border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} grid grid-cols-8 grid-rows-8 overflow-hidden transition-all duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
+       {/* BOARD */}
+       <div className={`relative w-full max-w-[500px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} transition-colors duration-300`}>
+           <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10 overflow-hidden rounded-lg transition-all duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
                {Array.from({length: 8}).map((_, r) => Array.from({length: 8}).map((_, c) => {
                    const key = `${r},${c}`;
                    return <CheckersCell 
@@ -461,19 +518,23 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                           />;
                }))}
            </div>
+       </div>
 
-           <div className="order-3 flex md:flex-col items-center gap-4 md:w-32">
-               <div className={`relative transition-all duration-300 ${turn === 'me' ? 'scale-110 ring-4 ring-gold-500/50 rounded-2xl' : 'opacity-70'}`}>
-                   <img src={user.avatar} className="w-16 h-16 rounded-2xl border-2 border-gold-500 shadow-[0_0_20px_gold]" />
-                   {turn === 'me' && <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 bg-gold-500 text-black text-[10px] font-bold px-2 py-0.5 rounded-full whitespace-nowrap">Active</div>}
-               </div>
-               <TimerDisplay time={timeRemaining.me} isActive={turn === 'me'} />
-               <div className="flex gap-1 mt-2">
-                   {Array.from({length: capturedCount.me}).map((_, i) => (
-                       <div key={i} className="w-3 h-3 rounded-full bg-red-600 border border-black/20" />
-                   ))}
-               </div>
-           </div>
+       {/* PLAYER BAR (ME) */}
+       <div className="w-full max-w-[500px] flex justify-between items-start mt-2 mb-4 px-2">
+            <div className="flex items-center gap-3">
+                <img src={user.avatar} className="w-10 h-10 rounded-full border border-gold-500" alt="Me" />
+                <div className="flex flex-col">
+                    <span className="text-sm font-bold text-white">You</span>
+                    <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1">
+                        Captured: <span className="text-white">{capturedCount.me}</span>
+                    </span>
+                </div>
+            </div>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${turn === 'me' ? 'bg-gold-500/20 border-gold-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
+                <Clock size={16} />
+                <span className="font-mono font-bold text-lg">{formatTime(timeRemaining.me)}</span>
+            </div>
        </div>
 
         {isP2P && socketGame && (
