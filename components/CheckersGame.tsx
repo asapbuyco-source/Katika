@@ -39,7 +39,7 @@ const formatTime = (seconds: number) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn, rotate }: any) => {
+const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighted, validMove, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn, rotate }: any) => {
   const isMe = piece?.player === 'me';
   const isClickable = (isMeTurn && isMe) || !!validMove;
 
@@ -69,7 +69,12 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, validMove, i
                     exit={{ scale: 0, opacity: 0 }}
                     className="relative w-[80%] h-[80%] z-20 pointer-events-none"
                 >
-                    <div className={`w-full h-full rounded-full shadow-[0_4px_6px_rgba(0,0,0,0.5)] border-2 flex items-center justify-center relative overflow-hidden ${isMe ? 'bg-gradient-to-br from-gold-400 to-yellow-600 border-yellow-200' : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300'} ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}`}>
+                    <div className={`
+                        w-full h-full rounded-full shadow-[0_4px_6px_rgba(0,0,0,0.5)] border-2 flex items-center justify-center relative overflow-hidden transition-all duration-300
+                        ${isMe ? 'bg-gradient-to-br from-gold-400 to-yellow-600 border-yellow-200' : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300'} 
+                        ${isSelected ? 'ring-4 ring-white/30 brightness-110' : ''}
+                        ${isHighlighted ? 'ring-4 ring-red-500 animate-pulse shadow-[0_0_20px_red]' : ''}
+                    `}>
                         <div className={`absolute inset-[20%] rounded-full border border-black/10 ${isMe ? 'bg-gold-300' : 'bg-red-400'}`}></div>
                         {piece.isKing && (
                             <motion.div 
@@ -94,6 +99,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
   const [validMoves, setValidMoves] = useState<Move[]>([]);
   const [lastMove, setLastMove] = useState<{from: string, to: string} | null>(null);
+  const [highlightedPieces, setHighlightedPieces] = useState<string[]>([]);
   
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [mustJumpFrom, setMustJumpFrom] = useState<string | null>(null);
@@ -206,12 +212,24 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
 
     if (mustJumpFrom && mustJumpFrom !== p.id) {
-        playSFX('error'); return;
+        playSFX('error');
+        // Hint: Highlight the piece that MUST continue the jump chain
+        setHighlightedPieces([mustJumpFrom]);
+        setTimeout(() => setHighlightedPieces([]), 1500);
+        return;
     }
     
     const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
     if (hasJump && !canThisPieceJump) {
-        playSFX('error'); 
+        playSFX('error');
+        // Hint: Highlight all pieces that CAN make a jump
+        const mandatoryPieces = [...new Set(moves.filter(m => m.isJump).map(m => {
+            const piece = pieces.find(pi => pi.r === m.fromR && pi.c === m.fromC);
+            return piece ? piece.id : '';
+        }))].filter(id => id !== '');
+        
+        setHighlightedPieces(mandatoryPieces);
+        setTimeout(() => setHighlightedPieces([]), 1500);
         return; 
     }
     
@@ -508,6 +526,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             isDark={(r+c)%2===1} 
                             piece={pieceMap.get(key)} 
                             isSelected={selectedPieceId === pieceMap.get(key)?.id} 
+                            isHighlighted={highlightedPieces.includes(pieceMap.get(key)?.id || '')}
                             validMove={validMoveMap.get(key)} 
                             isLastFrom={lastMove?.from === key} 
                             isLastTo={lastMove?.to === key} 
