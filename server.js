@@ -120,13 +120,31 @@ const createInitialGameState = (gameType, p1, p2) => {
                 turn: p1
             };
         case 'Checkers':
+            const checkersPieces = [];
+            let cid = 0;
+            // Player 2 (Top, Rows 0-2)
+            for(let r=0; r<3; r++) {
+                for(let c=0; c<8; c++) {
+                    if((r+c)%2===1) checkersPieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c });
+                }
+            }
+            // Player 1 (Bottom, Rows 5-7)
+            for(let r=5; r<8; r++) {
+                for(let c=0; c<8; c++) {
+                    if((r+c)%2===1) checkersPieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c });
+                }
+            }
+            return {
+                ...common,
+                pieces: checkersPieces,
+                turn: p1
+            };
         case 'Chess':
             return {
                 ...common,
-                board: null,
-                fen: null,
-                pgn: null,
-                pieces: null
+                fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', // Standard start FEN
+                pgn: '',
+                turn: p1
             };
         default:
             return common;
@@ -196,7 +214,7 @@ io.on('connection', (socket) => {
                 id: roomId,
                 gameType,
                 stake,
-                players: [opponentId, userId], // Player 0, Player 1
+                players: [opponentId, userId], // Player 0 (Host), Player 1 (Joiner)
                 profiles: {
                     [opponentId]: opponent.userProfile,
                     [userId]: userProfile
