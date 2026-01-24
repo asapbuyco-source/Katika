@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, Shield, AlertTriangle, X, Circle, RotateCcw, Clock, Cpu, RefreshCw, Settings, ChevronDown, Wifi, Loader2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -16,28 +16,24 @@ interface TicTacToeGameProps {
 
 type CellValue = 'X' | 'O' | null;
 type WinningLine = number[] | null;
-type Difficulty = 'Easy' | 'Medium' | 'Hard';
 
-const TURN_DURATION = 15; // Seconds
+const TURN_DURATION = 15; 
 
 export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [board, setBoard] = useState<CellValue[]>(Array(9).fill(null));
-  const [isXNext, setIsXNext] = useState(true); // X always goes first
+  const [isXNext, setIsXNext] = useState(true); 
   const [winner, setWinner] = useState<CellValue>(null);
   const [winningLine, setWinningLine] = useState<WinningLine>(null);
   const [isDraw, setIsDraw] = useState(false);
   const [drawStreak, setDrawStreak] = useState(0); 
   const [showForfeitModal, setShowForfeitModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
-  const [difficulty, setDifficulty] = useState<Difficulty>('Medium');
-  
-  // Timer State
   const [timeLeft, setTimeLeft] = useState(TURN_DURATION);
+  const [isProcessingMove, setIsProcessingMove] = useState(false);
 
-  // Player assignments
   const isP2P = !!socket && !!socketGame;
   const isHost = table.host?.id === user.id || (isP2P && socketGame.players[0] === user.id);
-  const mySymbol: CellValue = isHost ? 'X' : 'O'; // Host/Player1 is X
+  const mySymbol: CellValue = isHost ? 'X' : 'O'; 
   const isMyTurn = (isXNext && mySymbol === 'X') || (!isXNext && mySymbol === 'O');
   const isBotGame = !isP2P && (table.guest?.id === 'bot' || table.host?.id === 'bot');
 
@@ -45,20 +41,12 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
   };
 
-  // --- SOCKET SYNC ---
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.board) {
-              setBoard(socketGame.board);
-              
-              // Determine turn from backend or deduce from board state
-              // Backend 'turn' holds userId.
-              const isPlayer1Turn = socketGame.turn === socketGame.players[0];
-              setIsXNext(isPlayer1Turn);
-          }
-
+          if (socketGame.board) setBoard(socketGame.board);
+          if (socketGame.turn) setIsXNext(socketGame.turn === socketGame.players[0]);
+          
           if (socketGame.winner) {
-              // Convert userId winner to Symbol
               const winSymbol = socketGame.winner === socketGame.players[0] ? 'X' : 'O';
               setWinner(winSymbol);
               if (socketGame.winner === user.id) {
@@ -74,39 +62,39 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
               setIsDraw(true);
               playSFX('notification');
               addLog("Draw! Rematch...", "scanning");
-              // Auto-restart handled by backend state reset usually, 
-              // but for now visual feedback only
           } else {
-              // Reset if new round started
+              // Reset
               if (socketGame.board.every((c: any) => c === null) && (winner || isDraw)) {
                   setWinner(null);
                   setIsDraw(false);
+                  setIsXNext(true); 
               }
           }
       }
   }, [socketGame, user.id, isP2P]);
 
-  // --- GAME LOOP & TIMER ---
   useEffect(() => {
       if (winner || isDraw) return;
-
-      // Reset timer on turn switch
+      
       setTimeLeft(TURN_DURATION);
+      let timeoutId: any;
 
       const timer = setInterval(() => {
           setTimeLeft((prev) => {
               if (prev <= 1) {
                   clearInterval(timer);
-                  // In P2P, server handles timeout usually, but we can show local alert
-                  if (!isP2P) handleTimeout();
+                  timeoutId = setTimeout(() => !isP2P && handleTimeout(), 0);
                   return 0;
               }
               return prev - 1;
           });
       }, 1000);
 
-      return () => clearInterval(timer);
-  }, [isXNext, winner, isDraw, board]); // Reset on board change (move made)
+      return () => {
+          clearInterval(timer);
+          if (timeoutId) clearTimeout(timeoutId);
+      };
+  }, [isXNext, winner, isDraw]);
 
   const handleTimeout = () => {
       playSFX('error');
@@ -119,14 +107,13 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
       }
   };
 
-  // --- BOT LOGIC (LOCAL ONLY) ---
   useEffect(() => {
       if (isBotGame && !isMyTurn && !winner && !isDraw) {
           const delay = Math.random() * 1000 + 500;
           const timeout = setTimeout(() => makeBotMove(board), delay);
           return () => clearTimeout(timeout);
       }
-  }, [isBotGame, isMyTurn, board, winner, isDraw, difficulty]);
+  }, [isBotGame, isMyTurn, board, winner, isDraw]);
 
   const checkWinnerLocal = (squares: CellValue[]) => {
     const lines = [
@@ -144,17 +131,17 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   };
 
   const handleCellClick = (index: number) => {
-    if (board[index] || winner || isDraw || !isMyTurn) return;
+    if (board[index] || winner || isDraw || !isMyTurn || isProcessingMove) return;
 
     if (isP2P && socket) {
-        // Emit move to server
+        setIsProcessingMove(true);
         socket.emit('game_action', { 
             roomId: socketGame.roomId, 
             action: { type: 'MOVE', index } 
         });
-        playSFX('click'); // Feedback immediately
+        playSFX('click');
+        setTimeout(() => setIsProcessingMove(false), 500);
     } else {
-        // Local processing
         processMove(index, mySymbol);
     }
   };
@@ -171,45 +158,41 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
           setWinningLine(result.line);
           if (result.winner === mySymbol) {
               playSFX('win');
-              addLog("Victory Secured!", "secure");
               setTimeout(() => onGameEnd('win'), 2500);
           } else {
               playSFX('loss');
-              addLog("Defeat.", "alert");
               setTimeout(() => onGameEnd('loss'), 2500);
           }
       } else if (!newBoard.includes(null)) {
-          const nextStreak = drawStreak + 1;
-          setDrawStreak(nextStreak);
-          setIsDraw(true); 
-
-          if (nextStreak >= 3) {
-              playSFX('loss');
-              addLog("3rd Draw. Match Ended.", "alert");
-              setTimeout(() => onGameEnd('quit'), 2500);
+          if (isP2P && socket) {
+              socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
           } else {
-              playSFX('notification');
-              addLog(`Draw! Rematch (${nextStreak}/3)...`, "scanning");
-              setTimeout(() => {
-                  setBoard(Array(9).fill(null));
-                  setWinner(null);
-                  setWinningLine(null);
-                  setIsDraw(false);
-                  setIsXNext(prev => !prev);
-              }, 2000);
+              const nextStreak = drawStreak + 1;
+              setDrawStreak(nextStreak);
+              setIsDraw(true); 
+              if (nextStreak >= 3) {
+                  playSFX('loss');
+                  setTimeout(() => onGameEnd('quit'), 2500);
+              } else {
+                  playSFX('notification');
+                  setTimeout(() => {
+                      setBoard(Array(9).fill(null));
+                      setWinner(null);
+                      setWinningLine(null);
+                      setIsDraw(false);
+                      setIsXNext(prev => !prev);
+                  }, 2000);
+              }
           }
       } else {
           setIsXNext(!isXNext);
       }
   };
 
-  // --- BOT LOGIC (OMITTED FOR BREVITY, SAME AS BEFORE) ---
-  const getEmptyIndices = (squares: CellValue[]) => squares.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
-  
   const makeBotMove = (currentBoard: CellValue[]) => {
-      const emptyIndices = getEmptyIndices(currentBoard);
+      const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
       if (emptyIndices.length === 0) return;
-      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; // Simple random for now
+      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; 
       processMove(targetIndex, mySymbol === 'X' ? 'O' : 'X');
   };
 
@@ -262,14 +245,12 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
         {/* Players & Timer */}
         <div className="w-full max-w-lg flex justify-between items-center mb-8 px-4">
-            {/* Player 1 (Left) */}
             <div className={`flex flex-col items-center gap-2 transition-all duration-300 ${isXNext ? 'scale-110 opacity-100' : 'opacity-60 grayscale'}`}>
                 <div className="relative">
                     <div className="w-16 h-16 rounded-full border-4 border-gold-500 overflow-hidden shadow-[0_0_20px_gold]">
                         <img src={user.avatar} className="w-full h-full object-cover" />
                     </div>
                     <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full border-2 border-gold-500 p-1">
-                        {/* If I am Host (Player 1), I am X */}
                         {isHost ? <X size={14} className="text-gold-400" strokeWidth={4} /> : <Circle size={14} className="text-gold-400" strokeWidth={4} />}
                     </div>
                 </div>
@@ -281,7 +262,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 )}
             </div>
 
-            {/* VS Divider */}
             <div className="flex flex-col items-center">
                 <div className="text-2xl font-black text-slate-700 italic select-none">VS</div>
                 {isP2P && !isMyTurn && !winner && !isDraw && (
@@ -291,7 +271,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 )}
             </div>
 
-            {/* Player 2 (Right) */}
             <div className={`flex flex-col items-center gap-2 transition-all duration-300 ${!isXNext ? 'scale-110 opacity-100' : 'opacity-60 grayscale'}`}>
                 <div className="relative">
                     <div className="w-16 h-16 rounded-full border-4 border-purple-500 overflow-hidden shadow-[0_0_20px_purple]">
@@ -317,14 +296,20 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     <motion.button
                         key={idx}
                         whileTap={{ scale: 0.95 }}
+                        whileHover={cell === null && isMyTurn && !winner ? { backgroundColor: 'rgba(255,255,255,0.05)' } : {}}
                         onClick={() => handleCellClick(idx)}
                         disabled={cell !== null || winner !== null || isDraw || (isP2P && !isMyTurn)}
                         className={`
                             w-24 h-24 rounded-xl flex items-center justify-center text-5xl relative overflow-hidden shadow-inner border border-white/5 transition-colors
-                            ${cell === null && isMyTurn && !winner && !isDraw ? 'hover:bg-white/5 cursor-pointer' : 'cursor-default'}
+                            ${cell === null && isMyTurn && !winner && !isDraw ? 'cursor-pointer' : 'cursor-default'}
                             ${winningLine?.includes(idx) ? (winner === 'X' ? 'bg-gold-500/20 border-gold-500' : 'bg-purple-500/20 border-purple-500') : 'bg-royal-950'}
                         `}
                     >
+                        {cell === null && isMyTurn && !winner && (
+                            <div className="opacity-10 absolute inset-0 flex items-center justify-center pointer-events-none">
+                                {mySymbol === 'X' ? <X size={48} /> : <Circle size={48} />}
+                            </div>
+                        )}
                         <AnimatePresence>
                             {cell === 'X' && (
                                 <motion.div
@@ -385,7 +370,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 )}
             </AnimatePresence>
         </div>
-
     </div>
   );
 };

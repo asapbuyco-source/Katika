@@ -1,6 +1,5 @@
-
-import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, AlertTriangle, HelpCircle, X as XIcon, Zap, ShieldAlert, Hand, Crown } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, Zap, X, Check } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -74,22 +73,24 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [showSuitSelector, setShowSuitSelector] = useState(false);
   const [pendingCard, setPendingCard] = useState<Card | null>(null);
+  const [deckSize, setDeckSize] = useState(0);
 
   const isP2P = !!socket && !!socketGame;
 
   // Sync State
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.hands && socketGame.hands[user.id]) {
-              setMyHand(socketGame.hands[user.id]);
+          if (socketGame.gameState && socketGame.gameState.hands && socketGame.gameState.hands[user.id]) {
+              setMyHand(socketGame.gameState.hands[user.id]);
               
               // Count opponent cards
               const oppId = socketGame.players.find((id: string) => id !== user.id);
-              if (socketGame.hands[oppId]) setOppHandCount(socketGame.hands[oppId].length);
+              if (socketGame.gameState.hands[oppId]) setOppHandCount(socketGame.gameState.hands[oppId].length);
           }
-          if (socketGame.discardPile) setDiscardPile(socketGame.discardPile);
-          if (socketGame.activeSuit) setActiveSuit(socketGame.activeSuit);
+          if (socketGame.gameState && socketGame.gameState.discardPile) setDiscardPile(socketGame.gameState.discardPile);
+          if (socketGame.gameState && socketGame.gameState.activeSuit) setActiveSuit(socketGame.gameState.activeSuit);
           if (socketGame.turn) setTurn(socketGame.turn === user.id ? 'me' : 'opp');
+          if (socketGame.gameState && socketGame.gameState.deck) setDeckSize(socketGame.gameState.deck.length);
           
           if (socketGame.winner) {
               onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
@@ -101,7 +102,6 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       if (turn !== 'me') return;
       
       const top = discardPile[discardPile.length - 1];
-      // J is wild, matches anything. Otherwise must match suit or rank.
       const isJack = card.rank === 'J';
       const matchesSuit = card.suit === activeSuit;
       const matchesRank = top && card.rank === top.rank;
@@ -135,8 +135,19 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       if (pendingCard) emitMove(pendingCard, suit);
   };
 
+  const handleCancelSuitSelect = () => {
+      setShowSuitSelector(false);
+      setPendingCard(null);
+  };
+
   const drawCard = () => {
       if (turn !== 'me') return;
+      
+      if (deckSize === 0) {
+          playSFX('error'); // Cannot draw if deck empty
+          return;
+      }
+
       if (isP2P && socket) {
           socket.emit('game_action', {
               roomId: socketGame.roomId,
@@ -145,35 +156,6 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       }
       playSFX('move');
   };
-
-  // --- ACCESS CONTROL CHECK ---
-  if (!user.isAdmin) {
-      return (
-          <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
-              <div className="bg-royal-900 border border-gold-500/30 p-8 rounded-3xl shadow-2xl max-w-md relative overflow-hidden">
-                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                  <div className="absolute inset-0 bg-gold-500/5 pointer-events-none"></div>
-                  
-                  <div className="relative z-10 flex flex-col items-center">
-                      <div className="w-20 h-20 bg-gold-500/20 rounded-full flex items-center justify-center mb-6 border border-gold-500/30">
-                          <Layers size={40} className="text-gold-500" />
-                      </div>
-                      <h2 className="text-3xl font-display font-bold text-white mb-3">Coming Soon</h2>
-                      <p className="text-slate-400 mb-8 leading-relaxed">
-                          The <span className="text-white font-bold">Kmer Card Arena</span> is currently in <span className="text-gold-400 font-bold">Closed Beta</span>. 
-                          Access is restricted to Admins and Verified Testers while we finalize the rules engine.
-                      </p>
-                      <button 
-                          onClick={() => onGameEnd('quit')}
-                          className="px-8 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-bold transition-all flex items-center gap-2 group"
-                      >
-                          <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" /> Return to Lobby
-                      </button>
-                  </div>
-              </div>
-          </div>
-      );
-  }
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
@@ -186,8 +168,11 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
                         initial={{ scale: 0.9, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         exit={{ scale: 0.9, opacity: 0 }}
-                        className="bg-royal-900 border border-gold-500 rounded-2xl p-6 shadow-2xl"
+                        className="bg-royal-900 border border-gold-500 rounded-2xl p-6 shadow-2xl relative"
                     >
+                        <button onClick={handleCancelSuitSelect} className="absolute top-2 right-2 text-slate-400 hover:text-white">
+                            <X size={20} />
+                        </button>
                         <h3 className="text-white font-bold text-center mb-4">Select a Suit</h3>
                         <div className="grid grid-cols-2 gap-4">
                             {['H', 'D', 'C', 'S'].map((s) => (
@@ -235,8 +220,12 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
             {/* Draw Deck */}
             <div className="relative cursor-pointer group" onClick={drawCard}>
                 <div className="absolute top-1 left-1 w-24 h-36 bg-royal-800 rounded-xl border border-white/5"></div>
-                <div className="relative w-24 h-36 bg-royal-800 rounded-xl border-2 border-white/20 flex items-center justify-center group-hover:-translate-y-2 transition-transform">
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Draw</span>
+                <div className="relative w-24 h-36 bg-royal-800 rounded-xl border-2 border-white/20 flex items-center justify-center group-hover:-translate-y-2 transition-transform overflow-hidden">
+                    {deckSize === 0 ? (
+                        <span className="text-xs font-bold text-red-500 uppercase tracking-widest">Empty</span>
+                    ) : (
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Draw ({deckSize})</span>
+                    )}
                 </div>
             </div>
 

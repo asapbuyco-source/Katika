@@ -22,57 +22,38 @@ interface Piece { id: number; color: PlayerColor; step: number; owner?: string; 
 const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47];
 
 // Board Waypoints for visual interpolation
-// Simplified Rectangular Path mapped to % coordinates on the board
 const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) => {
     // 1. Base Positions (Home)
     if (step === -1) {
         if (color === 'Red') {
-            const positions = [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}]; // Top Left Base
+            const positions = [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}]; 
             return positions[pieceIndex % 4];
         } else {
-            const positions = [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}]; // Bottom Right Base
+            const positions = [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}]; 
             return positions[pieceIndex % 4];
         }
     }
 
     // 2. Home Straight (Victory Road)
-    // Steps 51-56 are the home straight
     if (step >= 51) {
-        const homeIndex = step - 51; // 0 to 5
-        const progress = 10 + (homeIndex * 6.5); // spacing
+        const homeIndex = step - 51; 
+        const progress = 10 + (homeIndex * 6.5); 
         
-        if (color === 'Red') return { x: progress, y: 50 }; // Left to Center (Red Home)
-        if (color === 'Yellow') return { x: 100 - progress, y: 50 }; // Right to Center (Yellow Home)
+        if (color === 'Red') return { x: progress, y: 50 }; 
+        if (color === 'Yellow') return { x: 100 - progress, y: 50 }; 
     }
 
-    // 3. Main Track (0-50)
-    // Red Start Offset: 0. Yellow Start Offset: 26.
+    // 3. Main Track
     let normalizedIndex = step;
     if (color === 'Yellow') normalizedIndex = (step + 26) % 52;
 
-    // Define the rect path manually for clean visual lines
-    // Top-Left corner is around index 11? No, let's map standard Ludo board indices roughly
-    // 0 = Red Start (left side of top arm, moving up? No, usually moving Clockwise)
-    // Let's assume Clockwise.
-    // 0 (Red Start): (10%, 40%) -> Move Up -> Right -> Down -> Left
-    
-    // We break the 52 steps into 4 sides of 13 steps
-    const side = Math.floor(normalizedIndex / 13);
-    const localStep = normalizedIndex % 13;
-
-    // RECTANGULAR LOGIC REFINED
-    // 0-12: Top Side (Left to Right)
-    // 13-25: Right Side (Top to Bottom)
-    // 26-38: Bottom Side (Right to Left)
-    // 39-51: Left Side (Bottom to Top)
-    
-    if (normalizedIndex < 13) { // Top
+    if (normalizedIndex < 13) { 
         return { x: 15 + (normalizedIndex * 5.8), y: 10 };
-    } else if (normalizedIndex < 26) { // Right
+    } else if (normalizedIndex < 26) { 
         return { x: 90, y: 15 + ((normalizedIndex - 13) * 5.8) };
-    } else if (normalizedIndex < 39) { // Bottom
+    } else if (normalizedIndex < 39) { 
         return { x: 85 - ((normalizedIndex - 26) * 5.8), y: 90 };
-    } else { // Left
+    } else { 
         return { x: 10, y: 85 - ((normalizedIndex - 39) * 5.8) };
     }
 };
@@ -88,20 +69,21 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const isP2P = !!socket && !!socketGame;
   const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
 
-  // Initialize Pieces locally if not P2P (or fallback)
+  // Initialize Pieces
   useEffect(() => {
-      if (!isP2P && pieces.length === 0) {
+      // If synced state is empty or local play, init
+      if ((!isP2P || (isP2P && socketGame?.gameState?.pieces?.length === 0)) && pieces.length === 0) {
           const initPieces: Piece[] = [];
           for(let i=0; i<4; i++) initPieces.push({ id: i, color: 'Red', step: -1 });
           for(let i=0; i<4; i++) initPieces.push({ id: i+4, color: 'Yellow', step: -1 });
           setPieces(initPieces);
       }
-  }, [isP2P]);
+  }, [isP2P, socketGame]);
 
   // --- SYNC ---
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.gameState && socketGame.gameState.pieces) setPieces(socketGame.gameState.pieces);
+          if (socketGame.gameState && socketGame.gameState.pieces && socketGame.gameState.pieces.length > 0) setPieces(socketGame.gameState.pieces);
           if (socketGame.gameState && socketGame.gameState.diceValue) setDiceValue(socketGame.gameState.diceValue);
           if (socketGame.gameState) setDiceRolled(socketGame.gameState.diceRolled);
           if (socketGame.turn) setCurrentTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Yellow');
@@ -122,11 +104,9 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const handleRoll = () => {
       if (currentTurn !== myColor || diceRolled) return;
       
-      // Local or P2P logic
       if (socket) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
       } else {
-          // Offline Logic
           const val = Math.ceil(Math.random() * 6);
           setDiceValue(val);
           setDiceRolled(true);
@@ -138,57 +118,45 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
       if (currentTurn !== myColor || !diceRolled || !diceValue) return;
       if (p.color !== myColor) return;
       
-      // 1. Validate Move (Can move out of base?)
       if (p.step === -1 && diceValue !== 6) {
           playSFX('error');
           return;
       }
 
-      // 2. Calculate New Step
       const nextStep = p.step === -1 ? 0 : p.step + diceValue;
       if (nextStep > 56) {
-          playSFX('error'); // Overshoot
+          playSFX('error'); 
           return; 
       }
 
       let newPieces = pieces.map(piece => piece.id === p.id ? { ...piece, step: nextStep } : piece);
       let captured = false;
 
-      // 3. Collision / Capture Logic
-      // Only check if landing on main track (0-50)
       if (nextStep >= 0 && nextStep <= 50) {
-          // Calculate Normalized Index for the moving piece
           const myNormalized = p.color === 'Red' ? nextStep : (nextStep + 26) % 52;
           
-          // Check against ALL other pieces
           newPieces = newPieces.map(other => {
-              if (other.id === p.id) return other; // Skip self
-              if (other.color === p.color) return other; // Skip teammates (stacking allowed visually)
-              if (other.step === -1 || other.step > 50) return other; // Skip base/home pieces
+              if (other.id === p.id) return other; 
+              if (other.color === p.color) return other; 
+              if (other.step === -1 || other.step > 50) return other; 
 
-              // Calculate opponent's normalized index
               const otherNormalized = other.color === 'Red' ? other.step : (other.step + 26) % 52;
 
               if (myNormalized === otherNormalized) {
-                  // LANDED ON OPPONENT!
                   if (SAFE_ZONES.includes(myNormalized)) {
-                      // Safe Zone: No capture, just coexist
                       return other;
                   } else {
-                      // CAPTURE!
                       playSFX('capture');
                       captured = true;
-                      return { ...other, step: -1 }; // Send home
+                      return { ...other, step: -1 }; 
                   }
               }
               return other;
           });
       }
 
-      // 4. Update State / Emit
       setLastMovedPieceId(p.id);
       
-      // Determine if bonus turn (6 rolled or capture made)
       const bonusTurn = diceValue === 6 || captured;
 
       if (socket) {
@@ -201,13 +169,11 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
               } 
           });
       } else {
-          // Local Update
           setPieces(newPieces);
           setDiceRolled(false);
           setDiceValue(null);
           if (!bonusTurn) {
               setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
-              // Trigger Bot if offline (omitted for brevity)
           }
       }
       playSFX('move');
@@ -280,7 +246,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 </div>
 
                 {/* Safe Zones (Visual) */}
-                {/* Simplified visual markers for safe zones */}
                 <div className="absolute top-[10%] left-[40%] w-[20%] h-[5%] bg-slate-300/30 flex justify-center"><Shield size={12} className="text-slate-400 opacity-50" /></div>
             </div>
 
@@ -288,7 +253,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             <AnimatePresence>
             {pieces.map((p, i) => {
                 const pos = getPiecePosition(p.color, p.step, i);
-                // Check if multiple pieces on same spot to offset slightly
                 const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
                 const offset = stackIndex * 4;
 
@@ -315,7 +279,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         `}
                     >
                         <div className="absolute inset-2 rounded-full bg-white/20"></div>
-                        {/* Star for safe */}
                         {p.step !== -1 && SAFE_ZONES.includes(p.color === 'Red' ? p.step : (p.step + 26) % 52) && (
                             <div className="absolute -top-2 -right-2 text-gold-400 drop-shadow-md"><Shield size={10} fill="currentColor" /></div>
                         )}
@@ -354,7 +317,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             )}
         </div>
 
-        {/* P2P Chat */}
         {isP2P && socketGame && (
             <GameChat 
                 messages={socketGame.chat || []}

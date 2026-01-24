@@ -67,6 +67,15 @@ const endGame = (roomId, winnerId, reason) => {
     }, 60000); 
 };
 
+// Card Game Helpers
+const createDeck = () => {
+    const suits = ['H', 'D', 'C', 'S'];
+    const ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+    let deck = [];
+    for(let s of suits) for(let r of ranks) deck.push({ id: s+r, suit: s, rank: r });
+    return deck.sort(() => Math.random() - 0.5);
+};
+
 const createInitialGameState = (gameType, p1, p2) => {
     const common = {
         startTime: Date.now(),
@@ -89,10 +98,29 @@ const createInitialGameState = (gameType, p1, p2) => {
                 board: Array(9).fill(null),
                 status: 'active'
             };
+        case 'Ludo':
+            const pieces = [];
+            for(let i=0; i<4; i++) pieces.push({ id: i, color: 'Red', step: -1, owner: p1 });
+            for(let i=0; i<4; i++) pieces.push({ id: i+4, color: 'Yellow', step: -1, owner: p2 });
+            return {
+                ...common,
+                pieces,
+                diceValue: null,
+                diceRolled: false,
+                turn: p1
+            };
+        case 'Cards':
+            const deck = createDeck();
+            return {
+                ...common,
+                deck: deck.slice(14),
+                hands: { [p1]: deck.slice(0, 7), [p2]: deck.slice(7, 14) },
+                discardPile: [deck[14]],
+                activeSuit: deck[14].suit,
+                turn: p1
+            };
         case 'Checkers':
         case 'Chess':
-        case 'Ludo':
-        case 'Cards':
             return {
                 ...common,
                 board: null,
@@ -385,12 +413,21 @@ io.on('connection', (socket) => {
                        io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
                        setTimeout(() => {
                            room.gameState.board = Array(9).fill(null);
+                           room.status = 'active'; // Reset status from draw
                            io.to(roomId).emit('game_update', { ...room, roomId });
                        }, 3000);
                    }
                }
             }
             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+        }
+        else if (room.gameType === 'TicTacToe' && action.type === 'DRAW_ROUND') {
+             io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
+             setTimeout(() => {
+                 room.gameState.board = Array(9).fill(null);
+                 room.status = 'active';
+                 io.to(roomId).emit('game_update', { ...room, roomId });
+             }, 3000);
         }
 
         // --- LUDO ---
@@ -415,7 +452,46 @@ io.on('connection', (socket) => {
 
         // --- CARDS ---
         else if (room.gameType === 'Cards') {
-            io.to(roomId).emit('game_update', { ...room, roomId }); 
+            if (room.turn !== userId) return;
+
+            if (action.type === 'PLAY') {
+                const hand = room.gameState.hands[userId];
+                const cardIndex = hand.findIndex(c => c.id === action.card.id);
+                
+                if (cardIndex > -1) {
+                    // Remove from hand
+                    hand.splice(cardIndex, 1);
+                    // Add to discard
+                    room.gameState.discardPile.push(action.card);
+                    // Update suit
+                    room.gameState.activeSuit = action.suit;
+                    
+                    // Win Check
+                    if (hand.length === 0) {
+                        endGame(roomId, userId, 'Hand Cleared');
+                        return;
+                    }
+                    
+                    // Turn Pass
+                    room.turn = room.players.find(id => id !== userId);
+                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                }
+            } else if (action.type === 'DRAW') {
+                if (room.gameState.deck.length > 0) {
+                    const card = room.gameState.deck.pop();
+                    room.gameState.hands[userId].push(card);
+                    // Shuffle discard back if empty
+                    if (room.gameState.deck.length === 0) {
+                        const top = room.gameState.discardPile.pop();
+                        room.gameState.deck = room.gameState.discardPile.sort(() => Math.random() - 0.5);
+                        room.gameState.discardPile = [top];
+                    }
+                    if (action.passTurn) {
+                        room.turn = room.players.find(id => id !== userId);
+                    }
+                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                }
+            }
         }
 
         // --- CHAT ---
