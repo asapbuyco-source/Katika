@@ -50,19 +50,21 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           setMyColor('w');
       }
 
-      // P2P Sync Logic - THE "BASIC" FIX
+      // P2P Sync Logic
       if (isP2P && socketGame) {
           // 1. Determine Color
-          if (socketGame.players && Array.isArray(socketGame.players) && socketGame.players.length > 0) {
-              const isPlayer1 = socketGame.players[0] === user.id;
+          const players = socketGame.players;
+          if (Array.isArray(players) && players.length > 0) {
+              const isPlayer1 = players[0] === user.id;
               setMyColor(isPlayer1 ? 'w' : 'b');
           }
 
           // 2. Load Board State (FEN)
           // We trust the server completely. If server sends FEN, we load it.
-          if (socketGame.gameState && socketGame.gameState.fen) {
+          const gameState = socketGame.gameState;
+          if (gameState && gameState.fen) {
               const currentFen = game.fen();
-              const serverFen = socketGame.gameState.fen;
+              const serverFen = gameState.fen;
               
               // Only update if different to avoid infinite loops, but do it forcefully
               if (currentFen !== serverFen) {
@@ -78,14 +80,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           }
 
           // 3. Sync Timers (Safe Access Fix)
-          const timers = socketGame.gameState?.timers;
-          const players = socketGame.players;
+          const timers = gameState?.timers;
           if (timers && Array.isArray(players) && players.length >= 2) {
               const p1 = players[0];
               const p2 = players[1];
-              // Ensure we don't crash if p1/p2 keys are missing or invalid
-              const t1 = typeof p1 === 'string' ? (timers[p1] ?? 600) : 600;
-              const t2 = typeof p2 === 'string' ? (timers[p2] ?? 600) : 600;
+              
+              // TS2532 Fix: Explicitly check for property existence and type
+              const t1 = (typeof p1 === 'string' && timers?.[p1] !== undefined) ? Number(timers[p1]) : 600;
+              const t2 = (typeof p2 === 'string' && timers?.[p2] !== undefined) ? Number(timers[p2]) : 600;
               
               setTimeRemaining({ w: t1, b: t2 });
           }
