@@ -79,16 +79,16 @@ const endGame = (roomId, winnerId, reason) => {
 const initialCheckersState = (p1, p2) => {
     const pieces = [];
     let cid = 0;
-    // Player 2 (Top, Rows 0-2)
+    // Player 2 (Top, Rows 0-2) - P2 is traditionally 'Black' or 'Opponent' relative to P1
     for(let r=0; r<3; r++) {
         for(let c=0; c<8; c++) {
-            if((r+c)%2===1) pieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c, player: 'opponent' });
+            if((r+c)%2===1) pieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c });
         }
     }
-    // Player 1 (Bottom, Rows 5-7)
+    // Player 1 (Bottom, Rows 5-7) - P1 is 'Red' or 'Me' relative to P1
     for(let r=5; r<8; r++) {
         for(let c=0; c<8; c++) {
-            if((r+c)%2===1) pieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c, player: 'me' });
+            if((r+c)%2===1) pieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c });
         }
     }
     return { pieces, turn: p1 };
@@ -118,7 +118,10 @@ const handleCheckersMove = (room, userId, move) => {
     
     // Validate Direction (unless King)
     if (!piece.isKing) {
-        if (Math.sign(dR) !== forwardDir && absDR !== 2) return; 
+        // If jump (absDR === 2), can move any direction in standard rules? 
+        // No, standard checkers: men capture forward only.
+        // King captures backward.
+        // Wait, standard English Draughts: men move and capture FORWARD only.
         if (Math.sign(dR) !== forwardDir) return; 
     }
 
@@ -154,7 +157,7 @@ const handleCheckersMove = (room, userId, move) => {
         return;
     }
 
-    // Turn Switch (Simple: Always switch unless multi-jump logic implemented - keeping simple for now)
+    // Multi-jump logic is skipped for simplicity - Turn always ends
     room.turn = opponentId;
     
     // Broadcast State
