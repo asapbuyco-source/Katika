@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, Zap, X, Check } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -103,7 +104,13 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       
       const top = discardPile[discardPile.length - 1];
       const isJack = card.rank === 'J';
-      const matchesSuit = card.suit === activeSuit;
+      
+      // Determine if match valid:
+      // 1. Matches active suit (if defined, otherwise top card suit)
+      // 2. Matches rank
+      // 3. Is a Jack
+      const currentTargetSuit = activeSuit || (top ? top.suit : null);
+      const matchesSuit = currentTargetSuit ? card.suit === currentTargetSuit : true; // First card any suit ok? Typically yes.
       const matchesRank = top && card.rank === top.rank;
       
       if (!isJack && !matchesSuit && !matchesRank) { 
@@ -144,7 +151,7 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
       if (turn !== 'me') return;
       
       if (deckSize === 0) {
-          playSFX('error'); // Cannot draw if deck empty
+          playSFX('error'); 
           return;
       }
 
@@ -258,7 +265,9 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
             <div className="flex justify-center -space-x-8 md:-space-x-6 overflow-x-auto pb-8 pt-4 px-4 min-h-[160px]">
                 {myHand.map((c, i) => {
                     const top = discardPile[discardPile.length - 1];
-                    const playable = turn === 'me' && (c.rank === 'J' || c.suit === activeSuit || (top && c.rank === top.rank));
+                    // Logic duplication here was an issue, now using same strict logic
+                    const currentTargetSuit = activeSuit || (top ? top.suit : null);
+                    const playable = turn === 'me' && (c.rank === 'J' || (currentTargetSuit ? c.suit === currentTargetSuit : true) || (top && c.rank === top.rank));
                     
                     return (
                         <div key={c.id} className="transition-all hover:-translate-y-6 hover:z-10">

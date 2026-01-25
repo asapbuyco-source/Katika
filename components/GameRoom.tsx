@@ -1,4 +1,4 @@
-// ... (imports)
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 
-// ... (Piece, PlayerColor, SAFE_ZONES, getPiecePosition)
 type PlayerColor = 'Red' | 'Yellow';
 interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
 
@@ -38,18 +37,87 @@ const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) 
     }
 
     // 3. Main Track
-    let normalizedIndex = step;
-    if (color === 'Yellow') normalizedIndex = (step + 26) % 52;
-
-    if (normalizedIndex < 13) { 
-        return { x: 15 + (normalizedIndex * 5.8), y: 10 };
-    } else if (normalizedIndex < 26) { 
-        return { x: 90, y: 15 + ((normalizedIndex - 13) * 5.8) };
-    } else if (normalizedIndex < 39) { 
-        return { x: 85 - ((normalizedIndex - 26) * 5.8), y: 90 };
-    } else { 
-        return { x: 10, y: 85 - ((normalizedIndex - 39) * 5.8) };
+    // We normalize the visual path so 0 is Red Start, 26 is Yellow Start.
+    // The visual loop is 52 steps.
+    let visualIndex = step;
+    if (color === 'Yellow') {
+        // Yellow starts 26 steps ahead of Red visually
+        visualIndex = (step + 26) % 52;
     }
+
+    if (visualIndex < 6) { 
+        return { x: 10 + (visualIndex * 6.6), y: 40 }; // Top-Left towards Center
+    } else if (visualIndex < 12) {
+        return { x: 40, y: 10 + ((visualIndex - 6) * 6.6) }; // Top-Vertical Up
+    } else if (visualIndex < 14) {
+        return { x: 50 + ((visualIndex - 12) * 5), y: 10 }; // Top-Right Corner
+    } else if (visualIndex < 20) {
+        return { x: 60, y: 10 + ((visualIndex - 14) * 6.6) }; // Top-Vertical Down
+    } else if (visualIndex < 26) {
+        return { x: 60 + ((visualIndex - 20) * 6.6), y: 40 }; // Right-Horizontal Out
+    } else if (visualIndex < 28) {
+        return { x: 90, y: 50 + ((visualIndex - 26) * 5) }; // Right-Bottom Corner
+    } else if (visualIndex < 34) {
+        return { x: 90 - ((visualIndex - 28) * 6.6), y: 60 }; // Right-Horizontal In
+    } else if (visualIndex < 40) {
+        return { x: 60, y: 60 + ((visualIndex - 34) * 6.6) }; // Bottom-Vertical Down
+    } else if (visualIndex < 42) {
+        return { x: 50 - ((visualIndex - 40) * 5), y: 90 }; // Bottom-Left Corner
+    } else if (visualIndex < 48) {
+        return { x: 40, y: 90 - ((visualIndex - 42) * 6.6) }; // Bottom-Vertical Up
+    } else {
+        return { x: 40 - ((visualIndex - 48) * 6.6), y: 60 }; // Left-Horizontal Out
+    }
+};
+
+// Simplified path mapper for reliability:
+// 0-5: Red Home Straight Out
+// 6-11: Top Vertical
+// 12: Top Right Corner
+// 13-18: Top Right Vertical
+// ... better to map specific coordinates for 52 steps if time allows, but let's approximate better
+const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) => {
+    if (step === -1) {
+        if (color === 'Red') return [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}][pieceIndex%4];
+        else return [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}][pieceIndex%4];
+    }
+    
+    // Victory Road
+    if (step >= 51) {
+        const offset = (step - 51) * 6;
+        if (color === 'Red') return { x: 10 + offset, y: 50 };
+        else return { x: 90 - offset, y: 50 };
+    }
+
+    // Main Track (0-51)
+    let pos = step;
+    if (color === 'Yellow') pos = (step + 26) % 52;
+
+    // Define corner waypoints
+    // 0 -> 5: (10, 40) -> (40, 40)
+    if (pos <= 5) return { x: 8 + (pos * 6), y: 40 };
+    // 6 -> 11: (40, 35) -> (40, 5)
+    if (pos <= 11) return { x: 42, y: 38 - ((pos-6) * 6) };
+    // 12: Top Middle
+    if (pos === 12) return { x: 50, y: 5 };
+    // 13 -> 18: (55, 5) -> (55, 35)
+    if (pos <= 18) return { x: 58, y: 8 + ((pos-13) * 6) };
+    // 19 -> 24: (60, 40) -> (90, 40)
+    if (pos <= 24) return { x: 62 + ((pos-19) * 6), y: 40 };
+    // 25: Right Middle
+    if (pos === 25) return { x: 95, y: 50 };
+    // 26 -> 31: (90, 55) -> (60, 55)
+    if (pos <= 31) return { x: 92 - ((pos-26) * 6), y: 60 };
+    // 32 -> 37: (55, 60) -> (55, 90)
+    if (pos <= 37) return { x: 58, y: 62 + ((pos-32) * 6) };
+    // 38: Bottom Middle
+    if (pos === 38) return { x: 50, y: 95 };
+    // 39 -> 44: (40, 90) -> (40, 60)
+    if (pos <= 44) return { x: 42, y: 92 - ((pos-39) * 6) };
+    // 45 -> 50: (40, 55) -> (10, 55)
+    if (pos <= 50) return { x: 38 - ((pos-45) * 6), y: 60 };
+    // 51: Left Middle
+    return { x: 5, y: 50 };
 };
 
 interface GameRoomProps {
@@ -73,7 +141,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
   // Initialize Pieces
   useEffect(() => {
-      if ((!isP2P || (isP2P && socketGame?.gameState?.pieces?.length === 0)) && pieces.length === 0) {
+      if ((!isP2P || (isP2P && !socketGame?.gameState?.pieces)) && pieces.length === 0) {
           const initPieces: Piece[] = [];
           for(let i=0; i<4; i++) initPieces.push({ id: i, color: 'Red', step: -1 });
           for(let i=0; i<4; i++) initPieces.push({ id: i+4, color: 'Yellow', step: -1 });
@@ -84,9 +152,12 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   // --- SYNC ---
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.gameState && socketGame.gameState.pieces && socketGame.gameState.pieces.length > 0) setPieces(socketGame.gameState.pieces);
-          if (socketGame.gameState && socketGame.gameState.diceValue) setDiceValue(socketGame.gameState.diceValue);
-          if (socketGame.gameState) setDiceRolled(socketGame.gameState.diceRolled);
+          const gs = socketGame.gameState;
+          if (gs) {
+              if (gs.pieces && gs.pieces.length > 0) setPieces(gs.pieces);
+              if (gs.diceValue !== undefined) setDiceValue(gs.diceValue);
+              if (gs.diceRolled !== undefined) setDiceRolled(gs.diceRolled);
+          }
           if (socketGame.turn) setCurrentTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Yellow');
           
           if (socketGame.winner) {
@@ -185,7 +256,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
-        {/* ... (Keep UI) ... */}
         {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
             <button onClick={handleQuit} className="flex items-center gap-2 text-slate-400 hover:text-white">
@@ -211,9 +281,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 {/* Red Base (Top Left) */}
                 <div className="absolute top-0 left-0 w-[40%] h-[40%] bg-white border-r-4 border-b-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-red-100 rounded-3xl border-4 border-red-500 flex items-center justify-center relative">
-                        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
-                            {[0,1,2,3].map(i => <div key={i} className="bg-red-200 rounded-full border-2 border-red-400 opacity-50"></div>)}
-                        </div>
                         <Crown className="text-red-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
@@ -221,26 +288,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 {/* Yellow Base (Bottom Right) */}
                 <div className="absolute bottom-0 right-0 w-[40%] h-[40%] bg-white border-l-4 border-t-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-yellow-100 rounded-3xl border-4 border-yellow-500 flex items-center justify-center relative">
-                        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
-                            {[0,1,2,3].map(i => <div key={i} className="bg-yellow-200 rounded-full border-2 border-yellow-400 opacity-50"></div>)}
-                        </div>
                         <Crown className="text-yellow-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
 
-                {/* Home Run Tracks */}
-                {/* Red Home (Left) */}
-                <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center p-2">
-                    <div className="w-full h-8 bg-red-100 rounded-full flex items-center px-2 space-x-1 border border-red-300">
-                        {[1,2,3,4,5].map(i => <div key={i} className="h-6 w-full bg-red-500 rounded-sm opacity-20"></div>)}
-                    </div>
-                </div>
-                {/* Yellow Home (Right) */}
-                <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center p-2">
-                    <div className="w-full h-8 bg-yellow-100 rounded-full flex items-center px-2 space-x-1 border border-yellow-300">
-                        {[1,2,3,4,5].map(i => <div key={i} className="h-6 w-full bg-yellow-500 rounded-sm opacity-20"></div>)}
-                    </div>
-                </div>
+                {/* Home Run Tracks (Visual) */}
+                <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center bg-red-100/30"></div>
+                <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center bg-yellow-100/30"></div>
                 
                 {/* Center */}
                 <div className="absolute top-[40%] left-[40%] w-[20%] h-[20%] bg-gradient-to-br from-royal-800 to-royal-950 flex items-center justify-center border-4 border-white shadow-inner z-10">
@@ -249,15 +303,12 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         <Star className="text-gold-400 w-6 h-6 mx-auto mt-1 animate-pulse" fill="currentColor" />
                     </div>
                 </div>
-
-                {/* Safe Zones (Visual) */}
-                <div className="absolute top-[10%] left-[40%] w-[20%] h-[5%] bg-slate-300/30 flex justify-center"><Shield size={12} className="text-slate-400 opacity-50" /></div>
             </div>
 
             {/* Pieces Layer */}
             <AnimatePresence>
             {pieces.map((p, i) => {
-                const pos = getPiecePosition(p.color, p.step, i);
+                const pos = getSmartPosition(p.color, p.step, i);
                 const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
                 const offset = stackIndex * 4;
 
@@ -284,9 +335,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         `}
                     >
                         <div className="absolute inset-2 rounded-full bg-white/20"></div>
-                        {p.step !== -1 && SAFE_ZONES.includes(p.color === 'Red' ? p.step : (p.step + 26) % 52) && (
-                            <div className="absolute -top-2 -right-2 text-gold-400 drop-shadow-md"><Shield size={10} fill="currentColor" /></div>
-                        )}
                     </motion.div>
                 )
             })}

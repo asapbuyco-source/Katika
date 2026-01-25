@@ -1,4 +1,3 @@
-
 import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
@@ -150,8 +149,12 @@ const AppContent = () => {
   // Auto-scroll on view change
   useEffect(() => {
       const mainContainer = document.getElementById('main-scroll-container');
-      if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'instant' });
-      else window.scrollTo(0, 0);
+      if (mainContainer) {
+          mainContainer.scrollTop = 0;
+          mainContainer.scrollTo({ top: 0, behavior: 'instant' });
+      } else {
+          window.scrollTo(0, 0);
+      }
   }, [currentView]);
 
   // Bot Match Handler (Local logic mostly, but synced for UI)
@@ -218,9 +221,9 @@ const AppContent = () => {
     <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
       {user && currentView !== 'game' && currentView !== 'matchmaking' && <Navigation />}
       
-      <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
+      <main id="main-scroll-container" className="flex-1 relative w-full h-[100dvh] md:h-screen overflow-y-auto">
         <GameErrorBoundary onReset={() => { user ? setView('dashboard') : setView('landing'); window.location.reload(); }}>
-            <AnimatePresence>
+            <AnimatePresence mode="wait">
                 {currentView === 'landing' && <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></motion.div>}
                 {currentView === 'auth' && <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AuthScreen onAuthenticated={() => {}} onNavigate={setView} /></motion.div>}
                 {currentView === 'dashboard' && user && <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Dashboard /></motion.div>}

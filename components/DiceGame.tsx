@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
@@ -107,6 +107,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
   const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
 
   const prevRoundState = useRef<string>('');
+  const phaseRef = useRef(phase); // Ref to track phase in closures
+  const isMyTurnRef = useRef(isMyTurn); // Ref to track turn in closures
+
+  // Sync refs with state
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => { isMyTurnRef.current = isMyTurn; }, [isMyTurn]);
 
   const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
@@ -125,7 +131,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           const amITurn = socketGame.turn === user.id;
           setIsMyTurn(amITurn);
           
-          const gs = socketGame.gameState || {}; // Access gameState safely
+          const gs = socketGame.gameState || {}; 
 
           if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
               setScores({
@@ -153,7 +159,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
               }
           } else {
               // Reset dice visual if new round (roundRolls empty)
-              // Only if we are not currently rolling (to avoid visual glitch mid-transition)
               if (phase !== 'rolling') {
                   setMyDice([1,1]);
                   setOppDice([1,1]);
@@ -209,6 +214,49 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       }
   }, [socketGame, user.id, opponentId, isP2P]);
 
+  // Actions wrapped in useCallback to prevent staleness
+  const roll = useCallback(() => {
+      if (!isMyTurnRef.current || phaseRef.current !== 'waiting' || isProcessing) return;
+      
+      playSFX('dice');
+      
+      if (isP2P && socket) {
+          setPhase('rolling');
+          setIsProcessing(true);
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
+          setTimeout(() => setIsProcessing(false), 500);
+      } else {
+          setPhase('rolling');
+          setTimeout(() => {
+              const d1 = Math.ceil(Math.random() * 6);
+              const d2 = Math.ceil(Math.random() * 6);
+              setMyDice([d1, d2]);
+              setPhase('waiting'); 
+              setIsMyTurn(false);
+              setTimeout(() => botPlay([d1, d2]), 1500); 
+          }, 1000);
+      }
+  }, [isMyTurn, phase, isProcessing, isP2P, socket, socketGame]);
+
+  const handleTimeout = useCallback(() => {
+      if (phaseRef.current !== 'waiting') return;
+      
+      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+      
+      // Only timeout if it's my turn AND I haven't rolled yet
+      if (isMyTurnRef.current && !hasRolled) {
+          playSFX('error');
+          addLog("Auto-roll triggered", "alert");
+          roll();
+      } else if (!isP2P && !isMyTurnRef.current) {
+          // Bot timeout fail-safe
+          const d1 = Math.ceil(Math.random() * 6);
+          const d2 = Math.ceil(Math.random() * 6);
+          botPlay([d1, d2]); // Pass dummy 'my' dice just to trigger flow, logic handles state
+      }
+  }, [isP2P, socketGame, roll]);
+
+  // Timer Effect
   useEffect(() => {
       if (phase !== 'waiting') return;
 
@@ -230,54 +278,17 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           clearInterval(timer);
           if (timeoutId) clearTimeout(timeoutId);
       };
-  }, [isMyTurn, round, phase]);
+  }, [isMyTurn, round, phase, handleTimeout]);
 
-  const handleTimeout = () => {
-      if (phase !== 'waiting') return;
-      
-      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
-      
-      // Only timeout if it's my turn AND I haven't rolled yet
-      if (isMyTurn && !hasRolled) {
-          playSFX('error');
-          addLog("Auto-roll triggered", "alert");
-          roll();
-      } else if (!isP2P) {
-          botPlay(); 
-      }
-  };
-
-  const roll = () => {
-      if (!isMyTurn || phase !== 'waiting' || isProcessing) return;
-      
-      playSFX('dice');
-      
-      if (isP2P && socket) {
-          setPhase('rolling');
-          setIsProcessing(true);
-          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
-          setTimeout(() => setIsProcessing(false), 500);
-      } else {
-          setPhase('rolling');
-          setTimeout(() => {
-              const d1 = Math.ceil(Math.random() * 6);
-              const d2 = Math.ceil(Math.random() * 6);
-              setMyDice([d1, d2]);
-              setPhase('waiting'); 
-              setIsMyTurn(false);
-              setTimeout(botPlay, 1500); 
-          }, 1000);
-      }
-  };
-
-  const botPlay = () => {
+  // Local Bot Logic
+  const botPlay = (playerDice: number[]) => {
       setPhase('rolling');
       playSFX('dice');
       setTimeout(() => {
           const d1 = Math.ceil(Math.random() * 6);
           const d2 = Math.ceil(Math.random() * 6);
           setOppDice([d1, d2]);
-          evaluateRoundLocal([myDice[0], myDice[1]], [d1, d2]);
+          evaluateRoundLocal(playerDice, [d1, d2]);
       }, 1000);
   };
 
@@ -405,12 +416,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             <motion.div 
                 className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                 onPanEnd={handleSwipe}
-                onTouchEnd={(e) => {
-                    // Simple swipe logic for touch
-                    if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
-                       roll();
-                    }
-                }}
             >
                 <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
                     {isMyTurn && phase === 'waiting' && !hasRolledServer && (

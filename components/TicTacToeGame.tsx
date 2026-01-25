@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
@@ -44,7 +44,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
   useEffect(() => {
       if (isP2P && socketGame) {
-          // Fix: Access board from gameState only (server schema convention)
           const serverBoard = socketGame.gameState?.board;
           if (serverBoard) setBoard(serverBoard);
           
@@ -101,6 +100,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   }, [isXNext, winner, isDraw]);
 
   const handleTimeout = () => {
+      if (winner || isDraw) return; 
       playSFX('error');
       if (isMyTurn) {
           addLog("Time Expired! You lost.", "alert");
@@ -111,13 +111,22 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
       }
   };
 
+  // Improved Bot Logic with explicit board state passed to avoid stale closure
+  const makeBotMove = useCallback((currentBoard: CellValue[]) => {
+      if (winner || isDraw) return; 
+      const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
+      if (emptyIndices.length === 0) return;
+      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; 
+      processMove(targetIndex, mySymbol === 'X' ? 'O' : 'X');
+  }, [winner, isDraw, mySymbol]);
+
   useEffect(() => {
       if (isBotGame && !isMyTurn && !winner && !isDraw) {
           const delay = Math.random() * 1000 + 500;
           const timeout = setTimeout(() => makeBotMove(board), delay);
           return () => clearTimeout(timeout);
       }
-  }, [isBotGame, isMyTurn, board, winner, isDraw]);
+  }, [isBotGame, isMyTurn, board, winner, isDraw, makeBotMove]);
 
   const checkWinnerLocal = (squares: CellValue[]) => {
     const lines = [
@@ -151,53 +160,51 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   };
 
   const processMove = (index: number, symbol: CellValue) => {
-      const newBoard = [...board];
-      newBoard[index] = symbol;
-      setBoard(newBoard);
-      playSFX(symbol === mySymbol ? 'click' : 'move');
-      
-      const result = checkWinnerLocal(newBoard);
-      if (result) {
-          setWinner(result.winner);
-          setWinningLine(result.line);
-          if (result.winner === mySymbol) {
-              playSFX('win');
-              setTimeout(() => onGameEnd('win'), 2500);
-          } else {
-              playSFX('loss');
-              setTimeout(() => onGameEnd('loss'), 2500);
-          }
-      } else if (!newBoard.includes(null)) {
-          if (isP2P && socket) {
-              socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
-          } else {
-              const nextStreak = drawStreak + 1;
-              setDrawStreak(nextStreak);
-              setIsDraw(true); 
-              if (nextStreak >= 3) {
-                  playSFX('loss');
-                  setTimeout(() => onGameEnd('quit'), 2500);
+      // Functional update to ensure we always have the latest board state if rapid clicks happen (rare in this logic but safe)
+      setBoard(prevBoard => {
+          const newBoard = [...prevBoard];
+          newBoard[index] = symbol;
+          
+          playSFX(symbol === mySymbol ? 'click' : 'move');
+          
+          const result = checkWinnerLocal(newBoard);
+          if (result) {
+              setWinner(result.winner);
+              setWinningLine(result.line);
+              if (result.winner === mySymbol) {
+                  playSFX('win');
+                  setTimeout(() => onGameEnd('win'), 2500);
               } else {
-                  playSFX('notification');
-                  setTimeout(() => {
-                      setBoard(Array(9).fill(null));
-                      setWinner(null);
-                      setWinningLine(null);
-                      setIsDraw(false);
-                      setIsXNext(prev => !prev);
-                  }, 2000);
+                  playSFX('loss');
+                  setTimeout(() => onGameEnd('loss'), 2500);
               }
+          } else if (!newBoard.includes(null)) {
+              if (isP2P && socket) {
+                  socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
+              } else {
+                  const nextStreak = drawStreak + 1;
+                  setDrawStreak(nextStreak);
+                  setIsDraw(true); 
+                  if (nextStreak >= 3) {
+                      playSFX('loss');
+                      setTimeout(() => onGameEnd('quit'), 2500);
+                  } else {
+                      playSFX('notification');
+                      setTimeout(() => {
+                          setBoard(Array(9).fill(null));
+                          setWinner(null);
+                          setWinningLine(null);
+                          setIsDraw(false);
+                          setIsXNext(prev => !prev);
+                      }, 2000);
+                  }
+              }
+          } else {
+              setIsXNext(prev => !prev);
           }
-      } else {
-          setIsXNext(!isXNext);
-      }
-  };
-
-  const makeBotMove = (currentBoard: CellValue[]) => {
-      const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
-      if (emptyIndices.length === 0) return;
-      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; 
-      processMove(targetIndex, mySymbol === 'X' ? 'O' : 'X');
+          
+          return newBoard;
+      });
   };
 
   return (
