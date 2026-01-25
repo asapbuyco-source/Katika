@@ -1,50 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can read/write their own profile
-    match /users/{userId} {
-      // Allow authenticated access to own doc, or guest access if ID starts with 'guest-'
-      allow read, write: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
-      
-      match /transactions/{txId} {
-        allow read: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
-        // Allow creation for simulation purposes in this demo, usually server-side only
-        allow create: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
-      }
-    }
-    
-    // Games
-    match /games/{gameId} {
-      allow read: if true; // Allow reading games for matchmaking
-      // Allow creation by auth users or guests
-      allow create: if request.auth != null || request.resource.data.host.id.matches('guest-.*');
-      // Allow updates by players in the game (simplified for P2P demo)
-      allow update: if true; 
-    }
-    
-    // Forum
-    match /forum_posts/{postId} {
-      allow read: if true;
-      allow create: if true;
-      allow delete: if false; // Only admin via backend usually
-    }
-    
-    // Bug Reports
-    match /bug_reports/{reportId} {
-      allow read: if true;
-      allow create: if true;
-      allow update: if true;
-    }
-    
-    // Challenges
-    match /challenges/{challengeId} {
+    match /{document=**} {
       allow read, write: if true;
-    }
-    
-    // System Settings
-    match /system_settings/{settingId} {
-      allow read: if true;
-      allow write: if false;
     }
   }
 }
