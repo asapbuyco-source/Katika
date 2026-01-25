@@ -15,108 +15,64 @@ interface Piece { id: number; color: PlayerColor; step: number; owner?: string; 
 const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47];
 
 // Board Waypoints for visual interpolation
-const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) => {
-    // 1. Base Positions (Home)
+// We map the 0-51 track steps to visual percentages (top%, left%)
+// The board is a grid. 0 is Red Start.
+const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) => {
+    // 1. Home Base Positions
     if (step === -1) {
         if (color === 'Red') {
+            // Top Left Quadrant
             const positions = [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}]; 
             return positions[pieceIndex % 4];
         } else {
+            // Bottom Right Quadrant
             const positions = [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}]; 
             return positions[pieceIndex % 4];
         }
     }
-
-    // 2. Home Straight (Victory Road)
-    if (step >= 51) {
-        const homeIndex = step - 51; 
-        const progress = 10 + (homeIndex * 6.5); 
-        
-        if (color === 'Red') return { x: progress, y: 50 }; 
-        if (color === 'Yellow') return { x: 100 - progress, y: 50 }; 
-    }
-
-    // 3. Main Track
-    // We normalize the visual path so 0 is Red Start, 26 is Yellow Start.
-    // The visual loop is 52 steps.
-    let visualIndex = step;
-    if (color === 'Yellow') {
-        // Yellow starts 26 steps ahead of Red visually
-        visualIndex = (step + 26) % 52;
-    }
-
-    if (visualIndex < 6) { 
-        return { x: 10 + (visualIndex * 6.6), y: 40 }; // Top-Left towards Center
-    } else if (visualIndex < 12) {
-        return { x: 40, y: 10 + ((visualIndex - 6) * 6.6) }; // Top-Vertical Up
-    } else if (visualIndex < 14) {
-        return { x: 50 + ((visualIndex - 12) * 5), y: 10 }; // Top-Right Corner
-    } else if (visualIndex < 20) {
-        return { x: 60, y: 10 + ((visualIndex - 14) * 6.6) }; // Top-Vertical Down
-    } else if (visualIndex < 26) {
-        return { x: 60 + ((visualIndex - 20) * 6.6), y: 40 }; // Right-Horizontal Out
-    } else if (visualIndex < 28) {
-        return { x: 90, y: 50 + ((visualIndex - 26) * 5) }; // Right-Bottom Corner
-    } else if (visualIndex < 34) {
-        return { x: 90 - ((visualIndex - 28) * 6.6), y: 60 }; // Right-Horizontal In
-    } else if (visualIndex < 40) {
-        return { x: 60, y: 60 + ((visualIndex - 34) * 6.6) }; // Bottom-Vertical Down
-    } else if (visualIndex < 42) {
-        return { x: 50 - ((visualIndex - 40) * 5), y: 90 }; // Bottom-Left Corner
-    } else if (visualIndex < 48) {
-        return { x: 40, y: 90 - ((visualIndex - 42) * 6.6) }; // Bottom-Vertical Up
-    } else {
-        return { x: 40 - ((visualIndex - 48) * 6.6), y: 60 }; // Left-Horizontal Out
-    }
-};
-
-// Simplified path mapper for reliability:
-// 0-5: Red Home Straight Out
-// 6-11: Top Vertical
-// 12: Top Right Corner
-// 13-18: Top Right Vertical
-// ... better to map specific coordinates for 52 steps if time allows, but let's approximate better
-const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) => {
-    if (step === -1) {
-        if (color === 'Red') return [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}][pieceIndex%4];
-        else return [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}][pieceIndex%4];
-    }
     
-    // Victory Road
+    // 2. Victory Road (Steps > 50)
+    // For Red, home entrance is at index 50 -> 51..56
+    // For Yellow, home entrance is at index 24 (relative) -> wait, normalized steps.
+    // Let's assume step is RELATIVE to the player's start. 0 = Start, 50 = End of loop, 51+ = Home Straight.
     if (step >= 51) {
-        const offset = (step - 51) * 6;
-        if (color === 'Red') return { x: 10 + offset, y: 50 };
-        else return { x: 90 - offset, y: 50 };
+        const depth = step - 51; 
+        const offset = 10 + (depth * 6.5);
+        if (color === 'Red') return { x: offset, y: 50 }; // Left to Center
+        else return { x: 100 - offset, y: 50 }; // Right to Center
     }
 
-    // Main Track (0-51)
+    // 3. Main Track (0-50)
+    // We normalize to a 52-step loop starting from Red's start (Top-Left, moving Clockwise).
+    // Red Start = 0.
+    // Yellow Start = 26.
     let pos = step;
     if (color === 'Yellow') pos = (step + 26) % 52;
 
-    // Define corner waypoints
-    // 0 -> 5: (10, 40) -> (40, 40)
-    if (pos <= 5) return { x: 8 + (pos * 6), y: 40 };
-    // 6 -> 11: (40, 35) -> (40, 5)
-    if (pos <= 11) return { x: 42, y: 38 - ((pos-6) * 6) };
-    // 12: Top Middle
+    // Define visual path coordinates (approximate for 15x15 grid)
+    // 0-5: Red Home Straight Out (Horizontal Top-Left)
+    if (pos <= 5) return { x: 8 + (pos * 6.6), y: 40 }; 
+    // 6-11: Top Vertical Up
+    if (pos <= 11) return { x: 42, y: 38 - ((pos - 6) * 6.6) };
+    // 12: Top Middle Turn
     if (pos === 12) return { x: 50, y: 5 };
-    // 13 -> 18: (55, 5) -> (55, 35)
-    if (pos <= 18) return { x: 58, y: 8 + ((pos-13) * 6) };
-    // 19 -> 24: (60, 40) -> (90, 40)
-    if (pos <= 24) return { x: 62 + ((pos-19) * 6), y: 40 };
-    // 25: Right Middle
+    // 13-18: Top Vertical Down
+    if (pos <= 18) return { x: 58, y: 8 + ((pos - 13) * 6.6) };
+    // 19-24: Right Horizontal Out
+    if (pos <= 24) return { x: 62 + ((pos - 19) * 6.6), y: 40 };
+    // 25: Right Middle Turn
     if (pos === 25) return { x: 95, y: 50 };
-    // 26 -> 31: (90, 55) -> (60, 55)
-    if (pos <= 31) return { x: 92 - ((pos-26) * 6), y: 60 };
-    // 32 -> 37: (55, 60) -> (55, 90)
-    if (pos <= 37) return { x: 58, y: 62 + ((pos-32) * 6) };
-    // 38: Bottom Middle
+    // 26-31: Right Horizontal In
+    if (pos <= 31) return { x: 92 - ((pos - 26) * 6.6), y: 60 };
+    // 32-37: Bottom Vertical Down
+    if (pos <= 37) return { x: 58, y: 62 + ((pos - 32) * 6.6) };
+    // 38: Bottom Middle Turn
     if (pos === 38) return { x: 50, y: 95 };
-    // 39 -> 44: (40, 90) -> (40, 60)
-    if (pos <= 44) return { x: 42, y: 92 - ((pos-39) * 6) };
-    // 45 -> 50: (40, 55) -> (10, 55)
-    if (pos <= 50) return { x: 38 - ((pos-45) * 6), y: 60 };
-    // 51: Left Middle
+    // 39-44: Bottom Vertical Up
+    if (pos <= 44) return { x: 42, y: 92 - ((pos - 39) * 6.6) };
+    // 45-50: Left Horizontal In
+    if (pos <= 50) return { x: 38 - ((pos - 45) * 6.6), y: 60 };
+    // 51: Left Middle Turn
     return { x: 5, y: 50 };
 };
 
@@ -137,9 +93,10 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const [lastMovedPieceId, setLastMovedPieceId] = useState<number | null>(null);
 
   const isP2P = !!socket && !!socketGame;
+  // Determine my color based on player order in socketGame. P1 = Red, P2 = Yellow.
   const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
 
-  // Initialize Pieces
+  // Initialize Pieces (Local Fallback)
   useEffect(() => {
       if ((!isP2P || (isP2P && !socketGame?.gameState?.pieces)) && pieces.length === 0) {
           const initPieces: Piece[] = [];
@@ -176,21 +133,37 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const handleRoll = () => {
       if (currentTurn !== myColor || diceRolled) return;
       
+      playSFX('dice');
+      
       if (socket) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
       } else {
-          const val = Math.ceil(Math.random() * 6);
-          setDiceValue(val);
-          setDiceRolled(true);
+          // Local Mode Logic
+          setTimeout(() => {
+              const val = Math.ceil(Math.random() * 6);
+              setDiceValue(val);
+              setDiceRolled(true);
+              
+              // Check if any move is possible
+              const myPieces = pieces.filter(p => p.color === myColor);
+              const canMove = myPieces.some(p => p.step !== -1 || val === 6);
+              if (!canMove) {
+                  // Auto skip after delay
+                  setTimeout(() => {
+                      setDiceRolled(false);
+                      setDiceValue(null);
+                      setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
+                  }, 1500);
+              }
+          }, 500);
       }
-      playSFX('dice');
   };
 
   const handlePieceClick = (p: Piece) => {
       if (currentTurn !== myColor || !diceRolled || !diceValue) return;
       if (p.color !== myColor) return;
       
-      // Send intention to server
+      // P2P: Send intention to server
       if (socket) {
           socket.emit('game_action', {
               roomId: socketGame.roomId,
@@ -212,30 +185,31 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
       const nextStep = p.step === -1 ? 0 : p.step + diceValue;
       if (nextStep > 56) {
-          playSFX('error'); 
+          playSFX('error'); // Overshoot
           return; 
       }
 
       let newPieces = pieces.map(piece => piece.id === p.id ? { ...piece, step: nextStep } : piece);
       let captured = false;
 
+      // Check Collision (Only on main track 0-50)
       if (nextStep >= 0 && nextStep <= 50) {
           const myNormalized = p.color === 'Red' ? nextStep : (nextStep + 26) % 52;
           
           newPieces = newPieces.map(other => {
-              if (other.id === p.id) return other; 
-              if (other.color === p.color) return other; 
-              if (other.step === -1 || other.step > 50) return other; 
+              if (other.id === p.id) return other; // Skip self
+              if (other.color === p.color) return other; // Skip friendly
+              if (other.step === -1 || other.step > 50) return other; // Skip home/base
 
               const otherNormalized = other.color === 'Red' ? other.step : (other.step + 26) % 52;
 
               if (myNormalized === otherNormalized) {
                   if (SAFE_ZONES.includes(myNormalized)) {
-                      return other;
+                      return other; // Safe zone, stack
                   } else {
                       playSFX('capture');
                       captured = true;
-                      return { ...other, step: -1 }; 
+                      return { ...other, step: -1 }; // Send home
                   }
               }
               return other;
@@ -309,8 +283,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             <AnimatePresence>
             {pieces.map((p, i) => {
                 const pos = getSmartPosition(p.color, p.step, i);
+                
+                // Stack handling for pieces on same spot
                 const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
                 const offset = stackIndex * 4;
+
+                const isMyPiece = p.color === myColor;
+                const canMove = isMyPiece && diceRolled && currentTurn === myColor && (p.step !== -1 || diceValue === 6);
 
                 return (
                     <motion.div 
@@ -328,9 +307,9 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
                         onClick={() => handlePieceClick(p)}
                         className={`
-                            absolute w-6 h-6 md:w-8 md:h-8 -ml-3 -mt-3 md:-ml-4 md:-mt-4 rounded-full border-2 border-white shadow-[0_4px_6px_rgba(0,0,0,0.4)] cursor-pointer 
+                            absolute w-6 h-6 md:w-8 md:h-8 -ml-3 -mt-3 md:-ml-4 md:-mt-4 rounded-full border-2 border-white shadow-[0_4px_6px_rgba(0,0,0,0.4)]
                             ${p.color === 'Red' ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-yellow-400 to-yellow-600'}
-                            ${currentTurn === myColor && p.color === myColor && diceRolled ? 'ring-4 ring-white/50 animate-pulse' : ''}
+                            ${canMove ? 'cursor-pointer ring-4 ring-white/50 animate-pulse' : 'cursor-default'}
                             ${lastMovedPieceId === p.id ? 'z-50' : ''}
                         `}
                     >

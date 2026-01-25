@@ -1,4 +1,5 @@
-import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
+
+import React, { ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
