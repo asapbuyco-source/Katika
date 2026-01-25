@@ -225,34 +225,32 @@ const handleLudoMove = (room, userId, pieceId) => {
     });
 };
 
-// CHESS
+// CHESS - SIMPLIFIED HANDLER
 const handleChessMove = (room, userId, move) => {
     if (room.turn !== userId) return;
 
     try {
         const game = new Chess();
-        // Load existing PGN to maintain history, or FEN if PGN missing
-        if (room.gameState.pgn) {
-            try { game.loadPgn(room.gameState.pgn); } catch (e) { game.load(room.gameState.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'); }
-        } else {
-            game.load(room.gameState.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+        
+        // Always load current FEN to calculate next state
+        // If no FEN, use default start position
+        if (room.gameState.fen) {
+            game.load(room.gameState.fen);
         }
         
-        // Attempt the move - chess.js validates logic (turn, geometry, check)
-        const result = game.move(move); // move is { from, to, promotion }
+        // Apply Move
+        const result = game.move(move);
 
         if (result) {
-            // Valid move - update server state
+            // Update Server State
             room.gameState.fen = game.fen();
-            room.gameState.pgn = game.pgn();
             
-            // Check Game Over Conditions
+            // Check Game Over
             if (game.isGameOver()) {
-                const opponentId = room.players.find(id => id !== userId);
-                
                 if (game.isCheckmate()) {
                     endGame(room.id, userId, 'Checkmate');
                 } else {
+                    // Stalemate / Draw
                     room.status = 'completed';
                     room.winner = 'DRAW';
                     io.to(room.id).emit('game_over', { 
@@ -260,12 +258,7 @@ const handleChessMove = (room, userId, move) => {
                         reason: 'Draw / Stalemate',
                         financials: null 
                     });
-                    
-                    // Cleanup
-                    setTimeout(() => {
-                        const r = rooms.get(room.id);
-                        if (r && r.status === 'completed') rooms.delete(room.id);
-                    }, 60000);
+                    setTimeout(() => rooms.delete(room.id), 60000);
                 }
             } else {
                 // Next turn
@@ -273,16 +266,16 @@ const handleChessMove = (room, userId, move) => {
                 room.turn = opponentId;
             }
 
-            // Broadcast authoritative state
+            // Broadcast New State
             io.to(room.id).emit('game_update', {
                 roomId: room.id,
-                gameState: { fen: room.gameState.fen, pgn: room.gameState.pgn },
+                gameState: { fen: room.gameState.fen },
                 lastMove: result,
                 turn: room.turn
             });
         }
     } catch (e) {
-        console.error("Invalid chess move attempt", e);
+        console.error("Chess move error", e);
     }
 };
 
@@ -304,7 +297,7 @@ const createInitialGameState = (gameType, p1, p2) => {
             for(let i=0; i<4; i++) ludoPieces.push({ id: i+4, color: 'Yellow', step: -1, owner: p2 });
             return { ...common, pieces: ludoPieces, diceValue: null, diceRolled: false, turn: p1 };
         case 'Checkers': return { ...common, ...initialCheckersState(p1, p2) };
-        case 'Chess': return { ...common, fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', pgn: '', turn: p1 };
+        case 'Chess': return { ...common, fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', turn: p1 };
         default: return common;
     }
 };
@@ -324,7 +317,6 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
-        // Cancel any pending disconnect timers if user rejoined via a fresh socket
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));
             disconnectTimers.delete(userId);
@@ -334,10 +326,8 @@ io.on('connection', (socket) => {
         if (!queues.has(queueKey)) queues.set(queueKey, []);
         const queue = queues.get(queueKey);
         
-        // Matchmaking
         if (queue.length > 0) {
             const opponent = queue.shift();
-            // Prevent matching with self or duplicate
             if (opponent.userProfile.id === userId) {
                 queue.push({ socketId: socket.id, userProfile });
                 socket.emit('waiting_for_opponent');
@@ -374,30 +364,24 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
-        // Cancel Disconnect Timer
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));
             disconnectTimers.delete(userId);
         }
 
-        // Find active room
         rooms.forEach((room, roomId) => {
             if (room.status === 'active' && room.players.includes(userId)) {
                 socket.join(roomId);
                 io.to(roomId).emit('opponent_reconnected', { userId });
-                // Send current state to reconnector
                 socket.emit('match_found', room); 
             }
         });
     });
 
     socket.on('leave_queue', () => {
-        // Iterate all queues and remove socket
         for (const [key, queue] of queues.entries()) {
             const idx = queue.findIndex(item => item.socketId === socket.id);
-            if (idx !== -1) {
-                queue.splice(idx, 1);
-            }
+            if (idx !== -1) queue.splice(idx, 1);
         }
     });
 
@@ -440,7 +424,6 @@ io.on('connection', (socket) => {
 
         // Chess
         else if (room.gameType === 'Chess' && action.type === 'MOVE') {
-            // ACTION.move contains { from, to, promotion }
             handleChessMove(room, userId, action.move);
         }
 
@@ -506,21 +489,17 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const userId = socketUsers.get(socket.id);
         if (userId) {
-            // 1. Remove from Queues
             for (const [key, queue] of queues.entries()) {
                 const idx = queue.findIndex(item => item.userProfile.id === userId);
                 if (idx !== -1) queue.splice(idx, 1);
             }
 
-            // 2. Handle Active Games Disconnect
             rooms.forEach((room, roomId) => {
                 if (room.status === 'active' && room.players.includes(userId)) {
-                    if (room.winner) return; // Already over
+                    if (room.winner) return; 
 
-                    // Notify opponent
                     io.to(roomId).emit('opponent_disconnected', { userId });
 
-                    // Start 60s Timer
                     const timer = setTimeout(() => {
                         const r = rooms.get(roomId);
                         if (r && r.status === 'active' && !r.winner) {
