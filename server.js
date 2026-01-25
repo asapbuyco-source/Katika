@@ -3,6 +3,7 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import { Chess } from 'chess.js';
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8080;
@@ -237,21 +238,68 @@ const handleLudoMove = (room, userId, pieceId) => {
 };
 
 // CHESS
-const handleChessMove = (room, userId, moveData) => {
+const handleChessMove = (room, userId, move) => {
     if (room.turn !== userId) return;
-    
-    const opponentId = room.players.find(id => id !== userId);
-    room.turn = opponentId;
-    
-    if (moveData.fen) room.gameState.fen = moveData.fen;
-    if (moveData.pgn) room.gameState.pgn = moveData.pgn;
 
-    io.to(room.id).emit('game_update', {
-        roomId: room.id,
-        gameState: { fen: moveData.fen, pgn: moveData.pgn },
-        lastMove: moveData.move, 
-        turn: room.turn
-    });
+    try {
+        // Initialize server-side game instance from current state
+        const game = new Chess(room.gameState.fen || undefined);
+        
+        // Attempt the move - chess.js validates logic (turn, geometry, check)
+        const result = game.move(move); // move is { from, to, promotion }
+
+        if (result) {
+            // Valid move - update server state
+            room.gameState.fen = game.fen();
+            room.gameState.pgn = game.pgn();
+            
+            // Check Game Over Conditions
+            if (game.isGameOver()) {
+                const opponentId = room.players.find(id => id !== userId);
+                
+                if (game.isCheckmate()) {
+                    endGame(room.id, userId, 'Checkmate');
+                } else if (game.isDraw() || game.isStalemate() || game.isThreefoldRepetition()) {
+                    // For now, treating draw as a completed game without a specific winner ID triggers a 'Draw' state in UI logic usually
+                    // Or we can assign a special ID or handle in endGame.
+                    // Given endGame implementation, we'll mark it completed but no 'winner' prop change if not passed?
+                    // Let's pass 'DRAW' as winnerId which frontend might handle or we handle here.
+                    // Ideally, we emit game_update with status 'draw' or call endGame with null.
+                    // endGame(room.id, null, 'Draw'); 
+                    // But our endGame function sets room.winner = winnerId.
+                    // Let's modify endGame to handle null or update room state manually here.
+                    
+                    room.status = 'completed';
+                    room.winner = 'DRAW';
+                    io.to(room.id).emit('game_over', { 
+                        winner: 'DRAW',
+                        reason: 'Draw / Stalemate',
+                        financials: null // Refund or split logic would go here
+                    });
+                    
+                    // Cleanup
+                    setTimeout(() => {
+                        const r = rooms.get(room.id);
+                        if (r && r.status === 'completed') rooms.delete(room.id);
+                    }, 60000);
+                }
+            } else {
+                // Next turn
+                const opponentId = room.players.find(id => id !== userId);
+                room.turn = opponentId;
+            }
+
+            // Broadcast authoritative state
+            io.to(room.id).emit('game_update', {
+                roomId: room.id,
+                gameState: { fen: room.gameState.fen, pgn: room.gameState.pgn },
+                lastMove: result,
+                turn: room.turn
+            });
+        }
+    } catch (e) {
+        console.error("Invalid chess move attempt", e);
+    }
 };
 
 // INITIALIZATION MAP
@@ -408,7 +456,8 @@ io.on('connection', (socket) => {
 
         // Chess
         else if (room.gameType === 'Chess' && action.type === 'MOVE') {
-            handleChessMove(room, userId, action);
+            // ACTION.move contains { from, to, promotion }
+            handleChessMove(room, userId, action.move);
         }
 
         // TicTacToe
