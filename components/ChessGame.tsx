@@ -25,7 +25,7 @@ const formatTime = (seconds: number) => {
 };
 
 // Unicode Chess Pieces
-const PIECE_SYMBOLS: Record<string, string> = {
+const PIECE_SYMBOLS: Record<string, Record<string, string>> = {
     // White
     w: {
         p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
@@ -34,7 +34,7 @@ const PIECE_SYMBOLS: Record<string, string> = {
     b: {
         p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
     }
-} as any;
+};
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
