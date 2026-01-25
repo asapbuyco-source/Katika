@@ -1,4 +1,4 @@
-import React, { ReactNode, ErrorInfo, useEffect, useState } from 'react';
+import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -41,7 +41,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };

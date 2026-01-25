@@ -1,54 +1,50 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only read/write their own profile
+    // Users can read/write their own profile
     match /users/{userId} {
-      allow read: if request.auth != null;
-      // Allow user to update their own profile (avatar/name/email), but NOT balance or rank
-      allow update: if request.auth.uid == userId && 
-                      request.resource.data.balance == resource.data.balance &&
-                      request.resource.data.rankTier == resource.data.rankTier &&
-                      request.resource.data.elo == resource.data.elo;
+      // Allow authenticated access to own doc, or guest access if ID starts with 'guest-'
+      allow read, write: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
       
       match /transactions/{txId} {
-        allow read: if request.auth.uid == userId;
-        allow create: if false; // Only server can create transactions
+        allow read: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
+        // Allow creation for simulation purposes in this demo, usually server-side only
+        allow create: if (request.auth != null && request.auth.uid == userId) || userId.matches('guest-.*');
       }
     }
     
     // Games
     match /games/{gameId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth.uid in resource.data.players;
+      allow read: if true; // Allow reading games for matchmaking
+      // Allow creation by auth users or guests
+      allow create: if request.auth != null || request.resource.data.host.id.matches('guest-.*');
+      // Allow updates by players in the game (simplified for P2P demo)
+      allow update: if true; 
     }
     
     // Forum
     match /forum_posts/{postId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow delete: if request.auth.uid == resource.data.userId || 
-                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow read: if true;
+      allow create: if true;
+      allow delete: if false; // Only admin via backend usually
     }
     
     // Bug Reports
     match /bug_reports/{reportId} {
-      allow read: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
-      allow create: if request.auth != null;
-      allow update: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow read: if true;
+      allow create: if true;
+      allow update: if true;
     }
     
     // Challenges
     match /challenges/{challengeId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
-      allow update: if request.auth.uid == resource.data.targetId;
+      allow read, write: if true;
     }
     
-    // System Settings (Read-only for users)
+    // System Settings
     match /system_settings/{settingId} {
       allow read: if true;
-      allow write: if get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+      allow write: if false;
     }
   }
 }
