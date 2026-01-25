@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { Chess } from 'chess.js';
-import type { Square } from 'chess.js';
+import type { Square, Piece } from 'chess.js';
 
 interface ChessGameProps {
   table: Table;
@@ -24,21 +24,24 @@ const formatTime = (seconds: number) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-// Unicode Chess Pieces
-const PIECE_SYMBOLS: Record<string, Record<string, string>> = {
-    // White
-    w: {
-        p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
-    },
-    // Black (Using same glyphs but styled differently via CSS for consistent look)
-    b: {
-        p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
-    }
+// High-Quality SVG Assets
+const PIECES: Record<string, string> = {
+  'wp': 'https://upload.wikimedia.org/wikipedia/commons/1/10/Chess_plt45.svg',
+  'wn': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
+  'wb': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
+  'wr': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
+  'wq': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
+  'wk': 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
+  'bp': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+  'bn': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
+  'bb': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
+  'br': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
+  'bq': 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
+  'bk': 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
-  const [viewIndex, setViewIndex] = useState<number>(0);
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
@@ -48,26 +51,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [endGameReason, setEndGameReason] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{from: Square, to: Square} | null>(null);
   const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
+  const [viewIndex, setViewIndex] = useState<number>(0); // Keeping for potential history feature, simplified for now
   
   // Ref to track the last applied PGN to prevent unnecessary re-renders/resets
   const prevPgnRef = useRef(""); 
 
   const isP2P = !!socket && !!socketGame;
-
-  // Derived state for display (history browsing)
-  const moveHistory = game.history();
-  
-  const displayGame = useMemo(() => {
-      if (viewIndex === moveHistory.length) return game;
-      const tempGame = new Chess();
-      for (let i = 0; i < viewIndex; i++) {
-          tempGame.move(moveHistory[i]);
-      }
-      return tempGame;
-  }, [game, viewIndex, moveHistory]);
-
-  const board = displayGame.board();
-  const isViewingLatest = viewIndex === moveHistory.length;
+  const board = game.board();
   const currentTurn = game.turn();
   const isMyTurn = currentTurn === myColor;
 
@@ -79,8 +69,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               const isWinner = winnerColor === myColor;
               setEndGameReason(isWinner ? "Checkmate! You Won!" : "Checkmate! You Lost.");
               playSFX(isWinner ? 'win' : 'loss');
-              
-              // In P2P, server handles the 'win' event usually, but we trigger local UI
               if (!isP2P) { 
                   setTimeout(() => onGameEnd(isWinner ? 'win' : 'loss'), 2000);
               }
@@ -91,7 +79,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       }
   }, [myColor, isP2P, onGameEnd]);
 
-  // Bot Logic - Wrapped in useCallback to prevent stale closures
+  // Bot Logic
   const makeBotMove = useCallback((currentGame: Chess) => {
       if (currentGame.isGameOver() || currentGame.turn() === myColor) return;
       const moves = currentGame.moves();
@@ -101,7 +89,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               currentGame.move(randomMove);
               const newGame = new Chess(currentGame.fen()); 
               setGame(newGame);
-              setViewIndex(newGame.history().length);
               playSFX('move');
               checkGameOver(newGame);
           } catch (e) { console.error("Bot move failed", e); }
@@ -136,26 +123,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
           const serverPgn = socketGame.gameState?.pgn || "";
           
-          // Only update if the server state is different from what we last processed
           if (serverPgn !== prevPgnRef.current) {
               const newGame = new Chess();
               try {
                   if (serverPgn) newGame.loadPgn(serverPgn);
                   
-                  // Only update state if it's actually a new move (length check or content check)
-                  // We check against current game state to avoid reloading if we just made the move locally
                   if (newGame.history().length !== game.history().length || serverPgn !== game.pgn()) {
                       setGame(newGame);
                       prevPgnRef.current = serverPgn;
                       
-                      // Auto-scroll to latest move
-                      setViewIndex(newGame.history().length);
-                      
-                      // Play sound based on last move
                       const history = newGame.history({ verbose: true });
                       const lastMove = history[history.length - 1];
                       if (lastMove) {
-                          if (lastMove.color !== myColor) { // Only play sound for opponent moves here
+                          if (lastMove.color !== myColor) {
                               playSFX(lastMove.captured ? 'capture' : 'move');
                           }
                       }
@@ -175,14 +155,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               setTimeout(() => onGameEnd(amIWinner ? 'win' : 'loss'), 3000);
           }
       }
-      // Removed 'game' from dependencies to prevent local move updates from triggering stale socket state reversion
   }, [socketGame, user.id, isP2P, checkGameOver, myColor, onGameEnd]);
 
   const getMoveOptions = (square: Square) => {
-    if (!isViewingLatest) {
-        setOptionSquares({});
-        return false;
-    }
     const sourcePiece = game.get(square);
     if (!sourcePiece) return false;
 
@@ -196,11 +171,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       const targetPiece = game.get(move.to);
       newSquares[move.to] = {
         background: targetPiece && targetPiece.color !== sourcePiece.color
-            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
-            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
+            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.6) 40%, transparent 40%)' // Capture hint
+            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 20%, transparent 20%)', // Move hint
       };
       return move;
     });
+    // Highlight source
     newSquares[square] = { background: 'rgba(251, 191, 36, 0.4)' };
     setOptionSquares(newSquares);
     return true;
@@ -208,22 +184,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const executeMove = (from: Square, to: Square, promotion?: string) => {
       try {
-          // Use current game state to avoid stale closure
           if (game.turn() !== myColor) return;
 
           const moveResult = game.move({ from, to, promotion: promotion || 'q' });
           if (moveResult) {
-              // Valid move
               const newPgn = game.pgn();
               const newFen = game.fen();
-              
-              // Force new instance for React state detection
               const newGame = new Chess();
               newGame.loadPgn(newPgn);
               
               setGame(newGame);
               prevPgnRef.current = newPgn;
-              setViewIndex(newGame.history().length);
               setSelectedSquare(null);
               setOptionSquares({});
               
@@ -241,7 +212,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                       }
                   });
               } else if (isBotGame && !newGame.isGameOver()) {
-                  // Pass the updated game instance to the bot
                   setTimeout(() => makeBotMove(newGame), 800);
               }
           }
@@ -254,9 +224,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const onSquareClick = (square: Square) => {
     if (isGameOver) return;
-    if (!isViewingLatest) { setViewIndex(moveHistory.length); return; }
 
-    // If clicking a move option for the selected piece
     const moveOptions = Object.keys(optionSquares);
     if (selectedSquare && moveOptions.includes(square)) {
         const piece = game.get(selectedSquare);
@@ -273,22 +241,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         return;
     }
 
-    // Select a piece
     const clickedPiece = game.get(square);
     if (clickedPiece) {
         if (clickedPiece.color !== myColor) {
-            // Clicking opponent piece - if we have a selected square and this isn't a valid move (handled above), deselect
             setSelectedSquare(null);
             setOptionSquares({});
             return;
         } 
-        
-        // Select my piece
         setSelectedSquare(square);
         getMoveOptions(square);
         playSFX('click');
     } else {
-        // Clicking empty square that isn't a move option
         setSelectedSquare(null);
         setOptionSquares({});
     }
@@ -302,7 +265,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4 relative">
-        {/* Promotion Modal */}
         <AnimatePresence>
             {pendingPromotion && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
@@ -310,8 +272,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         <h3 className="text-white font-bold text-lg">Promote Pawn</h3>
                         <div className="flex gap-4">
                             {['q', 'r', 'b', 'n'].map(p => (
-                                <button key={p} onClick={() => handlePromotionSelect(p)} className="w-16 h-16 bg-white/10 hover:bg-white/20 rounded-lg flex items-center justify-center text-4xl text-white">
-                                    {PIECE_SYMBOLS[myColor][p]}
+                                <button key={p} onClick={() => handlePromotionSelect(p)} className="w-16 h-16 bg-white/10 hover:bg-white/20 rounded-lg flex items-center justify-center">
+                                    <img src={PIECES[myColor + p]} className="w-12 h-12" />
                                 </button>
                             ))}
                         </div>
@@ -320,7 +282,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             )}
         </AnimatePresence>
 
-        {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
             <button onClick={() => onGameEnd('quit')} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
@@ -362,11 +323,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         </div>
 
         {/* Board */}
-        <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-lg shadow-2xl overflow-hidden border-8 border-royal-800 select-none">
+        <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-lg shadow-2xl overflow-hidden border-8 border-[#3d2b1f] select-none">
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
                 {board.map((row, r) => 
                     row.map((piece, c) => {
-                        // Flip board if playing black so my pieces are at bottom
                         const actualR = myColor === 'w' ? r : 7 - r;
                         const actualC = myColor === 'w' ? c : 7 - c;
                         
@@ -374,52 +334,44 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         const isDark = (actualR + actualC) % 2 === 1;
                         const p = board[actualR][actualC]; 
                         const isSelected = selectedSquare === square;
-                        const isOption = !!optionSquares[square];
+                        const optionStyle = optionSquares[square];
                         
-                        // Piece Visual Logic
-                        const isPieceWhite = p?.color === 'w';
-                        // White pieces = White color with black shadow
-                        // Black pieces = Black color with white shadow (high contrast on green/cream)
-                        const pieceStyle = isPieceWhite 
-                            ? { color: '#ffffff', filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.8))' }
-                            : { color: '#1a1a1a', filter: 'drop-shadow(0px 1px 1px rgba(255,255,255,0.7))' };
-
                         return (
                             <div 
                                 key={square} 
                                 onClick={() => onSquareClick(square)}
                                 className={`
                                     relative flex items-center justify-center 
-                                    ${isDark ? 'bg-[#779556]' : 'bg-[#ebecd0]'}
-                                    ${isSelected ? 'ring-inset ring-4 ring-yellow-400/80' : ''}
+                                    ${isDark ? 'bg-[#7d5c46]' : 'bg-[#e3c193]'}
                                 `}
                             >   
-                                {/* Last Move Highlight */}
-                                {prevPgnRef.current && (
-                                    /* Ideally we parse last move to highlight, omitted for brevity, simple select highlight is good enough */
-                                    null
-                                )}
-
                                 {/* Move Hint */}
-                                {isOption && (
-                                    <div className={`absolute w-3 h-3 md:w-4 md:h-4 rounded-full ${p ? 'bg-transparent border-4 border-black/20 w-full h-full rounded-none' : 'bg-black/20'}`} />
+                                {optionStyle && (
+                                    <div 
+                                        className="absolute inset-0 z-10 pointer-events-none" 
+                                        style={{ background: optionStyle.background }}
+                                    />
                                 )}
 
-                                {/* Piece (Text Based) */}
+                                {/* Selected Highlight */}
+                                {isSelected && (
+                                    <div className="absolute inset-0 bg-yellow-400/40 z-0" />
+                                )}
+
+                                {/* Piece */}
                                 {p && (
                                     <motion.div
                                         initial={{ scale: 0.8, opacity: 0 }}
                                         animate={{ scale: 1, opacity: 1 }}
-                                        className="text-4xl md:text-5xl select-none cursor-pointer z-10 leading-none"
-                                        style={pieceStyle}
+                                        className="w-[90%] h-[90%] z-20 cursor-pointer"
                                     >
-                                        {PIECE_SYMBOLS[p.color][p.type]}
+                                        <img src={PIECES[p.color + p.type]} alt={p.type} className="w-full h-full drop-shadow-md" />
                                     </motion.div>
                                 )}
                                 
                                 {/* Coordinates */}
-                                {actualC === 0 && <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{8 - actualR}</span>}
-                                {actualR === 7 && <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{String.fromCharCode(97 + actualC)}</span>}
+                                {actualC === 0 && <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#e3c193]' : 'text-[#7d5c46]'}`}>{8 - actualR}</span>}
+                                {actualR === 7 && <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#e3c193]' : 'text-[#7d5c46]'}`}>{String.fromCharCode(97 + actualC)}</span>}
                             </div>
                         );
                     })
@@ -450,24 +402,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${isMyTurn ? 'text-gold-400 border border-gold-500' : 'text-slate-500'}`}>
                 <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor])}
             </div>
-        </div>
-
-        {/* History Controls */}
-        <div className="w-full max-w-[600px] mt-4 flex justify-center gap-4">
-            <button 
-                onClick={() => setViewIndex(Math.max(0, viewIndex - 1))}
-                disabled={viewIndex === 0}
-                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors border border-white/10"
-            >
-                <ArrowLeft size={16} />
-            </button>
-            <button 
-                onClick={() => setViewIndex(moveHistory.length)}
-                disabled={isViewingLatest}
-                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors border border-white/10"
-            >
-                <RotateCcw size={16} />
-            </button>
         </div>
 
         {isP2P && socketGame && (

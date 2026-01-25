@@ -186,13 +186,22 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         playSFX('notification');
     };
 
-    const handleGameUpdate = (gameState: any) => {
-        setSocketGame((prev: any) => ({
-            ...(prev || {}),
-            ...gameState,
-            roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined),
-            id: gameState.id || gameState.roomId || (prev ? prev.id : undefined)
-        }));
+    const handleGameUpdate = (update: any) => {
+        setSocketGame((prev: any) => {
+            if (!prev) return update;
+            // Deep merge gameState to prevent data loss (e.g. pieces, timers) when server sends partial updates (e.g. only fen/pgn)
+            const newGameState = {
+                ...(prev.gameState || {}),
+                ...(update.gameState || {})
+            };
+            return {
+                ...prev,
+                ...update,
+                gameState: newGameState,
+                roomId: update.roomId || update.id || prev.roomId,
+                id: update.id || update.roomId || prev.id
+            };
+        });
     };
 
     const handleGameOver = ({ winner, financials }: { winner: string, financials?: any }) => {
