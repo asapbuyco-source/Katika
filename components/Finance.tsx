@@ -1,18 +1,14 @@
-// ... (imports)
 import React, { useState, useEffect } from 'react';
-import { User, Transaction } from '../types';
-import { getUserTransactions } from '../services/firebase'; // Removed addUserTransaction import
+import { Transaction } from '../types';
+import { getUserTransactions } from '../services/firebase'; 
 import { initiateFapshiPayment } from '../services/fapshi';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+import { useUser } from '../services/context';
 
-interface FinanceProps {
-  user: User;
-  onTopUp: () => void;
-}
-
-export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
+export const Finance: React.FC = () => {
+  const { user } = useUser();
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
   const [amount, setAmount] = useState('');
@@ -28,12 +24,14 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   // Fetch Transactions on Mount
   useEffect(() => {
       const fetchHistory = async () => {
-          if (user.id.startsWith('guest-')) return;
+          if (!user || user.id.startsWith('guest-')) return;
           const history = await getUserTransactions(user.id);
           setTransactions(history);
       };
       fetchHistory();
-  }, [user.id, activeTab]);
+  }, [user, activeTab]);
+
+  if (!user) return null;
 
   const handleDeposit = async () => {
       if(!amount) return;
@@ -54,14 +52,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
           window.open(response.link, '_blank');
           
           // Use Backend Verification (Simulated via Webhook/Socket in this demo environment)
-          // In a real production app, the backend would receive the Fapshi webhook and update DB.
-          // The frontend would listen to a socket event for "balance_updated" or poll the DB.
-          
-          // For this demo, we simulate the webhook triggering:
-          // (Note: We removed the insecure direct DB write)
           setTimeout(async () => {
               // Trigger refresh assuming backend handled it
-              onTopUp(); 
               setShowSuccess(true);
               setPaymentLink(null);
               setAmount('');
@@ -398,7 +390,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
            {/* RIGHT COLUMN: INFO */}
            <div className="space-y-6">
-                {/* ... (Keep existing stats/help box) ... */}
+                {/* Stats */}
                 <div className="p-6 rounded-2xl bg-gradient-to-b from-royal-800 to-royal-900 border border-white/5">
                     <h3 className="font-bold text-white mb-4 flex items-center gap-2">
                         <History size={18} className="text-gold-400" /> {t('quick_stats')}
