@@ -93,30 +93,43 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           const newGame = new Chess();
           let loaded = false;
 
-          // Priority 1: Load PGN to preserve history
+          // Robust Sync Strategy:
+          // 1. Try Loading PGN to get full history.
+          // 2. If PGN fails, Load FEN (Board State).
+          // 3. Verify turn matches server turn.
+
           if (socketGame.gameState && socketGame.gameState.pgn) {
               try {
                   newGame.loadPgn(socketGame.gameState.pgn);
                   loaded = true;
-              } catch (e) { console.warn("PGN load failed, falling back to FEN"); }
+              } catch (e) { 
+                  console.warn("PGN load failed, falling back to FEN", e); 
+              }
           }
 
-          // Priority 2: Load FEN if PGN unavailable
           if (!loaded && socketGame.gameState && socketGame.gameState.fen) {
               try {
                   newGame.load(socketGame.gameState.fen);
-              } catch (e) { console.warn("FEN load failed"); }
+                  loaded = true;
+              } catch (e) { 
+                  console.warn("FEN load failed", e); 
+              }
           }
           
-          const wasLatest = viewIndex === game.history().length - 1;
-          setGame(newGame);
-          
-          // Auto-scroll to latest move if user was already watching live
-          if (wasLatest || viewIndex === -1) {
-              setViewIndex(newGame.history().length - 1);
+          if (loaded) {
+              // Critical: Update state only if it changed to avoid loops/jitters
+              if (newGame.fen() !== game.fen()) {
+                  const wasLatest = viewIndex === game.history().length - 1;
+                  setGame(newGame);
+                  
+                  // Auto-scroll to latest move if user was already watching live
+                  if (wasLatest || viewIndex === -1) {
+                      setViewIndex(newGame.history().length - 1);
+                  }
+                  
+                  checkGameOver(newGame);
+              }
           }
-          
-          checkGameOver(newGame);
 
           if (socketGame.gameState && socketGame.gameState.timers && socketGame.players) {
               setTimeRemaining({
@@ -186,7 +199,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           const move = game.move({ from, to, promotion: promotion || 'q' });
           if (move) {
               const newGame = new Chess();
-              newGame.loadPgn(game.pgn());
+              // Try to preserve PGN if possible, else FEN
+              try { newGame.loadPgn(game.pgn()); } catch { newGame.load(game.fen()); }
               
               setGame(newGame);
               setViewIndex(newGame.history().length - 1);
@@ -210,6 +224,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               }
           }
       } catch (e) {
+          console.error("Execute Move Failed", e);
           setSelectedSquare(null);
           setOptionSquares({});
       }
@@ -281,7 +296,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       try {
           game.move(bestMove.san);
           const newGame = new Chess();
-          newGame.loadPgn(game.pgn());
+          try { newGame.loadPgn(game.pgn()); } catch { newGame.load(game.fen()); }
           setGame(newGame);
           setViewIndex(newGame.history().length - 1);
           
@@ -295,12 +310,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const getPieceComponent = (piece: { type: string, color: string } | null) => {
       if (!piece) return null;
       const symbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+      
+      // Visuals: White vs Black (Classic/Standard) instead of Neon
+      const isWhite = piece.color === 'w';
+      
       return (
           <motion.span 
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className={`text-3xl md:text-5xl select-none relative z-20 ${piece.color === 'w' ? 'text-[#e2e8f0] drop-shadow-md' : 'text-[#a855f7] drop-shadow-md'}`}
-              style={{ textShadow: piece.color === 'w' ? '0 2px 4px rgba(0,0,0,0.5)' : '0 2px 4px rgba(0,0,0,0.8)' }}
+              className={`text-3xl md:text-5xl select-none relative z-20 ${
+                  isWhite 
+                  ? 'text-white drop-shadow-[0_2px_1px_rgba(0,0,0,0.8)]' 
+                  : 'text-black drop-shadow-[0_1px_1px_rgba(255,255,255,0.5)]'
+              }`}
+              style={{ 
+                  filter: isWhite ? 'drop-shadow(0 0 2px rgba(0,0,0,0.5))' : 'drop-shadow(0 0 1px rgba(255,255,255,0.3))' 
+              }}
           >
               {symbolMap[piece.type]}
           </motion.span>
@@ -457,7 +482,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
                 {board.map((row, r) => 
                     row.map((piece, c) => {
-                        // Rotation Logic
+                        // Rotation Logic: If P2, board rotates 180 degrees visually (row 0 becomes row 7, etc)
                         const actualR = myColor === 'w' ? r : 7 - r;
                         const actualC = myColor === 'w' ? c : 7 - c;
                         

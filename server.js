@@ -40,18 +40,6 @@ const sanitize = (str) => {
   return str.replace(/[<>]/g, '').slice(0, 500);
 };
 
-const checkRateLimit = (userId) => {
-  const now = Date.now();
-  const limit = rateLimits.get(userId);
-  if (!limit || now > limit.resetTime) {
-    rateLimits.set(userId, { count: 1, resetTime: now + 1000 });
-    return true;
-  }
-  if (limit.count >= 10) return false;
-  limit.count++;
-  return true;
-};
-
 const endGame = (roomId, winnerId, reason) => {
     const room = rooms.get(roomId);
     if (!room || room.status === 'completed') return;
@@ -242,8 +230,13 @@ const handleChessMove = (room, userId, move) => {
     if (room.turn !== userId) return;
 
     try {
-        // Initialize server-side game instance from current state
-        const game = new Chess(room.gameState.fen || undefined);
+        const game = new Chess();
+        // Load existing PGN to maintain history, or FEN if PGN missing
+        if (room.gameState.pgn) {
+            try { game.loadPgn(room.gameState.pgn); } catch (e) { game.load(room.gameState.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1'); }
+        } else {
+            game.load(room.gameState.fen || 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1');
+        }
         
         // Attempt the move - chess.js validates logic (turn, geometry, check)
         const result = game.move(move); // move is { from, to, promotion }
@@ -259,22 +252,13 @@ const handleChessMove = (room, userId, move) => {
                 
                 if (game.isCheckmate()) {
                     endGame(room.id, userId, 'Checkmate');
-                } else if (game.isDraw() || game.isStalemate() || game.isThreefoldRepetition()) {
-                    // For now, treating draw as a completed game without a specific winner ID triggers a 'Draw' state in UI logic usually
-                    // Or we can assign a special ID or handle in endGame.
-                    // Given endGame implementation, we'll mark it completed but no 'winner' prop change if not passed?
-                    // Let's pass 'DRAW' as winnerId which frontend might handle or we handle here.
-                    // Ideally, we emit game_update with status 'draw' or call endGame with null.
-                    // endGame(room.id, null, 'Draw'); 
-                    // But our endGame function sets room.winner = winnerId.
-                    // Let's modify endGame to handle null or update room state manually here.
-                    
+                } else {
                     room.status = 'completed';
                     room.winner = 'DRAW';
                     io.to(room.id).emit('game_over', { 
                         winner: 'DRAW',
                         reason: 'Draw / Stalemate',
-                        financials: null // Refund or split logic would go here
+                        financials: null 
                     });
                     
                     // Cleanup
