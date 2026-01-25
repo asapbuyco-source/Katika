@@ -24,7 +24,7 @@ const formatTime = (seconds: number) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-// High-Quality SVG Assets
+// High-Quality SVG Assets (Wikimedia)
 const PIECES: Record<string, string> = {
   'wp': 'https://upload.wikimedia.org/wikipedia/commons/1/10/Chess_plt45.svg',
   'wn': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
@@ -51,7 +51,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [endGameReason, setEndGameReason] = useState<string | null>(null);
   const [pendingPromotion, setPendingPromotion] = useState<{from: Square, to: Square} | null>(null);
   const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
-  const [viewIndex, setViewIndex] = useState<number>(0); // Keeping for potential history feature, simplified for now
   
   // Ref to track the last applied PGN to prevent unnecessary re-renders/resets
   const prevPgnRef = useRef(""); 
@@ -117,6 +116,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
       if (isP2P && socketGame) {
           if (socketGame.players && socketGame.players[0]) {
+              // Determines color: Player 1 is White, Player 2 is Black
               const isPlayer1 = socketGame.players[0] === user.id;
               setMyColor(isPlayer1 ? 'w' : 'b');
           }
@@ -135,6 +135,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                       const history = newGame.history({ verbose: true });
                       const lastMove = history[history.length - 1];
                       if (lastMove) {
+                          // Play sound if opponent moved
                           if (lastMove.color !== myColor) {
                               playSFX(lastMove.captured ? 'capture' : 'move');
                           }
@@ -171,13 +172,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       const targetPiece = game.get(move.to);
       newSquares[move.to] = {
         background: targetPiece && targetPiece.color !== sourcePiece.color
-            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.6) 40%, transparent 40%)' // Capture hint
-            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 20%, transparent 20%)', // Move hint
+            ? 'radial-gradient(circle, rgba(0, 0, 0, 0.1) 85%, transparent 85%)' // Capture hint (subtle ring)
+            : 'radial-gradient(circle, rgba(0, 0, 0, 0.1) 25%, transparent 25%)', // Move hint (dot)
       };
       return move;
     });
     // Highlight source
-    newSquares[square] = { background: 'rgba(251, 191, 36, 0.4)' };
+    newSquares[square] = { background: 'rgba(255, 255, 0, 0.5)' };
     setOptionSquares(newSquares);
     return true;
   };
@@ -243,6 +244,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
     const clickedPiece = game.get(square);
     if (clickedPiece) {
+        // Strict Check: Only allow interaction with my own pieces
         if (clickedPiece.color !== myColor) {
             setSelectedSquare(null);
             setOptionSquares({});
@@ -322,11 +324,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             </div>
         </div>
 
-        {/* Board */}
-        <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-lg shadow-2xl overflow-hidden border-8 border-[#3d2b1f] select-none">
+        {/* Board - Chess.com Style Green Theme */}
+        <div className="relative w-full max-w-[600px] aspect-square bg-[#769656] rounded-lg shadow-2xl overflow-hidden border-4 border-[#3d2b1f] select-none">
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
                 {board.map((row, r) => 
                     row.map((piece, c) => {
+                        // Rotation Logic: If playing Black, board is flipped.
+                        // Rank 8 (Index 0) is top for White, but bottom for Black.
                         const actualR = myColor === 'w' ? r : 7 - r;
                         const actualC = myColor === 'w' ? c : 7 - c;
                         
@@ -342,10 +346,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                 onClick={() => onSquareClick(square)}
                                 className={`
                                     relative flex items-center justify-center 
-                                    ${isDark ? 'bg-[#7d5c46]' : 'bg-[#e3c193]'}
+                                    ${isDark ? 'bg-[#769656]' : 'bg-[#eeeed2]'}
                                 `}
                             >   
-                                {/* Move Hint */}
+                                {/* Move Highlight (Yellow) */}
+                                {isSelected && (
+                                    <div className="absolute inset-0 bg-[rgba(255,255,0,0.5)] z-0" />
+                                )}
+
+                                {/* Previous Move Highlight or Check hint could go here */}
+
+                                {/* Move Options (Dot or Ring) */}
                                 {optionStyle && (
                                     <div 
                                         className="absolute inset-0 z-10 pointer-events-none" 
@@ -353,25 +364,28 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     />
                                 )}
 
-                                {/* Selected Highlight */}
-                                {isSelected && (
-                                    <div className="absolute inset-0 bg-yellow-400/40 z-0" />
-                                )}
-
                                 {/* Piece */}
                                 {p && (
                                     <motion.div
                                         initial={{ scale: 0.8, opacity: 0 }}
                                         animate={{ scale: 1, opacity: 1 }}
-                                        className="w-[90%] h-[90%] z-20 cursor-pointer"
+                                        className="w-[95%] h-[95%] z-20 cursor-pointer"
                                     >
-                                        <img src={PIECES[p.color + p.type]} alt={p.type} className="w-full h-full drop-shadow-md" />
+                                        <img src={PIECES[p.color + p.type]} alt={p.type} className="w-full h-full drop-shadow-sm" />
                                     </motion.div>
                                 )}
                                 
-                                {/* Coordinates */}
-                                {actualC === 0 && <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#e3c193]' : 'text-[#7d5c46]'}`}>{8 - actualR}</span>}
-                                {actualR === 7 && <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#e3c193]' : 'text-[#7d5c46]'}`}>{String.fromCharCode(97 + actualC)}</span>}
+                                {/* Coordinates (Only on edges) */}
+                                {actualC === 0 && (
+                                    <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
+                                        {8 - actualR}
+                                    </span>
+                                )}
+                                {actualR === 7 && (
+                                    <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
+                                        {String.fromCharCode(97 + actualC)}
+                                    </span>
+                                )}
                             </div>
                         );
                     })
