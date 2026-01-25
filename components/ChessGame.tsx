@@ -79,15 +79,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               }
           }
 
-          // 3. Sync Timers (Safe Access Fix)
-          const timers = gameState?.timers;
+          // 3. Sync Timers
+          const timers = socketGame?.gameState?.timers;
           if (timers && Array.isArray(players) && players.length >= 2) {
               const p1 = players[0];
               const p2 = players[1];
               
-              // TS2532 Fix: Explicitly check for property existence and type
-              const t1 = (typeof p1 === 'string' && timers?.[p1] !== undefined) ? Number(timers[p1]) : 600;
-              const t2 = (typeof p2 === 'string' && timers?.[p2] !== undefined) ? Number(timers[p2]) : 600;
+              // Use safe intermediate variables to satisfy TS strict null checks
+              let t1 = 600;
+              let t2 = 600;
+
+              if (typeof p1 === 'string' && timers[p1] !== undefined) {
+                  t1 = Number(timers[p1]);
+              }
+              if (typeof p2 === 'string' && timers[p2] !== undefined) {
+                  t2 = Number(timers[p2]);
+              }
               
               setTimeRemaining({ w: t1, b: t2 });
           }
