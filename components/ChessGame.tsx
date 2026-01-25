@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, RotateCcw } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
@@ -57,22 +57,42 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const board = displayGame.board();
   const isViewingLatest = viewIndex === moveHistory.length;
 
-  // Bot Logic
-  const makeBotMove = () => {
-      if (isGameOver || game.turn() === myColor) return;
-      const moves = game.moves();
+  const checkGameOver = useCallback((currentGameState: Chess) => {
+      if (currentGameState.isGameOver()) {
+          setIsGameOver(true);
+          if (currentGameState.isCheckmate()) {
+              const winnerColor = currentGameState.turn() === 'w' ? 'b' : 'w';
+              const isWinner = winnerColor === myColor;
+              setEndGameReason(isWinner ? "Checkmate! You Won!" : "Checkmate! You Lost.");
+              playSFX(isWinner ? 'win' : 'loss');
+              
+              // In P2P, server handles the 'win' event usually, but we trigger local UI
+              if (!isP2P) { 
+                  setTimeout(() => onGameEnd(isWinner ? 'win' : 'loss'), 2000);
+              }
+          } else {
+              setEndGameReason("Draw / Stalemate");
+              setTimeout(() => onGameEnd('quit'), 2000);
+          }
+      }
+  }, [myColor, isP2P, onGameEnd]);
+
+  // Bot Logic - Wrapped in useCallback to prevent stale closures
+  const makeBotMove = useCallback((currentGame: Chess) => {
+      if (currentGame.isGameOver() || currentGame.turn() === myColor) return;
+      const moves = currentGame.moves();
       if (moves.length > 0) {
           const randomMove = moves[Math.floor(Math.random() * moves.length)];
           try {
-              game.move(randomMove);
-              const newGame = new Chess(game.fen()); // Clone to trigger re-render
+              currentGame.move(randomMove);
+              const newGame = new Chess(currentGame.fen()); 
               setGame(newGame);
               setViewIndex(newGame.history().length);
               playSFX('move');
               checkGameOver(newGame);
           } catch (e) { console.error("Bot move failed", e); }
       }
-  };
+  }, [myColor, checkGameOver]);
 
   // Timer logic
   useEffect(() => {
@@ -140,27 +160,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               setTimeout(() => onGameEnd(amIWinner ? 'win' : 'loss'), 3000);
           }
       }
-  }, [socketGame, user.id, isP2P]);
-
-  const checkGameOver = (currentGameState: Chess) => {
-      if (currentGameState.isGameOver()) {
-          setIsGameOver(true);
-          if (currentGameState.isCheckmate()) {
-              const winnerColor = currentGameState.turn() === 'w' ? 'b' : 'w';
-              const isWinner = winnerColor === myColor;
-              setEndGameReason(isWinner ? "Checkmate! You Won!" : "Checkmate! You Lost.");
-              playSFX(isWinner ? 'win' : 'loss');
-              
-              // In P2P, server handles the 'win' event usually, but we trigger local UI
-              if (!isP2P) { 
-                  setTimeout(() => onGameEnd(isWinner ? 'win' : 'loss'), 2000);
-              }
-          } else {
-              setEndGameReason("Draw / Stalemate");
-              setTimeout(() => onGameEnd('quit'), 2000);
-          }
-      }
-  };
+  }, [socketGame, user.id, isP2P, checkGameOver, myColor, game, onGameEnd]);
 
   const getMoveOptions = (square: Square) => {
     if (!isViewingLatest) {
@@ -192,6 +192,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const executeMove = (from: Square, to: Square, promotion?: string) => {
       try {
+          // Use current game state to avoid stale closure
           if (game.turn() !== myColor) return;
 
           const moveResult = game.move({ from, to, promotion: promotion || 'q' });
@@ -199,6 +200,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               // Valid move
               const newPgn = game.pgn();
               const newFen = game.fen();
+              
+              // Force new instance for React state detection
               const newGame = new Chess();
               newGame.loadPgn(newPgn);
               
@@ -222,7 +225,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                       }
                   });
               } else if (isBotGame && !newGame.isGameOver()) {
-                  setTimeout(makeBotMove, 800);
+                  // Pass the updated game instance to the bot
+                  setTimeout(() => makeBotMove(newGame), 800);
               }
           }
       } catch (e) {
@@ -344,15 +348,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     />
                                 )}
 
-                                {/* Piece */}
+                                {/* Piece - Removed layoutId for stability */}
                                 {p && (
-                                    <motion.img 
-                                        layoutId={`piece-${actualR}-${actualC}`}
+                                    <img 
                                         src={`https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/${p.color}${p.type}.svg`}
                                         className="w-[90%] h-[90%] z-10 select-none cursor-pointer"
-                                        initial={{ scale: 0.8 }}
-                                        animate={{ scale: 1 }}
-                                        transition={{ type: "spring", stiffness: 300, damping: 25 }}
                                     />
                                 )}
                                 

@@ -1,3 +1,4 @@
+
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
@@ -118,10 +119,6 @@ const handleCheckersMove = (room, userId, move) => {
     
     // Validate Direction (unless King)
     if (!piece.isKing) {
-        // If jump (absDR === 2), can move any direction in standard rules? 
-        // No, standard checkers: men capture forward only.
-        // King captures backward.
-        // Wait, standard English Draughts: men move and capture FORWARD only.
         if (Math.sign(dR) !== forwardDir) return; 
     }
 
@@ -157,7 +154,6 @@ const handleCheckersMove = (room, userId, move) => {
         return;
     }
 
-    // Multi-jump logic is skipped for simplicity - Turn always ends
     room.turn = opponentId;
     
     // Broadcast State
@@ -191,7 +187,6 @@ const handleLudoMove = (room, userId, pieceId) => {
     
     // Collision / Capture Logic
     let captured = false;
-    // Normalize position to 0-51 loop
     const isPlayer1 = room.players[0] === userId; // P1 is Red
     
     if (nextStep >= 0 && nextStep <= 50) {
@@ -216,7 +211,7 @@ const handleLudoMove = (room, userId, pieceId) => {
     
     // Win Check
     const myPieces = pieces.filter(mp => mp.owner === userId);
-    if (myPieces.every(mp => mp.step === 56)) { // Assuming 56 is home final
+    if (myPieces.every(mp => mp.step === 56)) { 
         endGame(room.id, userId, 'All pieces home');
         return;
     }
@@ -233,24 +228,19 @@ const handleLudoMove = (room, userId, pieceId) => {
 };
 
 // CHESS
-// Simple relay with turn validation to prevent state overwrites
 const handleChessMove = (room, userId, moveData) => {
     if (room.turn !== userId) return;
     
     const opponentId = room.players.find(id => id !== userId);
-    
-    // We assume the client verified the move validty with chess.js
-    // Server just enforces turn order and relays the move
     room.turn = opponentId;
     
-    // Update internal state if provided (for reconnection)
     if (moveData.fen) room.gameState.fen = moveData.fen;
     if (moveData.pgn) room.gameState.pgn = moveData.pgn;
 
     io.to(room.id).emit('game_update', {
         roomId: room.id,
         gameState: { fen: moveData.fen, pgn: moveData.pgn },
-        lastMove: moveData.move, // Relay the specific move {from, to}
+        lastMove: moveData.move, 
         turn: room.turn
     });
 };
@@ -282,15 +272,6 @@ const createInitialGameState = (gameType, p1, p2) => {
 app.post('/webhook/fapshi', (req, res) => {
     const { transId, status, userId, amount } = req.body;
     console.log(`Payment Webhook: ${transId} for ${userId} (${amount}) - ${status}`);
-    
-    if (status === 'SUCCESSFUL') {
-        // Securely update user balance via socket notification to client to refresh? 
-        // In real app, use firebase-admin here. 
-        // For this demo, we can locate the user socket and notify them to refresh, 
-        // assuming the transaction was actually recorded by a backend process we are simulating.
-        // OR we can rely on the simulation in Finance.tsx but validate it doesn't trust client input.
-        // Since we can't write to DB here easily without Admin SDK, we'll just log it.
-    }
     res.sendStatus(200);
 });
 
@@ -309,6 +290,13 @@ io.on('connection', (socket) => {
         // Matchmaking
         if (queue.length > 0) {
             const opponent = queue.shift();
+            // Prevent matching with self or duplicate
+            if (opponent.userProfile.id === userId) {
+                queue.push({ socketId: socket.id, userProfile });
+                socket.emit('waiting_for_opponent');
+                return;
+            }
+
             const roomId = generateRoomId();
             const room = {
                 id: roomId,
@@ -331,6 +319,16 @@ io.on('connection', (socket) => {
         } else {
             queue.push({ socketId: socket.id, userProfile });
             socket.emit('waiting_for_opponent');
+        }
+    });
+
+    socket.on('leave_queue', () => {
+        // Iterate all queues and remove socket
+        for (const [key, queue] of queues.entries()) {
+            const idx = queue.findIndex(item => item.socketId === socket.id);
+            if (idx !== -1) {
+                queue.splice(idx, 1);
+            }
         }
     });
 
@@ -376,7 +374,7 @@ io.on('connection', (socket) => {
             handleChessMove(room, userId, action);
         }
 
-        // TicTacToe (Legacy/Simple logic maintained)
+        // TicTacToe
         else if (room.gameType === 'TicTacToe' && action.type === 'MOVE') {
              if (room.turn !== userId) return;
              const board = room.gameState.board;
@@ -385,7 +383,6 @@ io.on('connection', (socket) => {
                  board[action.index] = sym;
                  room.turn = room.players.find(id => id !== userId);
                  
-                 // Win Check
                  const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
                  let winner = null;
                  for(let l of lines) if(board[l[0]] && board[l[0]]===board[l[1]] && board[l[0]]===board[l[2]]) winner = userId;
@@ -402,16 +399,13 @@ io.on('connection', (socket) => {
         
         // Dice
         else if (room.gameType === 'Dice' && action.type === 'ROLL') {
-             // ... existing dice logic (simplified for brevity, assume largely same as before but ensuring secure rng)
              if (room.turn !== userId) return;
              const r1 = Math.ceil(Math.random()*6);
              const r2 = Math.ceil(Math.random()*6);
              room.gameState.roundRolls[userId] = [r1, r2];
              io.to(roomId).emit('game_update', { roomId, gameState: room.gameState, diceRolled: true, diceValue: r1+r2 });
-             // Round evaluation logic would go here
              const p1 = room.players[0]; const p2 = room.players[1];
              if (room.gameState.roundRolls[p1] && room.gameState.roundRolls[p2]) {
-                 // Evaluate round after delay
                  setTimeout(() => {
                      const s1 = room.gameState.roundRolls[p1].reduce((a,b)=>a+b,0);
                      const s2 = room.gameState.roundRolls[p2].reduce((a,b)=>a+b,0);
@@ -442,7 +436,11 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const userId = socketUsers.get(socket.id);
         if (userId) {
-            // ... (Existing disconnect logic)
+            // Remove from any queues
+            for (const [key, queue] of queues.entries()) {
+                const idx = queue.findIndex(item => item.socketId === socket.id);
+                if (idx !== -1) queue.splice(idx, 1);
+            }
             userSockets.delete(userId);
             socketUsers.delete(socket.id);
         }

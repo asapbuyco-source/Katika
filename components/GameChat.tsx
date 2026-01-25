@@ -49,25 +49,25 @@ export const GameChat: React.FC<GameChatProps> = ({ messages, onSendMessage, cur
 
     return (
         <>
-            {/* Toggle Button - High Z-Index */}
+            {/* Toggle Button - Repositioned for better mobile UX */}
             <button 
                 onClick={() => setIsOpen(!isOpen)}
-                className={`fixed bottom-6 right-6 z-[100] p-3 rounded-full shadow-lg transition-all ${isOpen ? 'bg-royal-800 text-white' : 'bg-gold-500 text-royal-950'}`}
+                className={`fixed top-4 right-4 z-[100] p-3 rounded-full shadow-lg transition-all border ${isOpen ? 'bg-royal-800 text-white border-white/20' : 'bg-gold-500 text-royal-950 border-gold-400'}`}
             >
-                {isOpen ? <X size={24} /> : <MessageSquare size={24} />}
+                {isOpen ? <X size={20} /> : <MessageSquare size={20} />}
                 {!isOpen && hasUnread && (
                     <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full animate-pulse border border-royal-950" />
                 )}
             </button>
 
-            {/* Chat Window - High Z-Index */}
+            {/* Chat Window */}
             <AnimatePresence>
                 {isOpen && (
                     <motion.div 
-                        initial={{ opacity: 0, y: 20, scale: 0.9 }}
+                        initial={{ opacity: 0, y: -20, scale: 0.9 }}
                         animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 20, scale: 0.9 }}
-                        className="fixed bottom-20 right-6 z-[100] w-80 h-96 bg-royal-900/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+                        exit={{ opacity: 0, y: -20, scale: 0.9 }}
+                        className="fixed top-16 right-4 z-[99] w-80 h-[50vh] bg-royal-900/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
                     >
                         <div className="p-3 border-b border-white/5 bg-black/20 font-bold text-white text-sm flex justify-between items-center">
                             <span>Match Chat</span>

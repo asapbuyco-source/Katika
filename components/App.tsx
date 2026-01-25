@@ -1,5 +1,5 @@
 
-import React, { ReactNode, ErrorInfo, useEffect, useState } from 'react';
+import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -42,7 +42,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -232,7 +232,7 @@ const AppContent = () => {
                 
                 {currentView === 'matchmaking' && user && (
                     <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                        <MatchmakingScreen />
+                        <MatchmakingScreen onBotMatch={handleBotMatch} />
                     </motion.div>
                 )}
 

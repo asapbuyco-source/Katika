@@ -1,19 +1,41 @@
-import React from 'react';
+
+import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Lock } from 'lucide-react';
+import { Search, Lock, Bot } from 'lucide-react';
 import { useUser, useSocket } from '../services/context';
 
-export const MatchmakingScreen: React.FC = () => {
+interface MatchmakingScreenProps {
+    onBotMatch?: (gameType: string) => void;
+}
+
+export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ onBotMatch }) => {
   const { user } = useUser();
-  const { leaveGame, matchmakingStatus, socketGame } = useSocket();
+  const { leaveGame, matchmakingStatus, socketGame, searchingGameDetails } = useSocket();
+  const [searchTime, setSearchTime] = useState(0);
+
+  useEffect(() => {
+      let interval: any;
+      if (matchmakingStatus === 'searching') {
+          interval = setInterval(() => {
+              setSearchTime(t => t + 1);
+          }, 1000);
+      } else {
+          setSearchTime(0);
+      }
+      return () => clearInterval(interval);
+  }, [matchmakingStatus]);
 
   if (!user) return null;
 
-  // Derive display data from socket game if available, or just generic searching
-  // If socketGame is present, we are likely about to transition to 'game' view
-  // but we can show opponent info here briefly.
   const opponent = socketGame?.players?.find((id: string) => id !== user.id);
   const oppProfile = socketGame?.profiles?.[opponent];
+
+  const handleSwitchToBot = () => {
+      leaveGame(); // Cancel current search
+      if (onBotMatch && searchingGameDetails) {
+          onBotMatch(searchingGameDetails.gameType);
+      }
+  };
 
   return (
     <div className="fixed inset-0 z-50 bg-royal-950 flex flex-col items-center justify-center p-6">
@@ -36,7 +58,19 @@ export const MatchmakingScreen: React.FC = () => {
                         <span className="font-bold font-mono tracking-wider">ESCROW LOCKED</span>
                     </motion.div>
                 ) : (
-                    <p className="text-slate-400 font-mono text-sm">Connecting to peer...</p>
+                    <>
+                        <p className="text-slate-400 font-mono text-sm">Connecting to peer... ({searchTime}s)</p>
+                        {searchTime > 5 && onBotMatch && searchingGameDetails && (
+                            <motion.button 
+                                initial={{ opacity: 0, y: 10 }} 
+                                animate={{ opacity: 1, y: 0 }}
+                                onClick={handleSwitchToBot}
+                                className="mt-4 flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 text-purple-300 rounded-xl font-bold text-xs uppercase hover:bg-purple-500/30 transition-colors"
+                            >
+                                <Bot size={16} /> Play vs AI Instead
+                            </motion.button>
+                        )}
+                    </>
                 )}
             </div>
         </motion.div>

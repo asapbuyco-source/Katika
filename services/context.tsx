@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, ReactNode, useRef, useCallback } from 'react';
 import { User, ViewState, Table, Challenge } from '../types';
 import { auth, syncUserProfile, subscribeToUser, loginAsGuest as apiLoginAsGuest, subscribeToIncomingChallenges } from './firebase';
@@ -35,6 +36,7 @@ interface SocketContextType {
   rematchStatus: 'idle' | 'requested' | 'opponent_requested' | 'declined';
   requestRematch: () => void;
   opponentDisconnected: boolean;
+  searchingGameDetails: { gameType: string, stake: number } | null;
 }
 
 // --- CONTEXTS ---
@@ -125,6 +127,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   const [socketGame, setSocketGame] = useState<any>(null);
   const [matchmakingStatus, setMatchmakingStatus] = useState<'idle' | 'searching' | 'found'>('idle');
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [searchingGameDetails, setSearchingGameDetails] = useState<{ gameType: string, stake: number } | null>(null);
   
   // Game End / Rematch States
   const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number, financials?: any } | null>(null);
@@ -179,6 +182,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setGameResult(null);
         setRematchStatus('idle');
         setOpponentDisconnected(false);
+        setSearchingGameDetails(null);
         playSFX('notification');
     };
 
@@ -249,6 +253,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
       if (!socket || !user) return;
       setMatchmakingStatus('searching');
       setSocketGame(null); 
+      setSearchingGameDetails({ gameType, stake });
       socket.emit('join_game', { 
           stake, 
           userProfile: user, 
@@ -258,11 +263,15 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const leaveGame = () => {
+      if (matchmakingStatus === 'searching' && socket) {
+          socket.emit('leave_queue');
+      }
       if (socket && socketGame) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
       }
       setSocketGame(null);
       setMatchmakingStatus('idle');
+      setSearchingGameDetails(null);
       setGameResult(null);
   };
 
@@ -300,7 +309,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     <SocketContext.Provider value={{
         socket, isConnected, isConnecting, socketGame, matchmakingStatus, connectionError,
         joinGame, leaveGame, sendGameAction,
-        gameResult, resetGameResult, rematchStatus, requestRematch, opponentDisconnected
+        gameResult, resetGameResult, rematchStatus, requestRematch, opponentDisconnected,
+        searchingGameDetails
     }}>
       {children}
     </SocketContext.Provider>
