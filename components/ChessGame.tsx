@@ -1,14 +1,13 @@
 
-import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, Clock, RotateCcw, AlertTriangle } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, Clock, RefreshCw, AlertTriangle, CheckCircle2, Crown } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-import { Chess } from 'chess.js';
-import type { Square, Piece } from 'chess.js';
+import { Chess, Square } from 'chess.js';
 
 interface ChessGameProps {
   table: Table;
@@ -24,267 +23,333 @@ const formatTime = (seconds: number) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
-// High-Quality SVG Assets (Wikimedia)
+// --- ASSETS ---
 const PIECES: Record<string, string> = {
-  'wp': 'https://upload.wikimedia.org/wikipedia/commons/1/10/Chess_plt45.svg',
-  'wn': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
-  'wb': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
-  'wr': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
-  'wq': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
-  'wk': 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
-  'bp': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
-  'bn': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
-  'bb': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
-  'br': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
-  'bq': 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
-  'bk': 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
+  'p': 'https://upload.wikimedia.org/wikipedia/commons/c/c7/Chess_pdt45.svg',
+  'n': 'https://upload.wikimedia.org/wikipedia/commons/e/ef/Chess_ndt45.svg',
+  'b': 'https://upload.wikimedia.org/wikipedia/commons/9/98/Chess_bdt45.svg',
+  'r': 'https://upload.wikimedia.org/wikipedia/commons/f/ff/Chess_rdt45.svg',
+  'q': 'https://upload.wikimedia.org/wikipedia/commons/4/47/Chess_qdt45.svg',
+  'k': 'https://upload.wikimedia.org/wikipedia/commons/f/f0/Chess_kdt45.svg',
+  'P': 'https://upload.wikimedia.org/wikipedia/commons/1/10/Chess_plt45.svg',
+  'N': 'https://upload.wikimedia.org/wikipedia/commons/7/70/Chess_nlt45.svg',
+  'B': 'https://upload.wikimedia.org/wikipedia/commons/b/b1/Chess_blt45.svg',
+  'R': 'https://upload.wikimedia.org/wikipedia/commons/7/72/Chess_rlt45.svg',
+  'Q': 'https://upload.wikimedia.org/wikipedia/commons/1/15/Chess_qlt45.svg',
+  'K': 'https://upload.wikimedia.org/wikipedia/commons/4/42/Chess_klt45.svg',
 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  // Game State
   const [game, setGame] = useState(new Chess());
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
-  const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
-  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
-  const [isBotGame, setIsBotGame] = useState(false);
-  const [isGameOver, setIsGameOver] = useState(false);
-  const [endGameReason, setEndGameReason] = useState<string | null>(null);
-  const [pendingPromotion, setPendingPromotion] = useState<{from: Square, to: Square} | null>(null);
-  const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
+  const [possibleMoves, setPossibleMoves] = useState<Square[]>([]);
   
-  // Ref to track the last applied PGN to prevent unnecessary re-renders/resets
-  const prevPgnRef = useRef(""); 
-
+  // UI State
+  const [isGameOver, setIsGameOver] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const [promotionSquare, setPromotionSquare] = useState<{from: Square, to: Square} | null>(null);
+  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
+  
+  // P2P / Bot Flags
   const isP2P = !!socket && !!socketGame;
-  const board = game.board();
-  const currentTurn = game.turn();
-  const isMyTurn = currentTurn === myColor;
+  const isBotGame = !isP2P && (table.guest?.id === 'bot' || table.host?.id === 'bot');
+  
+  // Refs for checking stale state in callbacks
+  const gameRef = useRef(game);
+  useEffect(() => { gameRef.current = game; }, [game]);
 
-  const checkGameOver = useCallback((currentGameState: Chess) => {
-      if (currentGameState.isGameOver()) {
-          setIsGameOver(true);
-          if (currentGameState.isCheckmate()) {
-              const winnerColor = currentGameState.turn() === 'w' ? 'b' : 'w';
-              const isWinner = winnerColor === myColor;
-              setEndGameReason(isWinner ? "Checkmate! You Won!" : "Checkmate! You Lost.");
-              playSFX(isWinner ? 'win' : 'loss');
-              if (!isP2P) { 
-                  setTimeout(() => onGameEnd(isWinner ? 'win' : 'loss'), 2000);
+  // --- INITIALIZATION ---
+  useEffect(() => {
+      // 1. Determine Color
+      if (isP2P && socketGame && socketGame.players) {
+          const p1 = socketGame.players[0]; // Player 1 is White
+          setMyColor(user.id === p1 ? 'w' : 'b');
+      } else {
+          setMyColor('w'); // Local/Bot default to White
+      }
+  }, [isP2P, socketGame, user.id]);
+
+  // --- SYNC WITH SERVER ---
+  useEffect(() => {
+      if (isP2P && socketGame && socketGame.gameState) {
+          const serverFen = socketGame.gameState.fen;
+          const currentFen = game.fen();
+
+          // Only update if FEN is different (prevents infinite loops)
+          if (serverFen && serverFen !== currentFen) {
+              try {
+                  const newGame = new Chess(serverFen);
+                  setGame(newGame);
+                  
+                  // Check for Game Over conditions from Server State
+                  if (newGame.isGameOver()) {
+                      handleGameOver(newGame);
+                  } else {
+                      // Play sound if it's now my turn (meaning opponent moved)
+                      if (newGame.turn() === myColor) playSFX('move');
+                  }
+              } catch (e) {
+                  console.error("Failed to load server FEN:", e);
               }
-          } else {
-              setEndGameReason("Draw / Stalemate");
-              setTimeout(() => onGameEnd('quit'), 2000);
+          }
+          
+          if (socketGame.winner && !isGameOver) {
+              const iWon = socketGame.winner === user.id;
+              setIsGameOver(true);
+              setStatusMessage(iWon ? "Opponent Resigned. You Win!" : "You Lost.");
+              playSFX(iWon ? 'win' : 'loss');
+              setTimeout(() => onGameEnd(iWon ? 'win' : 'loss'), 3000);
           }
       }
-  }, [myColor, isP2P, onGameEnd]);
+  }, [socketGame, isP2P, myColor, isGameOver]);
 
-  // Bot Logic
-  const makeBotMove = useCallback((currentGame: Chess) => {
-      if (currentGame.isGameOver() || currentGame.turn() === myColor) return;
-      const moves = currentGame.moves();
+  // --- GAME LOGIC ---
+
+  const handleGameOver = (finalGame: Chess) => {
+      setIsGameOver(true);
+      if (finalGame.isCheckmate()) {
+          const winner = finalGame.turn() === 'w' ? 'b' : 'w';
+          const iWon = winner === myColor;
+          setStatusMessage(iWon ? "Checkmate! You Won!" : "Checkmate. You Lost.");
+          playSFX(iWon ? 'win' : 'loss');
+          if (!isP2P) setTimeout(() => onGameEnd(iWon ? 'win' : 'loss'), 2000);
+      } else if (finalGame.isDraw() || finalGame.isStalemate()) {
+          setStatusMessage("Draw / Stalemate");
+          playSFX('error');
+          if (!isP2P) setTimeout(() => onGameEnd('quit'), 2000);
+      }
+  };
+
+  const makeBotMove = useCallback(() => {
+      if (isGameOver || gameRef.current.turn() === myColor) return;
+      
+      const moves = gameRef.current.moves();
       if (moves.length > 0) {
           const randomMove = moves[Math.floor(Math.random() * moves.length)];
-          try {
-              currentGame.move(randomMove);
-              const newGame = new Chess(currentGame.fen()); 
-              setGame(newGame);
-              playSFX('move');
-              checkGameOver(newGame);
-          } catch (e) { console.error("Bot move failed", e); }
-      }
-  }, [myColor, checkGameOver]);
-
-  // Timer logic
-  useEffect(() => {
-      if (isGameOver) return;
-      const interval = setInterval(() => {
-          const activeColor = game.turn(); 
-          setTimeRemaining(prev => {
-              if (prev[activeColor] <= 0) return prev;
-              return { ...prev, [activeColor]: Math.max(0, prev[activeColor] - 1) };
-          });
-      }, 1000);
-      return () => clearInterval(interval);
-  }, [game, isGameOver]);
-
-  // Sync / Init logic
-  useEffect(() => {
-      if (!isP2P && table.guest?.id === 'bot') {
-          setIsBotGame(true);
-          setMyColor('w');
-      }
-
-      if (isP2P && socketGame) {
-          if (socketGame.players && socketGame.players[0]) {
-              // Determines color: Player 1 is White, Player 2 is Black
-              const isPlayer1 = socketGame.players[0] === user.id;
-              setMyColor(isPlayer1 ? 'w' : 'b');
-          }
-
-          const serverPgn = socketGame.gameState?.pgn || "";
+          const newGame = new Chess(gameRef.current.fen());
+          newGame.move(randomMove);
+          setGame(newGame);
+          playSFX('move');
           
-          if (serverPgn !== prevPgnRef.current) {
-              const newGame = new Chess();
-              try {
-                  if (serverPgn) newGame.loadPgn(serverPgn);
-                  
-                  if (newGame.history().length !== game.history().length || serverPgn !== game.pgn()) {
-                      setGame(newGame);
-                      prevPgnRef.current = serverPgn;
-                      
-                      const history = newGame.history({ verbose: true });
-                      const lastMove = history[history.length - 1];
-                      if (lastMove) {
-                          // Play sound if opponent moved
-                          if (lastMove.color !== myColor) {
-                              playSFX(lastMove.captured ? 'capture' : 'move');
-                          }
-                      }
-                      
-                      checkGameOver(newGame);
-                  }
-              } catch (e) { 
-                  console.warn("PGN load error", e); 
-              }
-          }
-
-          if (socketGame.winner && !isGameOver) {
-              setIsGameOver(true);
-              const amIWinner = socketGame.winner === user.id;
-              setEndGameReason(amIWinner ? "Victory by Resignation/Timeout" : "Defeat");
-              playSFX(amIWinner ? 'win' : 'loss');
-              setTimeout(() => onGameEnd(amIWinner ? 'win' : 'loss'), 3000);
-          }
+          if (newGame.isGameOver()) handleGameOver(newGame);
       }
-  }, [socketGame, user.id, isP2P, checkGameOver, myColor, onGameEnd]);
+  }, [myColor, isGameOver]);
 
-  const getMoveOptions = (square: Square) => {
-    const sourcePiece = game.get(square);
-    if (!sourcePiece) return false;
-
-    const moves = game.moves({ square, verbose: true });
-    if (moves.length === 0) {
-      setOptionSquares({});
-      return false;
-    }
-    const newSquares: any = {};
-    moves.map((move: any) => {
-      const targetPiece = game.get(move.to);
-      newSquares[move.to] = {
-        background: targetPiece && targetPiece.color !== sourcePiece.color
-            ? 'radial-gradient(circle, rgba(0, 0, 0, 0.1) 85%, transparent 85%)' // Capture hint (subtle ring)
-            : 'radial-gradient(circle, rgba(0, 0, 0, 0.1) 25%, transparent 25%)', // Move hint (dot)
-      };
-      return move;
-    });
-    // Highlight source
-    newSquares[square] = { background: 'rgba(255, 255, 0, 0.5)' };
-    setOptionSquares(newSquares);
-    return true;
-  };
-
-  const executeMove = (from: Square, to: Square, promotion?: string) => {
-      try {
-          if (game.turn() !== myColor) return;
-
-          const moveResult = game.move({ from, to, promotion: promotion || 'q' });
-          if (moveResult) {
-              const newPgn = game.pgn();
-              const newFen = game.fen();
-              const newGame = new Chess();
-              newGame.loadPgn(newPgn);
-              
-              setGame(newGame);
-              prevPgnRef.current = newPgn;
-              setSelectedSquare(null);
-              setOptionSquares({});
-              
-              playSFX(moveResult.captured ? 'capture' : 'move');
-              checkGameOver(newGame);
-
-              if (isP2P && socket && socketGame) {
-                  socket.emit('game_action', {
-                      roomId: socketGame.roomId,
-                      action: {
-                          type: 'MOVE',
-                          pgn: newPgn,
-                          fen: newFen,
-                          move: { from, to, promotion: promotion || 'q' } 
-                      }
-                  });
-              } else if (isBotGame && !newGame.isGameOver()) {
-                  setTimeout(() => makeBotMove(newGame), 800);
-              }
-          }
-      } catch (e) {
-          console.error("Move execution failed", e);
-          setSelectedSquare(null);
-          setOptionSquares({});
+  useEffect(() => {
+      if (isBotGame && game.turn() !== myColor && !isGameOver) {
+          const timer = setTimeout(makeBotMove, 800);
+          return () => clearTimeout(timer);
       }
-  };
+  }, [game, isBotGame, myColor, isGameOver, makeBotMove]);
 
   const onSquareClick = (square: Square) => {
-    if (isGameOver) return;
+      if (isGameOver) return;
 
-    const moveOptions = Object.keys(optionSquares);
-    if (selectedSquare && moveOptions.includes(square)) {
-        const piece = game.get(selectedSquare);
-        if (piece) {
-            const isPawn = piece.type === 'p';
-            const isLastRank = (piece.color === 'w' && square[1] === '8') || (piece.color === 'b' && square[1] === '1');
-            
-            if (isPawn && isLastRank) {
-                setPendingPromotion({ from: selectedSquare, to: square });
-                return;
-            }
-        }
-        executeMove(selectedSquare, square);
-        return;
-    }
+      // 1. If trying to move selected piece
+      if (selectedSquare) {
+          // Attempt move
+          try {
+              // Check for promotion
+              const piece = game.get(selectedSquare);
+              const isPawn = piece?.type === 'p';
+              const targetRank = square[1]; // '1' or '8'
+              const isPromo = isPawn && ((piece.color === 'w' && targetRank === '8') || (piece.color === 'b' && targetRank === '1'));
 
-    const clickedPiece = game.get(square);
-    if (clickedPiece) {
-        // Strict Check: Only allow interaction with my own pieces
-        if (clickedPiece.color !== myColor) {
-            setSelectedSquare(null);
-            setOptionSquares({});
-            return;
-        } 
-        setSelectedSquare(square);
-        getMoveOptions(square);
-        playSFX('click');
-    } else {
-        setSelectedSquare(null);
-        setOptionSquares({});
-    }
+              if (isPromo) {
+                  // Validate if it's a legal move first
+                  const moves = game.moves({ square: selectedSquare, verbose: true });
+                  const valid = moves.some(m => m.to === square);
+                  if (valid) {
+                      setPromotionSquare({ from: selectedSquare, to: square });
+                      return;
+                  }
+              }
+
+              const move = {
+                  from: selectedSquare,
+                  to: square,
+                  promotion: 'q' // Default to queen if not intercepted above
+              };
+
+              const newGame = new Chess(game.fen());
+              const result = newGame.move(move); // This throws if invalid? No, returns null.
+
+              if (result) {
+                  // VALID MOVE
+                  setGame(newGame);
+                  setSelectedSquare(null);
+                  setPossibleMoves([]);
+                  playSFX(result.captured ? 'capture' : 'move');
+
+                  // Send to Server
+                  if (isP2P && socket && socketGame) {
+                      socket.emit('game_action', {
+                          roomId: socketGame.roomId,
+                          action: {
+                              type: 'MOVE',
+                              fen: newGame.fen(),
+                              pgn: newGame.pgn(),
+                              move: result
+                          }
+                      });
+                  }
+
+                  if (newGame.isGameOver()) handleGameOver(newGame);
+                  return;
+              }
+          } catch (e) {
+              // Invalid move, ignore or deselect
+          }
+      }
+
+      // 2. Select a piece
+      const piece = game.get(square);
+      if (piece) {
+          // Strict Turn Check for P2P
+          if (piece.color !== myColor) {
+              // If we clicked opponent piece, just clear selection (or maybe show their moves? No, strict.)
+              setSelectedSquare(null);
+              setPossibleMoves([]);
+              return;
+          }
+          
+          if (isP2P && game.turn() !== myColor) {
+              // Not my turn
+              return;
+          }
+
+          setSelectedSquare(square);
+          const moves = game.moves({ square, verbose: true });
+          setPossibleMoves(moves.map(m => m.to as Square));
+          playSFX('click');
+      } else {
+          setSelectedSquare(null);
+          setPossibleMoves([]);
+      }
   };
 
   const handlePromotionSelect = (pieceType: string) => {
-      if (!pendingPromotion) return;
-      executeMove(pendingPromotion.from, pendingPromotion.to, pieceType);
-      setPendingPromotion(null);
+      if (!promotionSquare) return;
+      
+      const newGame = new Chess(game.fen());
+      const result = newGame.move({
+          from: promotionSquare.from,
+          to: promotionSquare.to,
+          promotion: pieceType
+      });
+
+      if (result) {
+          setGame(newGame);
+          setPromotionSquare(null);
+          setSelectedSquare(null);
+          setPossibleMoves([]);
+          playSFX('king');
+
+          if (isP2P && socket && socketGame) {
+              socket.emit('game_action', {
+                  roomId: socketGame.roomId,
+                  action: {
+                      type: 'MOVE',
+                      fen: newGame.fen(),
+                      pgn: newGame.pgn(),
+                      move: result
+                  }
+              });
+          }
+      }
   };
 
+  // --- RENDER HELPERS ---
+  
+  // Board Rendering Loop
+  // If myColor is White: Rows 0..7 (mapped to 8..1), Cols 0..7 (a..h)
+  // If myColor is Black: Rows 7..0 (mapped to 1..8), Cols 7..0 (h..a)
+  const boardRows = [];
+  for (let r = 0; r < 8; r++) {
+      const rowSquares = [];
+      for (let c = 0; c < 8; c++) {
+          // Orientation Logic
+          const actualRow = myColor === 'w' ? r : 7 - r;
+          const actualCol = myColor === 'w' ? c : 7 - c;
+          
+          // Chess.js uses algebraic 'a1', 'h8'.
+          // Row index 0 in UI = Rank 8 in Chess (usually).
+          // Let's map strict indices:
+          // White Top (Index 0) -> Rank 8. White Bottom (Index 7) -> Rank 1.
+          const rankIndex = 7 - actualRow; // 0->7 (8), 7->0 (1)
+          const fileIndex = actualCol;     // 0->a, 7->h
+          
+          const square = String.fromCharCode(97 + fileIndex) + (rankIndex + 1) as Square;
+          
+          // Color Check
+          // (0,0) is a8 (Light). (0,1) is b8 (Dark).
+          // Logic: (row + col) % 2 === 0 ? Light : Dark
+          // Wait, a8 is white? Standard is a8=white.
+          // r=0, c=0 -> 0%2=0 -> Light. Correct.
+          const isLight = (actualRow + actualCol) % 2 === 0;
+          
+          const piece = game.get(square);
+          const isSelected = selectedSquare === square;
+          const isPossible = possibleMoves.includes(square);
+          const isLastMove = false; // Could impl from socketGame.lastMove
+
+          rowSquares.push(
+              <div 
+                  key={square}
+                  onClick={() => onSquareClick(square)}
+                  className={`
+                      w-full h-full flex items-center justify-center relative
+                      ${isLight ? 'bg-[#f0d9b5]' : 'bg-[#b58863]'}
+                      ${isSelected ? 'bg-[rgba(255,255,0,0.5)]' : ''}
+                  `}
+              >
+                  {/* Coordinates Markers */}
+                  {actualCol === 0 && <span className={`absolute top-0.5 left-0.5 text-[10px] font-bold ${isLight ? 'text-[#b58863]' : 'text-[#f0d9b5]'}`}>{rankIndex + 1}</span>}
+                  {actualRow === 7 && <span className={`absolute bottom-0 right-1 text-[10px] font-bold ${isLight ? 'text-[#b58863]' : 'text-[#f0d9b5]'}`}>{String.fromCharCode(97 + fileIndex)}</span>}
+
+                  {/* Move Hint */}
+                  {isPossible && (
+                      <div className={`absolute w-3 h-3 rounded-full ${piece ? 'bg-red-500/50 ring-4 ring-red-500/30' : 'bg-black/10'}`} />
+                  )}
+
+                  {/* Piece */}
+                  {piece && (
+                      <motion.img 
+                          layoutId={square} // Smooth transition if same key logic used (hard with dynamic keys, so simple scale in)
+                          initial={{ scale: 0.8 }}
+                          animate={{ scale: 1 }}
+                          src={PIECES[piece.color === 'w' ? piece.type.toUpperCase() : piece.type]} 
+                          className="w-[90%] h-[90%] z-10 cursor-pointer drop-shadow-md select-none"
+                      />
+                  )}
+              </div>
+          );
+      }
+      boardRows.push(<div key={r} className="flex flex-1">{rowSquares}</div>);
+  }
+
   return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4 relative">
+    <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        
+        {/* Promotion Modal */}
         <AnimatePresence>
-            {pendingPromotion && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
-                    <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-royal-900 border border-gold-500 rounded-xl p-6 flex flex-col items-center gap-4">
-                        <h3 className="text-white font-bold text-lg">Promote Pawn</h3>
-                        <div className="flex gap-4">
-                            {['q', 'r', 'b', 'n'].map(p => (
-                                <button key={p} onClick={() => handlePromotionSelect(p)} className="w-16 h-16 bg-white/10 hover:bg-white/20 rounded-lg flex items-center justify-center">
-                                    <img src={PIECES[myColor + p]} className="w-12 h-12" />
-                                </button>
-                            ))}
-                        </div>
+            {promotionSquare && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+                    <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-white rounded-xl p-4 flex gap-4 shadow-2xl">
+                        {['q', 'r', 'b', 'n'].map(p => (
+                            <button key={p} onClick={() => handlePromotionSelect(p)} className="p-2 hover:bg-slate-100 rounded-lg">
+                                <img src={PIECES[myColor === 'w' ? p.toUpperCase() : p]} className="w-16 h-16" />
+                            </button>
+                        ))}
                     </motion.div>
                 </div>
             )}
         </AnimatePresence>
 
-        <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
+        {/* Header */}
+        <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
             <button onClick={() => onGameEnd('quit')} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
             </button>
@@ -295,127 +360,46 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
-       {/* Turn Indicator */}
-       <div className="mb-4 w-full max-w-[600px] flex justify-center">
-            <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                key={isMyTurn ? 'me' : 'opp'}
-                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all border ${
-                    isMyTurn 
-                    ? 'bg-gold-500 text-royal-950 border-gold-400 shadow-[0_0_20px_rgba(251,191,36,0.4)]' 
-                    : 'bg-royal-800 text-slate-400 border-white/10'
-                }`}
-            >
-                {isMyTurn ? "YOUR MOVE" : "OPPONENT'S MOVE"}
-            </motion.div>
-       </div>
-
-        {/* Opponent Info */}
-        <div className="w-full max-w-[600px] flex justify-between items-center mb-2 px-2">
-            <div className={`flex items-center gap-3 transition-opacity ${!isMyTurn ? 'opacity-100' : 'opacity-60'}`}>
-                <div className={`relative ${!isMyTurn ? 'ring-2 ring-red-500 rounded-full' : ''}`}>
-                    <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-10 h-10 rounded-full border border-white/20" />
-                </div>
-                <span className="text-sm font-bold text-slate-300">{table.host?.id === user.id ? table.guest?.name : table.host?.name || "Opponent"}</span>
-            </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${!isMyTurn ? 'text-red-400 border border-red-500/50' : 'text-slate-500'}`}>
-                <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor === 'w' ? 'b' : 'w'])}
-            </div>
-        </div>
-
-        {/* Board - Chess.com Style Green Theme */}
-        <div className="relative w-full max-w-[600px] aspect-square bg-[#769656] rounded-lg shadow-2xl overflow-hidden border-4 border-[#3d2b1f] select-none">
-            <div className="w-full h-full grid grid-cols-8 grid-rows-8">
-                {board.map((row, r) => 
-                    row.map((piece, c) => {
-                        // Rotation Logic: If playing Black, board is flipped.
-                        // Rank 8 (Index 0) is top for White, but bottom for Black.
-                        const actualR = myColor === 'w' ? r : 7 - r;
-                        const actualC = myColor === 'w' ? c : 7 - c;
-                        
-                        const square = String.fromCharCode(97 + actualC) + (8 - actualR) as Square;
-                        const isDark = (actualR + actualC) % 2 === 1;
-                        const p = board[actualR][actualC]; 
-                        const isSelected = selectedSquare === square;
-                        const optionStyle = optionSquares[square];
-                        
-                        return (
-                            <div 
-                                key={square} 
-                                onClick={() => onSquareClick(square)}
-                                className={`
-                                    relative flex items-center justify-center 
-                                    ${isDark ? 'bg-[#769656]' : 'bg-[#eeeed2]'}
-                                `}
-                            >   
-                                {/* Move Highlight (Yellow) */}
-                                {isSelected && (
-                                    <div className="absolute inset-0 bg-[rgba(255,255,0,0.5)] z-0" />
-                                )}
-
-                                {/* Previous Move Highlight or Check hint could go here */}
-
-                                {/* Move Options (Dot or Ring) */}
-                                {optionStyle && (
-                                    <div 
-                                        className="absolute inset-0 z-10 pointer-events-none" 
-                                        style={{ background: optionStyle.background }}
-                                    />
-                                )}
-
-                                {/* Piece */}
-                                {p && (
-                                    <motion.div
-                                        initial={{ scale: 0.8, opacity: 0 }}
-                                        animate={{ scale: 1, opacity: 1 }}
-                                        className="w-[95%] h-[95%] z-20 cursor-pointer"
-                                    >
-                                        <img src={PIECES[p.color + p.type]} alt={p.type} className="w-full h-full drop-shadow-sm" />
-                                    </motion.div>
-                                )}
-                                
-                                {/* Coordinates (Only on edges) */}
-                                {actualC === 0 && (
-                                    <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
-                                        {8 - actualR}
-                                    </span>
-                                )}
-                                {actualR === 7 && (
-                                    <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
-                                        {String.fromCharCode(97 + actualC)}
-                                    </span>
-                                )}
-                            </div>
-                        );
-                    })
-                )}
-            </div>
-            
-            {isGameOver && (
-                <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-30">
-                    <div className="bg-royal-900 border border-gold-500 p-8 rounded-2xl text-center shadow-2xl max-w-xs">
-                        <h2 className="text-2xl font-black text-white mb-2 uppercase">{endGameReason}</h2>
-                        <div className="h-1 w-16 bg-gold-500 mx-auto mb-6"></div>
-                        <button onClick={() => onGameEnd('quit')} className="w-full px-6 py-3 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-transform active:scale-95">
-                            Continue
-                        </button>
-                    </div>
+       {/* Turn Status */}
+       <div className="mb-6">
+            {isGameOver ? (
+                <div className="px-6 py-2 bg-red-500 text-white font-bold rounded-full animate-pulse">{statusMessage}</div>
+            ) : (
+                <div className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg border ${
+                    game.turn() === myColor 
+                    ? 'bg-gold-500 text-royal-950 border-gold-400 shadow-gold-500/20' 
+                    : 'bg-royal-800 text-slate-500 border-white/10'
+                }`}>
+                    {game.turn() === myColor ? "Your Move" : "Opponent Thinking"}
                 </div>
             )}
+       </div>
+
+        {/* The Board */}
+        <div className="w-full max-w-[500px] aspect-square bg-[#3d2b1f] p-1 rounded-sm shadow-2xl">
+            <div className="w-full h-full flex flex-col border-2 border-[#b58863]">
+                {boardRows}
+            </div>
         </div>
 
-        {/* My Info */}
-        <div className="w-full max-w-[600px] flex justify-between items-center mt-2 px-2">
-            <div className={`flex items-center gap-3 transition-opacity ${isMyTurn ? 'opacity-100' : 'opacity-60'}`}>
-                <div className={`relative ${isMyTurn ? 'ring-2 ring-gold-500 rounded-full' : ''}`}>
-                    <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-gold-500" />
+        {/* Player Info */}
+        <div className="w-full max-w-[500px] flex justify-between items-center mt-6">
+            <div className="flex items-center gap-3">
+                <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-gold-500" />
+                <div className="text-sm">
+                    <div className="font-bold text-white">You</div>
+                    <div className="text-xs text-slate-400">{myColor === 'w' ? 'White' : 'Black'}</div>
                 </div>
-                <span className="text-sm font-bold text-white">You</span>
             </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${isMyTurn ? 'text-gold-400 border border-gold-500' : 'text-slate-500'}`}>
-                <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor])}
-            </div>
+            {isP2P && (
+                <div className="flex items-center gap-3 text-right">
+                    <div className="text-sm">
+                        <div className="font-bold text-slate-300">{table.host?.id === user.id ? table.guest?.name : table.host?.name || "Opponent"}</div>
+                        <div className="text-xs text-slate-500">{myColor === 'w' ? 'Black' : 'White'}</div>
+                    </div>
+                    <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-10 h-10 rounded-full border-2 border-slate-600" />
+                </div>
+            )}
         </div>
 
         {isP2P && socketGame && (
