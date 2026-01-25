@@ -210,7 +210,6 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     const handleOpponentDisc = () => {
         setOpponentDisconnected(true);
-        setRematchStatus('declined');
         playSFX('error');
     };
 
@@ -263,12 +262,18 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
   };
 
   const leaveGame = () => {
+      // If we are searching, we cancel search.
+      // If we are IN game (status 'found'), leaveGame is treated as Forfeit by UI calling it.
+      
       if (matchmakingStatus === 'searching' && socket) {
           socket.emit('leave_queue');
       }
-      if (socket && socketGame) {
+      
+      // If we are in a game, ensure we notify server if we are quitting manually
+      if (matchmakingStatus === 'found' && socket && socketGame) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
       }
+
       setSocketGame(null);
       setMatchmakingStatus('idle');
       setSearchingGameDetails(null);

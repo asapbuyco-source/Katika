@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, Clock, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Clock, RotateCcw, AlertTriangle } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -23,6 +23,18 @@ const formatTime = (seconds: number) => {
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
+
+// Unicode Chess Pieces
+const PIECE_SYMBOLS: Record<string, string> = {
+    // White
+    w: {
+        p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
+    },
+    // Black (Using same glyphs but styled differently via CSS for consistent look)
+    b: {
+        p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚'
+    }
+} as any;
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
@@ -56,6 +68,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
   const board = displayGame.board();
   const isViewingLatest = viewIndex === moveHistory.length;
+  const currentTurn = game.turn();
+  const isMyTurn = currentTurn === myColor;
 
   const checkGameOver = useCallback((currentGameState: Chess) => {
       if (currentGameState.isGameOver()) {
@@ -185,7 +199,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       };
       return move;
     });
-    newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
+    newSquares[square] = { background: 'rgba(251, 191, 36, 0.4)' };
     setOptionSquares(newSquares);
     return true;
   };
@@ -240,9 +254,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     if (isGameOver) return;
     if (!isViewingLatest) { setViewIndex(moveHistory.length); return; }
 
-    // Deselect if clicking same square
-    if (selectedSquare === square) { setSelectedSquare(null); setOptionSquares({}); return; }
-
     // If clicking a move option for the selected piece
     const moveOptions = Object.keys(optionSquares);
     if (selectedSquare && moveOptions.includes(square)) {
@@ -263,13 +274,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     // Select a piece
     const clickedPiece = game.get(square);
     if (clickedPiece) {
-        if (clickedPiece.color !== myColor) return; // Can't select opponent pieces
-        if (game.turn() !== myColor) return; // Can't select if not my turn
+        if (clickedPiece.color !== myColor) {
+            // Clicking opponent piece - if we have a selected square and this isn't a valid move (handled above), deselect
+            setSelectedSquare(null);
+            setOptionSquares({});
+            return;
+        } 
         
+        // Select my piece
         setSelectedSquare(square);
         getMoveOptions(square);
         playSFX('click');
     } else {
+        // Clicking empty square that isn't a move option
         setSelectedSquare(null);
         setOptionSquares({});
     }
@@ -287,19 +304,22 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         <AnimatePresence>
             {pendingPromotion && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
-                    <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-royal-900 border border-gold-500 rounded-xl p-4 flex gap-4">
-                        {['q', 'r', 'b', 'n'].map(p => (
-                            <button key={p} onClick={() => handlePromotionSelect(p)} className="p-4 bg-white/10 hover:bg-white/20 rounded-lg">
-                                <img src={`https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/${myColor}${p}.svg`} className="w-12 h-12" />
-                            </button>
-                        ))}
+                    <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} className="bg-royal-900 border border-gold-500 rounded-xl p-6 flex flex-col items-center gap-4">
+                        <h3 className="text-white font-bold text-lg">Promote Pawn</h3>
+                        <div className="flex gap-4">
+                            {['q', 'r', 'b', 'n'].map(p => (
+                                <button key={p} onClick={() => handlePromotionSelect(p)} className="w-16 h-16 bg-white/10 hover:bg-white/20 rounded-lg flex items-center justify-center text-4xl text-white">
+                                    {PIECE_SYMBOLS[myColor][p]}
+                                </button>
+                            ))}
+                        </div>
                     </motion.div>
                 </div>
             )}
         </AnimatePresence>
 
         {/* Header */}
-        <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
+        <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">
             <button onClick={() => onGameEnd('quit')} className="flex items-center gap-2 text-slate-400 hover:text-white">
                 <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
             </button>
@@ -310,19 +330,37 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
+       {/* Turn Indicator */}
+       <div className="mb-4 w-full max-w-[600px] flex justify-center">
+            <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                key={isMyTurn ? 'me' : 'opp'}
+                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all border ${
+                    isMyTurn 
+                    ? 'bg-gold-500 text-royal-950 border-gold-400 shadow-[0_0_20px_rgba(251,191,36,0.4)]' 
+                    : 'bg-royal-800 text-slate-400 border-white/10'
+                }`}
+            >
+                {isMyTurn ? "YOUR MOVE" : "OPPONENT'S MOVE"}
+            </motion.div>
+       </div>
+
         {/* Opponent Info */}
         <div className="w-full max-w-[600px] flex justify-between items-center mb-2 px-2">
-            <div className="flex items-center gap-2">
-                <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-8 h-8 rounded-full border border-white/20" />
+            <div className={`flex items-center gap-3 transition-opacity ${!isMyTurn ? 'opacity-100' : 'opacity-60'}`}>
+                <div className={`relative ${!isMyTurn ? 'ring-2 ring-red-500 rounded-full' : ''}`}>
+                    <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-10 h-10 rounded-full border border-white/20" />
+                </div>
                 <span className="text-sm font-bold text-slate-300">{table.host?.id === user.id ? table.guest?.name : table.host?.name || "Opponent"}</span>
             </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${game.turn() !== myColor ? 'text-white border border-white/20' : 'text-slate-500'}`}>
+            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${!isMyTurn ? 'text-red-400 border border-red-500/50' : 'text-slate-500'}`}>
                 <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor === 'w' ? 'b' : 'w'])}
             </div>
         </div>
 
         {/* Board */}
-        <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-lg shadow-2xl overflow-hidden border-4 border-royal-800 select-none">
+        <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-lg shadow-2xl overflow-hidden border-8 border-royal-800 select-none">
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
                 {board.map((row, r) => 
                     row.map((piece, c) => {
@@ -333,32 +371,53 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         const square = String.fromCharCode(97 + actualC) + (8 - actualR) as Square;
                         const isDark = (actualR + actualC) % 2 === 1;
                         const p = board[actualR][actualC]; 
+                        const isSelected = selectedSquare === square;
+                        const isOption = !!optionSquares[square];
                         
+                        // Piece Visual Logic
+                        const isPieceWhite = p?.color === 'w';
+                        // White pieces = White color with black shadow
+                        // Black pieces = Black color with white shadow (high contrast on green/cream)
+                        const pieceStyle = isPieceWhite 
+                            ? { color: '#ffffff', filter: 'drop-shadow(0px 2px 2px rgba(0,0,0,0.8))' }
+                            : { color: '#1a1a1a', filter: 'drop-shadow(0px 1px 1px rgba(255,255,255,0.7))' };
+
                         return (
                             <div 
                                 key={square} 
                                 onClick={() => onSquareClick(square)}
-                                className={`relative flex items-center justify-center ${isDark ? 'bg-[#779556]' : 'bg-[#ebecd0]'}`}
+                                className={`
+                                    relative flex items-center justify-center 
+                                    ${isDark ? 'bg-[#779556]' : 'bg-[#ebecd0]'}
+                                    ${isSelected ? 'ring-inset ring-4 ring-yellow-400/80' : ''}
+                                `}
                             >   
-                                {/* Move Hint / Highlight */}
-                                {(optionSquares[square] || selectedSquare === square) && (
-                                    <div 
-                                        className="absolute inset-0 z-0" 
-                                        style={optionSquares[square] || { background: 'rgba(255, 255, 0, 0.5)' }} 
-                                    />
+                                {/* Last Move Highlight */}
+                                {prevPgnRef.current && (
+                                    /* Ideally we parse last move to highlight, omitted for brevity, simple select highlight is good enough */
+                                    null
                                 )}
 
-                                {/* Piece - Removed layoutId for stability */}
+                                {/* Move Hint */}
+                                {isOption && (
+                                    <div className={`absolute w-3 h-3 md:w-4 md:h-4 rounded-full ${p ? 'bg-transparent border-4 border-black/20 w-full h-full rounded-none' : 'bg-black/20'}`} />
+                                )}
+
+                                {/* Piece (Text Based) */}
                                 {p && (
-                                    <img 
-                                        src={`https://raw.githubusercontent.com/lichess-org/lila/master/public/piece/cburnett/${p.color}${p.type}.svg`}
-                                        className="w-[90%] h-[90%] z-10 select-none cursor-pointer"
-                                    />
+                                    <motion.div
+                                        initial={{ scale: 0.8, opacity: 0 }}
+                                        animate={{ scale: 1, opacity: 1 }}
+                                        className="text-4xl md:text-5xl select-none cursor-pointer z-10 leading-none"
+                                        style={pieceStyle}
+                                    >
+                                        {PIECE_SYMBOLS[p.color][p.type]}
+                                    </motion.div>
                                 )}
                                 
                                 {/* Coordinates */}
-                                {actualC === 0 && <span className={`absolute top-0 left-0.5 text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{8 - actualR}</span>}
-                                {actualR === 7 && <span className={`absolute bottom-0 right-0.5 text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{String.fromCharCode(97 + actualC)}</span>}
+                                {actualC === 0 && <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{8 - actualR}</span>}
+                                {actualR === 7 && <span className={`absolute bottom-0 right-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#ebecd0]' : 'text-[#779556]'}`}>{String.fromCharCode(97 + actualC)}</span>}
                             </div>
                         );
                     })
@@ -380,11 +439,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
         {/* My Info */}
         <div className="w-full max-w-[600px] flex justify-between items-center mt-2 px-2">
-            <div className="flex items-center gap-2">
-                <img src={user.avatar} className="w-8 h-8 rounded-full border-2 border-gold-500" />
+            <div className={`flex items-center gap-3 transition-opacity ${isMyTurn ? 'opacity-100' : 'opacity-60'}`}>
+                <div className={`relative ${isMyTurn ? 'ring-2 ring-gold-500 rounded-full' : ''}`}>
+                    <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-gold-500" />
+                </div>
                 <span className="text-sm font-bold text-white">You</span>
             </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${game.turn() === myColor ? 'text-gold-400 border border-gold-500' : 'text-slate-500'}`}>
+            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${isMyTurn ? 'text-gold-400 border border-gold-500' : 'text-slate-500'}`}>
                 <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor])}
             </div>
         </div>
@@ -394,14 +455,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <button 
                 onClick={() => setViewIndex(Math.max(0, viewIndex - 1))}
                 disabled={viewIndex === 0}
-                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors"
+                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors border border-white/10"
             >
                 <ArrowLeft size={16} />
             </button>
             <button 
                 onClick={() => setViewIndex(moveHistory.length)}
                 disabled={isViewingLatest}
-                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors"
+                className="p-3 rounded-full bg-royal-800 disabled:opacity-30 hover:bg-royal-700 transition-colors border border-white/10"
             >
                 <RotateCcw size={16} />
             </button>

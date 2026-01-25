@@ -1,4 +1,3 @@
-
 import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
@@ -26,7 +25,7 @@ import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { subscribeToIncomingChallenges, respondToChallenge, createBotMatch, getGame } from '../services/firebase';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Clock, WifiOff } from 'lucide-react';
+import { AlertTriangle, Clock, WifiOff, Loader2 } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
 import { ThemeProvider } from '../services/theme';
 import { playSFX } from '../services/sound';
@@ -42,8 +41,11 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -109,31 +111,53 @@ const AppContent = () => {
   const { user, loading: authLoading } = useUser();
   const { currentView, setView } = useNav();
   const { 
-      socket, socketGame, matchmakingStatus, 
+      socket, socketGame, matchmakingStatus, isConnecting,
       leaveGame, gameResult, resetGameResult, 
       rematchStatus, requestRematch, opponentDisconnected 
   } = useSocket();
   
   const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
-  const [activeTable, setActiveTable] = useState<Table | null>(null); // For Local/Bot games
+  
+  // Initialize activeTable from localStorage if available (for persisting Bot games on refresh)
+  const [activeTable, setActiveTable] = useState<Table | null>(() => {
+      const saved = localStorage.getItem('vantage_active_table');
+      return saved ? JSON.parse(saved) : null;
+  });
+
+  // Persist activeTable (Bot games only, P2P is handled by socket state)
+  useEffect(() => {
+      if (activeTable) {
+          localStorage.setItem('vantage_active_table', JSON.stringify(activeTable));
+      } else {
+          localStorage.removeItem('vantage_active_table');
+      }
+  }, [activeTable]);
 
   // Auth Redirects
   useEffect(() => {
       if (authLoading) return;
-      if (user) {
+      
+      // If we have a stored bot game and user is logged in, ensure we are on 'game' view
+      // But only if NOT in P2P mode (socketGame takes precedence)
+      if (user && activeTable && !socketGame && currentView !== 'game') {
+          setView('game');
+      }
+      else if (user) {
           if (currentView === 'landing' || currentView === 'auth') setView('dashboard');
       } else {
           const publicViews = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
           if (!publicViews.includes(currentView)) setView('landing');
       }
-  }, [user, currentView, authLoading, setView]);
+  }, [user, currentView, authLoading, setView, activeTable, socketGame]);
 
-  // Handle Socket Game State Changes
+  // Handle Socket Game State Changes (P2P Reconnection Logic)
   useEffect(() => {
       if (matchmakingStatus === 'searching') {
           setView('matchmaking');
+          setActiveTable(null); // Clear local bot table if entering P2P
       } else if (matchmakingStatus === 'found' && socketGame) {
           setView('game');
+          setActiveTable(null); // Clear local bot table if entering P2P
       }
   }, [matchmakingStatus, socketGame, setView]);
 
@@ -165,7 +189,7 @@ const AppContent = () => {
           const gameId = await createBotMatch(user, gameType);
           const gameData = await getGame(gameId);
           if (gameData) {
-              setActiveTable({
+              const newTable = {
                   id: gameData.id,
                   gameType: gameData.gameType as any,
                   stake: gameData.stake,
@@ -174,7 +198,8 @@ const AppContent = () => {
                   status: 'active',
                   host: gameData.host,
                   guest: gameData.guest
-              });
+              } as Table;
+              setActiveTable(newTable);
               setView('game');
           }
       } catch (e) {
@@ -187,7 +212,7 @@ const AppContent = () => {
       // But typically we let the socket events drive this for P2P.
       if (!socketGame) {
           // Local Bot Game End
-          leaveGame(); // Just resets view
+          leaveGame(); // Just resets view vars
           setActiveTable(null);
           setView('lobby');
       }
@@ -208,10 +233,15 @@ const AppContent = () => {
       };
   };
 
-  if (authLoading) {
+  // Improved Loading State: Wait for Auth AND Socket Reconnection check
+  // This prevents Dashboard from flashing if we are about to rejoin a game
+  if (authLoading || (user && isConnecting)) {
       return (
-          <div className="min-h-screen bg-royal-950 flex items-center justify-center">
-              <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
+          <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center gap-4">
+              <div className="w-12 h-12 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
+              <p className="text-gold-400 font-bold text-sm animate-pulse">
+                  {authLoading ? "Authenticating..." : "Reconnecting to Network..."}
+              </p>
           </div>
       );
   }

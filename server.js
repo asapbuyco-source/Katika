@@ -28,7 +28,7 @@ const rooms = new Map(); // roomId -> { players: [], gameState: {}, ... }
 const queues = new Map();
 const userSockets = new Map();
 const socketUsers = new Map();
-const disconnectTimers = new Map();
+const disconnectTimers = new Map(); // userId -> TimeoutID
 const rateLimits = new Map();
 
 // --- HELPER FUNCTIONS ---
@@ -62,12 +62,21 @@ const endGame = (roomId, winnerId, reason) => {
     const platformFee = Math.floor(totalPot * 0.10);
     const winnings = totalPot - platformFee;
 
+    // Clear any pending timers for this room
+    room.players.forEach(pid => {
+        if (disconnectTimers.has(pid)) {
+            clearTimeout(disconnectTimers.get(pid));
+            disconnectTimers.delete(pid);
+        }
+    });
+
     io.to(roomId).emit('game_over', { 
         winner: winnerId,
         reason: reason,
         financials: { totalPot, platformFee, winnings }
     });
 
+    // Clean up room after delay
     setTimeout(() => {
         const r = rooms.get(roomId);
         if (r && r.status === 'completed') rooms.delete(roomId);
@@ -283,6 +292,12 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
+        // Cancel any pending disconnect timers if user rejoined via a fresh socket
+        if (disconnectTimers.has(userId)) {
+            clearTimeout(disconnectTimers.get(userId));
+            disconnectTimers.delete(userId);
+        }
+
         const queueKey = `${gameType}_${stake}`;
         if (!queues.has(queueKey)) queues.set(queueKey, []);
         const queue = queues.get(queueKey);
@@ -322,6 +337,28 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('rejoin_game', ({ userProfile }) => {
+        const userId = userProfile.id;
+        userSockets.set(userId, socket.id);
+        socketUsers.set(socket.id, userId);
+
+        // Cancel Disconnect Timer
+        if (disconnectTimers.has(userId)) {
+            clearTimeout(disconnectTimers.get(userId));
+            disconnectTimers.delete(userId);
+        }
+
+        // Find active room
+        rooms.forEach((room, roomId) => {
+            if (room.status === 'active' && room.players.includes(userId)) {
+                socket.join(roomId);
+                io.to(roomId).emit('opponent_reconnected', { userId });
+                // Send current state to reconnector
+                socket.emit('match_found', room); 
+            }
+        });
+    });
+
     socket.on('leave_queue', () => {
         // Iterate all queues and remove socket
         for (const [key, queue] of queues.entries()) {
@@ -342,7 +379,7 @@ io.on('connection', (socket) => {
         // General
         if (action.type === 'FORFEIT') {
             const winner = room.players.find(id => id !== userId);
-            endGame(roomId, winner, 'Forfeit');
+            endGame(roomId, winner, 'Opponent Forfeited');
         }
         else if (action.type === 'CHAT') {
             room.chat = room.chat || [];
@@ -436,11 +473,34 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const userId = socketUsers.get(socket.id);
         if (userId) {
-            // Remove from any queues
+            // 1. Remove from Queues
             for (const [key, queue] of queues.entries()) {
-                const idx = queue.findIndex(item => item.socketId === socket.id);
+                const idx = queue.findIndex(item => item.userProfile.id === userId);
                 if (idx !== -1) queue.splice(idx, 1);
             }
+
+            // 2. Handle Active Games Disconnect
+            rooms.forEach((room, roomId) => {
+                if (room.status === 'active' && room.players.includes(userId)) {
+                    if (room.winner) return; // Already over
+
+                    // Notify opponent
+                    io.to(roomId).emit('opponent_disconnected', { userId });
+
+                    // Start 60s Timer
+                    const timer = setTimeout(() => {
+                        const r = rooms.get(roomId);
+                        if (r && r.status === 'active' && !r.winner) {
+                            const winnerId = r.players.find(p => p !== userId);
+                            endGame(roomId, winnerId, 'Opponent Timed Out');
+                        }
+                        disconnectTimers.delete(userId);
+                    }, 60000); 
+
+                    disconnectTimers.set(userId, timer);
+                }
+            });
+
             userSockets.delete(userId);
             socketUsers.delete(socket.id);
         }
