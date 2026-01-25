@@ -1,11 +1,14 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
+import { ArrowLeft, X, Circle, Clock, Loader2, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
+import { GameTimer } from './GameTimer';
+import { TurnIndicator } from './TurnIndicator';
+import { ForfeitModal } from './ForfeitModal';
 
 interface TicTacToeGameProps {
   table: Table;
@@ -66,7 +69,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
               playSFX('notification');
               addLog("Draw! Rematch...", "scanning");
           } else {
-              // Reset
               if (serverBoard && serverBoard.every((c: any) => c === null) && (winner || isDraw)) {
                   setWinner(null);
                   setIsDraw(false);
@@ -111,7 +113,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
       }
   };
 
-  // Improved Bot Logic with explicit board state passed to avoid stale closure
   const makeBotMove = useCallback((currentBoard: CellValue[]) => {
       if (winner || isDraw) return; 
       const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
@@ -160,7 +161,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   };
 
   const processMove = (index: number, symbol: CellValue) => {
-      // Functional update to ensure we always have the latest board state if rapid clicks happen (rare in this logic but safe)
       setBoard(prevBoard => {
           const newBoard = [...prevBoard];
           newBoard[index] = symbol;
@@ -209,35 +209,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
-        {/* FORFEIT MODAL */}
-        <AnimatePresence>
-          {showForfeitModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowForfeitModal(false)}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
-                  >
-                      <div className="flex flex-col items-center text-center mb-6">
-                          <AlertTriangle className="text-red-500 mb-4" size={32} />
-                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
-                          <p className="text-sm text-slate-400">
-                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
-                          </p>
-                      </div>
-                      <div className="flex gap-3">
-                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 rounded-xl text-slate-300 font-bold">Cancel</button>
-                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Forfeit</button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-       </AnimatePresence>
-
         {/* Header */}
         <div className="w-full max-w-lg flex justify-between items-center mb-8 mt-4">
              <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
@@ -266,11 +237,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     </div>
                 </div>
                 <span className="text-sm font-bold text-white">You</span>
-                {isXNext && (
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${timeLeft <= 5 ? 'bg-red-500 text-white animate-pulse' : 'bg-gold-500 text-black'}`}>
-                        <Clock size={10} /> {timeLeft}s
-                    </div>
-                )}
+                {isXNext && <GameTimer seconds={timeLeft} isActive={true} />}
             </div>
 
             <div className="flex flex-col items-center">
@@ -292,11 +259,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     </div>
                 </div>
                 <span className="text-sm font-bold text-white">{table.host?.id === user.id ? table.guest?.name : table.host?.name || "Opponent"}</span>
-                {!isXNext && (
-                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${timeLeft <= 5 ? 'bg-red-500 text-white animate-pulse' : 'bg-purple-500 text-white'}`}>
-                        <Clock size={10} /> {timeLeft}s
-                    </div>
-                )}
+                {!isXNext && <GameTimer seconds={timeLeft} isActive={true} />}
             </div>
         </div>
 
@@ -381,6 +344,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 )}
             </AnimatePresence>
         </div>
+
+        <ForfeitModal isOpen={showForfeitModal} onClose={() => setShowForfeitModal(false)} onConfirm={() => onGameEnd('quit')} />
     </div>
   );
 };

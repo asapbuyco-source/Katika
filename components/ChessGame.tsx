@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft, BookOpen, X, Clock, AlertTriangle } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -9,6 +9,9 @@ import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { Chess } from 'chess.js';
 import type { Square } from 'chess.js';
+import { GameTimer } from './GameTimer';
+import { TurnIndicator } from './TurnIndicator';
+import { ForfeitModal } from './ForfeitModal';
 
 interface ChessGameProps {
   table: Table;
@@ -19,12 +22,6 @@ interface ChessGameProps {
 }
 
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
-
-const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-};
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
@@ -52,21 +49,17 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
       // P2P Sync Logic
       if (isP2P && socketGame) {
-          // 1. Determine Color
           const players = socketGame.players;
           if (Array.isArray(players) && players.length > 0) {
               const isPlayer1 = players[0] === user.id;
               setMyColor(isPlayer1 ? 'w' : 'b');
           }
 
-          // 2. Load Board State (FEN)
-          // We trust the server completely. If server sends FEN, we load it.
           const gameState = socketGame.gameState;
           if (gameState && gameState.fen) {
               const currentFen = game.fen();
               const serverFen = gameState.fen;
               
-              // Only update if different to avoid infinite loops, but do it forcefully
               if (currentFen !== serverFen) {
                   const newGame = new Chess();
                   try {
@@ -79,27 +72,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               }
           }
 
-          // 3. Sync Timers
-          const timers = socketGame?.gameState?.timers;
+          // 3. Sync Timers (Robust Fix)
+          const timers = socketGame?.gameState?.timers as Record<string, number> | undefined;
           if (timers && Array.isArray(players) && players.length >= 2) {
               const p1 = players[0];
               const p2 = players[1];
               
-              // Use safe intermediate variables to satisfy TS strict null checks
-              let t1 = 600;
-              let t2 = 600;
-
-              if (typeof p1 === 'string' && timers[p1] !== undefined) {
-                  t1 = Number(timers[p1]);
-              }
-              if (typeof p2 === 'string' && timers[p2] !== undefined) {
-                  t2 = Number(timers[p2]);
-              }
+              // Safe access with explicit typing
+              const t1 = typeof p1 === 'string' && timers[p1] !== undefined ? Number(timers[p1]) : 600;
+              const t2 = typeof p2 === 'string' && timers[p2] !== undefined ? Number(timers[p2]) : 600;
               
               setTimeRemaining({ w: t1, b: t2 });
           }
 
-          // 4. Handle Game Over
           if (socketGame.winner && !isGameOver) {
               setIsGameOver(true);
               const isWin = socketGame.winner === user.id;
@@ -157,7 +142,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       };
       return move;
     });
-    newSquares[square] = { background: 'rgba(255, 215, 0, 0.4)' }; // Highlight selected
+    newSquares[square] = { background: 'rgba(255, 215, 0, 0.4)' };
     setOptionSquares(newSquares);
     return true;
   };
@@ -168,7 +153,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           const result = game.move(moveAttempt);
           
           if (result) {
-              // Optimistic UI update
               const newGame = new Chess(game.fen()); 
               setGame(newGame);
               setSelectedSquare(null);
@@ -178,13 +162,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               checkGameOver(newGame);
 
               if (isP2P && socket && socketGame) {
-                  // Simply send the move. Server calculates FEN and sends it back.
                   socket.emit('game_action', {
                       roomId: socketGame.roomId,
-                      action: {
-                          type: 'MOVE',
-                          move: moveAttempt
-                      }
+                      action: { type: 'MOVE', move: moveAttempt }
                   });
               } else if (isBotGame && !newGame.isGameOver()) {
                   setTimeout(makeBotMove, 800);
@@ -200,18 +180,15 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const onSquareClick = (square: Square) => {
     if (isGameOver) return;
 
-    // Deselect if clicking same square
     if (selectedSquare === square) { 
         setSelectedSquare(null); 
         setOptionSquares({}); 
         return; 
     }
 
-    // Attempt Move if square is in options
     const moveOptions = Object.keys(optionSquares);
     if (selectedSquare && moveOptions.includes(square)) {
         const piece = game.get(selectedSquare);
-        // Pawn promotion check
         if (piece && piece.type === 'p') {
             const isLastRank = (piece.color === 'w' && square[1] === '8') || (piece.color === 'b' && square[1] === '1');
             if (isLastRank) {
@@ -223,12 +200,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         return;
     }
 
-    // Select Piece
     const clickedPiece = game.get(square);
     if (clickedPiece) {
-        // Can only select own pieces
         if (clickedPiece.color !== myColor) return;
-        // Can only select if it's my turn (Basic rule enforcement)
         if (game.turn() !== myColor) return;
 
         setSelectedSquare(square);
@@ -282,9 +256,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const getPieceComponent = (piece: { type: string, color: string } | null) => {
       if (!piece) return null;
       const symbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
-      
       const isWhite = piece.color === 'w';
-      
       return (
           <motion.span 
               initial={{ scale: 0.8, opacity: 0 }}
@@ -342,15 +314,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
        </div>
 
        {/* Turn Indicator */}
-       <div className="mb-2 flex flex-col items-center">
-            <div className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg border transition-all ${
-                game.turn() === myColor 
-                ? 'bg-gold-500 text-royal-950 border-gold-400' 
-                : 'bg-royal-800 text-slate-400 border-white/10'
-            }`}>
-                {game.turn() === myColor ? "YOUR MOVE" : "OPPONENT'S MOVE"}
-            </div>
-       </div>
+       <TurnIndicator isMyTurn={game.turn() === myColor} />
 
         {/* Opponent Info */}
         <div className="w-full max-w-[600px] flex justify-between items-center mb-2 px-2">
@@ -363,9 +327,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <span className="text-[10px] text-slate-500">{myColor === 'w' ? 'Black' : 'White'}</span>
                 </div>
             </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${game.turn() !== myColor ? 'text-white border border-white/20' : 'text-slate-500'}`}>
-                <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor === 'w' ? 'b' : 'w'])}
-            </div>
+            <GameTimer seconds={timeRemaining[myColor === 'w' ? 'b' : 'w']} isActive={game.turn() !== myColor} />
         </div>
 
         {/* Board */}
@@ -373,7 +335,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="w-full h-full grid grid-cols-8 grid-rows-8">
                 {board.map((row, r) => 
                     row.map((piece, c) => {
-                        // Rotation Logic: If playing Black, rotate board 180deg
                         const actualR = myColor === 'w' ? r : 7 - r;
                         const actualC = myColor === 'w' ? c : 7 - c;
                         
@@ -392,23 +353,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     ${isDark ? 'bg-[#769656]' : 'bg-[#eeeed2]'} 
                                 `}
                             >   
-                                {/* Move Highlight */}
                                 {isSelected && (
                                     <div className="absolute inset-0 bg-[rgba(255,255,0,0.4)] z-0" />
                                 )}
-
-                                {/* Move Options */}
                                 {optionStyle && (
                                     <div 
                                         className="absolute inset-0 z-10 pointer-events-none" 
                                         style={{ background: optionStyle.background }}
                                     />
                                 )}
-
-                                {/* Piece */}
                                 {getPieceComponent(p)}
-                                
-                                {/* Coordinates */}
                                 {actualC === 0 && (
                                     <span className={`absolute top-0.5 left-0.5 text-[8px] md:text-[10px] font-bold ${isDark ? 'text-[#eeeed2]' : 'text-[#769656]'}`}>
                                         {8 - actualR}
@@ -425,7 +379,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 )}
             </div>
             
-            {/* Game Over Overlay */}
             {isGameOver && (
                 <div className="absolute inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-30">
                     <div className="bg-royal-900 border border-gold-500 p-8 rounded-2xl text-center shadow-2xl max-w-xs">
@@ -450,9 +403,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <span className="text-[10px] text-slate-400">{myColor === 'w' ? 'White' : 'Black'}</span>
                 </div>
             </div>
-            <div className={`px-3 py-1 rounded bg-black/40 text-xs font-mono font-bold ${game.turn() === myColor ? 'text-gold-400 border border-gold-500' : 'text-slate-500'}`}>
-                <Clock size={12} className="inline mr-1" /> {formatTime(timeRemaining[myColor])}
-            </div>
+            <GameTimer seconds={timeRemaining[myColor]} isActive={game.turn() === myColor} />
         </div>
 
         {isP2P && socketGame && (
@@ -464,27 +415,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             />
         )}
 
-        {/* Forfeit Modal */}
-        <AnimatePresence>
-          {showForfeitModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowForfeitModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
-                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-[#1a1a1a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl">
-                      <div className="flex flex-col items-center text-center mb-6">
-                          <AlertTriangle className="text-red-500 mb-4" size={32} />
-                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
-                          <p className="text-sm text-slate-400">
-                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
-                          </p>
-                      </div>
-                      <div className="flex gap-3">
-                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
-                          <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Forfeit</button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-       </AnimatePresence>
+        <ForfeitModal isOpen={showForfeitModal} onClose={() => setShowForfeitModal(false)} onConfirm={handleQuit} />
     </div>
   );
 };
