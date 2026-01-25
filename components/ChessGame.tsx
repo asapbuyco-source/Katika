@@ -53,7 +53,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       // P2P Sync Logic - THE "BASIC" FIX
       if (isP2P && socketGame) {
           // 1. Determine Color
-          if (socketGame.players && socketGame.players[0]) {
+          if (socketGame.players && Array.isArray(socketGame.players) && socketGame.players.length > 0) {
               const isPlayer1 = socketGame.players[0] === user.id;
               setMyColor(isPlayer1 ? 'w' : 'b');
           }
@@ -81,10 +81,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           const timers = socketGame.gameState?.timers;
           const players = socketGame.players;
           if (timers && Array.isArray(players) && players.length >= 2) {
-              setTimeRemaining({
-                  w: timers[players[0]] || 600,
-                  b: timers[players[1]] || 600
-              });
+              const p1 = players[0];
+              const p2 = players[1];
+              // Ensure we don't crash if p1/p2 keys are missing or invalid
+              const t1 = typeof p1 === 'string' ? (timers[p1] ?? 600) : 600;
+              const t2 = typeof p2 === 'string' ? (timers[p2] ?? 600) : 600;
+              
+              setTimeRemaining({ w: t1, b: t2 });
           }
 
           // 4. Handle Game Over
