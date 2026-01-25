@@ -143,6 +143,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                   if (serverPgn) newGame.loadPgn(serverPgn);
                   
                   // Only update state if it's actually a new move (length check or content check)
+                  // We check against current game state to avoid reloading if we just made the move locally
                   if (newGame.history().length !== game.history().length || serverPgn !== game.pgn()) {
                       setGame(newGame);
                       prevPgnRef.current = serverPgn;
@@ -174,7 +175,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               setTimeout(() => onGameEnd(amIWinner ? 'win' : 'loss'), 3000);
           }
       }
-  }, [socketGame, user.id, isP2P, checkGameOver, myColor, game, onGameEnd]);
+      // Removed 'game' from dependencies to prevent local move updates from triggering stale socket state reversion
+  }, [socketGame, user.id, isP2P, checkGameOver, myColor, onGameEnd]);
 
   const getMoveOptions = (square: Square) => {
     if (!isViewingLatest) {
