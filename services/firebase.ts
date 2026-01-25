@@ -12,16 +12,15 @@ import {
 import { User, Transaction, PlayerProfile, ForumPost, Challenge, BugReport } from "../types";
 import { MOCK_TRANSACTIONS } from './mockData';
 
-// Helper to access env safely
-const env = (import.meta as any).env || {};
-
+// Hardcoded configuration to ensure login works without .env files
 const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || "mock-key",
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || "mock.firebaseapp.com",
-  projectId: env.VITE_FIREBASE_PROJECT_ID || "mock-project",
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || "mock.appspot.com",
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || "000000",
-  appId: env.VITE_FIREBASE_APP_ID || "1:0000:web:0000"
+  apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
+  authDomain: "katika-8eef2.firebaseapp.com",
+  projectId: "katika-8eef2",
+  storageBucket: "katika-8eef2.firebasestorage.app",
+  messagingSenderId: "758549221515",
+  appId: "1:758549221515:web:67ff82bbb07e01556b448e",
+  measurementId: "G-6882Y7PZ9Q"
 };
 
 const app = initializeApp(firebaseConfig);
