@@ -32,7 +32,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
   const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
   const [showForfeitModal, setShowForfeitModal] = useState(false);
-  const [showRulesModal, setShowRulesModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [isBotGame, setIsBotGame] = useState(false);
   const [isGameOver, setIsGameOver] = useState(false);
@@ -78,11 +77,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               }
           }
 
-          // 3. Sync Timers
-          if (socketGame.gameState && socketGame.gameState.timers && socketGame.players) {
+          // 3. Sync Timers (Safe Access Fix)
+          const timers = socketGame.gameState?.timers;
+          const players = socketGame.players;
+          if (timers && Array.isArray(players) && players.length >= 2) {
               setTimeRemaining({
-                  w: socketGame.gameState.timers[socketGame.players[0]] || 600,
-                  b: socketGame.gameState.timers[socketGame.players[1]] || 600
+                  w: timers[players[0]] || 600,
+                  b: timers[players[1]] || 600
               });
           }
 
