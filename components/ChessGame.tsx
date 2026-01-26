@@ -138,7 +138,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     moves.map((move: any) => {
       const targetPiece = game.get(move.to);
       newSquares[move.to] = {
-        background: targetPiece && targetPiece.color !== game.get(square).color
+        background: targetPiece && targetPiece.color !== game.get(square)?.color
             ? 'radial-gradient(circle, rgba(255, 0, 0, 0.5) 20%, transparent 30%)' // Red for capture
             : 'radial-gradient(circle, rgba(0, 0, 0, 0.2) 20%, transparent 30%)',   // Dot for move
       };

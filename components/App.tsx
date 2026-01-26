@@ -1,4 +1,3 @@
-
 import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
@@ -43,7 +42,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   public state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -62,7 +61,7 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-royal-950">
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-royal-900 text-white">
           <AlertTriangle size={48} className="text-red-500 mb-4" />
           <h2 className="text-xl font-bold text-white mb-2">Game Error</h2>
           <p className="text-slate-400 mb-6">We apologize for the interruption.</p>
