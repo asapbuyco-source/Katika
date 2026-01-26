@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, Zap, X, Check } from 'lucide-react';
-import { Table, User, AIRefereeLog } from '../types';
+import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, Zap, X, RefreshCw } from 'lucide-react';
+import { Table, User } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+import { useSocket } from '../services/context';
 
 interface CardGameProps {
   table: Table;
@@ -66,57 +67,47 @@ const CardView = ({ card, isFaceDown, isPlayable, onClick, style }: any) => {
 };
 
 export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const [myHand, setMyHand] = useState<Card[]>([]);
   const [oppHandCount, setOppHandCount] = useState(0);
   const [discardPile, setDiscardPile] = useState<Card[]>([]);
   const [activeSuit, setActiveSuit] = useState<Suit | null>(null); 
   const [turn, setTurn] = useState<'me' | 'opp'>('me');
-  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   const [showSuitSelector, setShowSuitSelector] = useState(false);
   const [pendingCard, setPendingCard] = useState<Card | null>(null);
   const [deckSize, setDeckSize] = useState(0);
+  const [isDrawing, setIsDrawing] = useState(false); // ISSUE 5: Loading State
 
   const isP2P = !!socket && !!socketGame;
 
   // Sync State
   useEffect(() => {
       if (isP2P && socketGame) {
-          if (socketGame.gameState && socketGame.gameState.hands && socketGame.gameState.hands[user.id]) {
-              setMyHand(socketGame.gameState.hands[user.id]);
+          setIsDrawing(false); // Clear loading on update
+          if (socketGame.gameState) {
+              const gs = socketGame.gameState;
+              if (gs.hands && gs.hands[user.id]) setMyHand(gs.hands[user.id]);
+              if (gs.discardPile) setDiscardPile(gs.discardPile);
+              if (gs.activeSuit !== undefined) setActiveSuit(gs.activeSuit);
+              if (gs.deck) setDeckSize(gs.deck.length);
               
-              // Count opponent cards
               const oppId = socketGame.players.find((id: string) => id !== user.id);
-              if (socketGame.gameState.hands[oppId]) setOppHandCount(socketGame.gameState.hands[oppId].length);
+              if (gs.hands && gs.hands[oppId]) setOppHandCount(gs.hands[oppId].length);
           }
-          if (socketGame.gameState && socketGame.gameState.discardPile) setDiscardPile(socketGame.gameState.discardPile);
-          if (socketGame.gameState && socketGame.gameState.activeSuit) setActiveSuit(socketGame.gameState.activeSuit);
           if (socketGame.turn) setTurn(socketGame.turn === user.id ? 'me' : 'opp');
-          if (socketGame.gameState && socketGame.gameState.deck) setDeckSize(socketGame.gameState.deck.length);
-          
-          if (socketGame.winner) {
-              onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
-          }
+          if (socketGame.winner) onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
       }
   }, [socketGame, user.id, isP2P]);
 
   const playCard = (card: Card) => {
       if (turn !== 'me') return;
-      
       const top = discardPile[discardPile.length - 1];
       const isJack = card.rank === 'J';
-      
-      // Determine if match valid:
-      // 1. Matches active suit (if defined, otherwise top card suit)
-      // 2. Matches rank
-      // 3. Is a Jack
       const currentTargetSuit = activeSuit || (top ? top.suit : null);
-      const matchesSuit = currentTargetSuit ? card.suit === currentTargetSuit : true; // First card any suit ok? Typically yes.
+      const matchesSuit = currentTargetSuit ? card.suit === currentTargetSuit : true;
       const matchesRank = top && card.rank === top.rank;
       
-      if (!isJack && !matchesSuit && !matchesRank) { 
-          playSFX('error'); 
-          return; 
-      }
+      if (!isJack && !matchesSuit && !matchesRank) { playSFX('error'); return; }
 
       if (isJack) {
           setPendingCard(card);
@@ -128,66 +119,40 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
 
   const emitMove = (card: Card, overrideSuit?: Suit) => {
       if (isP2P && socket) {
-          socket.emit('game_action', {
-              roomId: socketGame.roomId,
-              action: { type: 'PLAY', card: card, suit: overrideSuit || card.suit }
-          });
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'PLAY', card: card, suit: overrideSuit || card.suit } });
       }
       playSFX('move');
       setShowSuitSelector(false);
       setPendingCard(null);
   };
 
-  const handleSuitSelect = (suit: Suit) => {
-      if (pendingCard) emitMove(pendingCard, suit);
-  };
+  const handleSuitSelect = (suit: Suit) => { if (pendingCard) emitMove(pendingCard, suit); };
 
-  const handleCancelSuitSelect = () => {
-      setShowSuitSelector(false);
-      setPendingCard(null);
-  };
-
+  // ISSUE 5: Secure Draw Logic
   const drawCard = () => {
-      if (turn !== 'me') return;
+      if (turn !== 'me' || deckSize === 0 || isDrawing) return;
       
-      if (deckSize === 0) {
-          playSFX('error'); 
-          return;
-      }
-
+      setIsDrawing(true);
       if (isP2P && socket) {
-          socket.emit('game_action', {
-              roomId: socketGame.roomId,
-              action: { type: 'DRAW', passTurn: true }
-          });
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW', passTurn: true } });
+          // Timeout to release lock if server hangs
+          setTimeout(() => { if(isDrawing) setIsDrawing(false); }, 5000);
       }
       playSFX('move');
   };
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
-        
         {/* SUIT SELECTOR MODAL */}
         <AnimatePresence>
             {showSuitSelector && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
-                    <motion.div 
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 0.9, opacity: 0 }}
-                        className="bg-royal-900 border border-gold-500 rounded-2xl p-6 shadow-2xl relative"
-                    >
-                        <button onClick={handleCancelSuitSelect} className="absolute top-2 right-2 text-slate-400 hover:text-white">
-                            <X size={20} />
-                        </button>
+                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-royal-900 border border-gold-500 rounded-2xl p-6 shadow-2xl relative">
+                        <button onClick={() => setShowSuitSelector(false)} className="absolute top-2 right-2 text-slate-400 hover:text-white"><X size={20} /></button>
                         <h3 className="text-white font-bold text-center mb-4">Select a Suit</h3>
                         <div className="grid grid-cols-2 gap-4">
                             {['H', 'D', 'C', 'S'].map((s) => (
-                                <button 
-                                    key={s}
-                                    onClick={() => handleSuitSelect(s as Suit)}
-                                    className="w-20 h-20 rounded-xl bg-white flex items-center justify-center hover:scale-105 transition-transform"
-                                >
+                                <button key={s} onClick={() => handleSuitSelect(s as Suit)} className="w-20 h-20 rounded-xl bg-white flex items-center justify-center hover:scale-105 transition-transform">
                                     <SuitIcon suit={s as Suit} size={40} />
                                 </button>
                             ))}
@@ -206,7 +171,9 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
              </div>
-             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+             <div className="w-32 flex justify-end">
+                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30" title="Sync State"><RefreshCw size={16} /></button>
+             </div>
         </div>
 
         {/* Opponent Hand */}
@@ -214,36 +181,22 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
             {Array.from({ length: Math.min(oppHandCount, 5) }).map((_, i) => (
                 <CardView key={`opp-${i}`} isFaceDown={true} style={{ transform: `rotate(${(i - 2) * 5}deg)` }} />
             ))}
-            {oppHandCount > 5 && (
-                <div className="w-20 h-32 md:w-24 md:h-36 rounded-xl bg-royal-800 border border-white/10 flex items-center justify-center text-white font-bold">
-                    +{oppHandCount - 5}
-                </div>
-            )}
+            {oppHandCount > 5 && <div className="w-20 h-32 rounded-xl bg-royal-800 border border-white/10 flex items-center justify-center text-white font-bold">+{oppHandCount - 5}</div>}
         </div>
         
         {/* Game Center */}
         <div className="flex-1 flex items-center justify-center gap-12">
-            
-            {/* Draw Deck */}
             <div className="relative cursor-pointer group" onClick={drawCard}>
                 <div className="absolute top-1 left-1 w-24 h-36 bg-royal-800 rounded-xl border border-white/5"></div>
-                <div className="relative w-24 h-36 bg-royal-800 rounded-xl border-2 border-white/20 flex items-center justify-center group-hover:-translate-y-2 transition-transform overflow-hidden">
-                    {deckSize === 0 ? (
-                        <span className="text-xs font-bold text-red-500 uppercase tracking-widest">Empty</span>
-                    ) : (
-                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Draw ({deckSize})</span>
-                    )}
+                <div className={`relative w-24 h-36 bg-royal-800 rounded-xl border-2 border-white/20 flex items-center justify-center transition-transform overflow-hidden ${isDrawing ? 'opacity-50' : 'group-hover:-translate-y-2'}`}>
+                    {deckSize === 0 ? <span className="text-xs font-bold text-red-500 uppercase">Empty</span> : <span className="text-xs font-bold text-slate-400 uppercase">Draw ({deckSize})</span>}
                 </div>
             </div>
 
-            {/* Discard Pile */}
             <div className="relative">
                 {discardPile.slice(-2).map((c, i) => (
-                    <div key={c.id} className="absolute top-0 left-0" style={{ transform: `rotate(${i * 5}deg)` }}>
-                        <CardView card={c} />
-                    </div>
+                    <div key={c.id} className="absolute top-0 left-0" style={{ transform: `rotate(${i * 5}deg)` }}><CardView card={c} /></div>
                 ))}
-                {/* Active Suit Indicator */}
                 {activeSuit && (
                     <div className="absolute -right-16 top-1/2 -translate-y-1/2 w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-lg border-2 border-gold-500 animate-pulse">
                         <SuitIcon suit={activeSuit} size={20} />
@@ -255,42 +208,24 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
         {/* Player Hand */}
         <div className="w-full max-w-4xl mt-8">
             <div className="text-center text-white font-bold mb-4 flex justify-center items-center gap-2">
-                {turn === 'me' ? (
-                    <span className="text-gold-400 flex items-center gap-2"><Zap size={16} /> Your Turn</span>
-                ) : (
-                    <span className="text-slate-500">Opponent's Turn...</span>
-                )}
+                {turn === 'me' ? <span className="text-gold-400 flex items-center gap-2"><Zap size={16} /> Your Turn</span> : <span className="text-slate-500">Opponent's Turn...</span>}
             </div>
             
             <div className="flex justify-center -space-x-8 md:-space-x-6 overflow-x-auto pb-8 pt-4 px-4 min-h-[160px]">
-                {myHand.map((c, i) => {
+                {myHand.map((c) => {
                     const top = discardPile[discardPile.length - 1];
-                    // Logic duplication here was an issue, now using same strict logic
                     const currentTargetSuit = activeSuit || (top ? top.suit : null);
                     const playable = turn === 'me' && (c.rank === 'J' || (currentTargetSuit ? c.suit === currentTargetSuit : true) || (top && c.rank === top.rank));
-                    
                     return (
                         <div key={c.id} className="transition-all hover:-translate-y-6 hover:z-10">
-                            <CardView 
-                                card={c} 
-                                isPlayable={playable} 
-                                onClick={() => playCard(c)} 
-                            />
+                            <CardView card={c} isPlayable={playable} onClick={() => playCard(c)} />
                         </div>
                     );
                 })}
             </div>
         </div>
 
-        {/* P2P Chat */}
-        {isP2P && socketGame && (
-            <GameChat 
-                messages={socketGame.chat || []}
-                onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
-                currentUserId={user.id}
-                profiles={socketGame.profiles || {}}
-            />
-        )}
+        {isP2P && socketGame && <GameChat messages={socketGame.chat || []} onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })} currentUserId={user.id} profiles={socketGame.profiles || {}} />}
     </div>
   );
 };

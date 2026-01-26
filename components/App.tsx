@@ -1,5 +1,5 @@
 
-import React, { ReactNode, ErrorInfo, useEffect, useState } from 'react';
+import React, { Component, ReactNode, ErrorInfo, useEffect, useState } from 'react';
 import { UserProvider, NavigationProvider, SocketProvider, useUser, useNav, useSocket } from '../services/context';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -9,6 +9,7 @@ import { DiceGame } from './DiceGame';
 import { TicTacToeGame } from './TicTacToeGame';
 import { ChessGame } from './ChessGame';
 import { CardGame } from './CardGame';
+import { PoolGame } from './PoolGame';
 import { Finance } from './Finance';
 import { Navigation } from './Navigation';
 import { LandingPage } from './LandingPage';
@@ -42,10 +43,8 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = {
-    hasError: false
-  };
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -118,13 +117,11 @@ const AppContent = () => {
   
   const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
   
-  // Initialize activeTable from localStorage if available (for persisting Bot games on refresh)
   const [activeTable, setActiveTable] = useState<Table | null>(() => {
       const saved = localStorage.getItem('vantage_active_table');
       return saved ? JSON.parse(saved) : null;
   });
 
-  // Persist activeTable (Bot games only, P2P is handled by socket state)
   useEffect(() => {
       if (activeTable) {
           localStorage.setItem('vantage_active_table', JSON.stringify(activeTable));
@@ -133,12 +130,8 @@ const AppContent = () => {
       }
   }, [activeTable]);
 
-  // Auth Redirects
   useEffect(() => {
       if (authLoading) return;
-      
-      // If we have a stored bot game and user is logged in, ensure we are on 'game' view
-      // But only if NOT in P2P mode (socketGame takes precedence)
       if (user && activeTable && !socketGame && currentView !== 'game') {
           setView('game');
       }
@@ -150,18 +143,16 @@ const AppContent = () => {
       }
   }, [user, currentView, authLoading, setView, activeTable, socketGame]);
 
-  // Handle Socket Game State Changes (P2P Reconnection Logic)
   useEffect(() => {
       if (matchmakingStatus === 'searching') {
           setView('matchmaking');
-          setActiveTable(null); // Clear local bot table if entering P2P
+          setActiveTable(null); 
       } else if (matchmakingStatus === 'found' && socketGame) {
           setView('game');
-          setActiveTable(null); // Clear local bot table if entering P2P
+          setActiveTable(null);
       }
   }, [matchmakingStatus, socketGame, setView]);
 
-  // Challenge Listener
   useEffect(() => {
       if (!user) return;
       const unsub = subscribeToIncomingChallenges(user.id, (challenge) => {
@@ -171,7 +162,6 @@ const AppContent = () => {
       return () => unsub();
   }, [user]);
 
-  // Auto-scroll on view change
   useEffect(() => {
       const mainContainer = document.getElementById('main-scroll-container');
       if (mainContainer) {
@@ -182,7 +172,6 @@ const AppContent = () => {
       }
   }, [currentView]);
 
-  // Bot Match Handler (Local logic mostly, but synced for UI)
   const handleBotMatch = async (gameType: string) => {
       if (!user) return;
       try {
@@ -208,11 +197,8 @@ const AppContent = () => {
   };
 
   const handleGameEnd = (result: 'win' | 'loss' | 'quit') => {
-      // If it's a local/bot game, we manually trigger result overlay locally if needed
-      // But typically we let the socket events drive this for P2P.
       if (!socketGame) {
-          // Local Bot Game End
-          leaveGame(); // Just resets view vars
+          leaveGame(); 
           setActiveTable(null);
           setView('lobby');
       }
@@ -233,8 +219,6 @@ const AppContent = () => {
       };
   };
 
-  // Improved Loading State: Wait for Auth AND Socket Reconnection check
-  // This prevents Dashboard from flashing if we are about to rejoin a game
   if (authLoading || (user && isConnecting)) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center gap-4">
@@ -273,10 +257,12 @@ const AppContent = () => {
                          activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                          activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                          activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                         activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} /> :
                          <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />}
                     </motion.div>
                 )}
 
+                {/* Rest of the views (Profile, Finance, etc) unchanged */}
                 {currentView === 'profile' && user && <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Profile /></motion.div>}
                 {currentView === 'finance' && user && <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Finance /></motion.div>}
                 {currentView === 'how-it-works' && <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></motion.div>}
@@ -299,7 +285,7 @@ const AppContent = () => {
                   amount={gameResult.amount}
                   financials={gameResult.financials}
                   onContinue={resetGameResult}
-                  onRematch={socketGame && !gameResult.financials ? requestRematch : undefined} // Only rematch if clean
+                  onRematch={socketGame && !gameResult.financials ? requestRematch : undefined} 
                   rematchStatus={rematchStatus}
                   stake={socketGame?.stake}
                   userBalance={user?.balance}

@@ -9,6 +9,7 @@ import { Socket } from 'socket.io-client';
 import { GameTimer } from './GameTimer';
 import { TurnIndicator } from './TurnIndicator';
 import { ForfeitModal } from './ForfeitModal';
+import { useSocket } from '../services/context';
 
 interface DiceGameProps {
   table: Table;
@@ -87,6 +88,7 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 };
 
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const isP2P = !!socket && !!socketGame;
   const opponentId = isP2P && Array.isArray(socketGame?.players) 
       ? socketGame.players.find((id: string) => id !== user.id) 
@@ -345,8 +347,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                     </div>
                 </div>
             </div>
-            <div className="w-32 hidden md:block">
-                 <AIReferee externalLog={refereeLog} />
+            <div className="w-32 hidden md:flex justify-end">
+                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 h-fit" title="Sync State"><RefreshCw size={16} /></button>
             </div>
         </div>
 

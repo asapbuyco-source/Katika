@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, X, Circle, Clock, Loader2, Wifi, Cpu } from 'lucide-react';
+import { ArrowLeft, X, Circle, Clock, Loader2, Wifi, Cpu, RefreshCw } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -9,6 +9,7 @@ import { Socket } from 'socket.io-client';
 import { GameTimer } from './GameTimer';
 import { TurnIndicator } from './TurnIndicator';
 import { ForfeitModal } from './ForfeitModal';
+import { useSocket } from '../services/context';
 
 interface TicTacToeGameProps {
   table: Table;
@@ -24,6 +25,7 @@ type WinningLine = number[] | null;
 const TURN_DURATION = 15; 
 
 export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const [board, setBoard] = useState<CellValue[]>(Array(9).fill(null));
   const [isXNext, setIsXNext] = useState(true); 
   const [winner, setWinner] = useState<CellValue>(null);
@@ -220,8 +222,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                  </div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
              </div>
-             <div className="w-32 hidden md:block">
-                 <AIReferee externalLog={refereeLog} />
+             <div className="w-32 flex justify-end">
+                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30" title="Sync State"><RefreshCw size={16} /></button>
              </div>
         </div>
 

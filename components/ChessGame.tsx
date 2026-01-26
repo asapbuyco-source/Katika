@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -12,6 +12,7 @@ import type { Square } from 'chess.js';
 import { GameTimer } from './GameTimer';
 import { TurnIndicator } from './TurnIndicator';
 import { ForfeitModal } from './ForfeitModal';
+import { useSocket } from '../services/context';
 
 interface ChessGameProps {
   table: Table;
@@ -24,6 +25,7 @@ interface ChessGameProps {
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const [game, setGame] = useState(new Chess());
   const [myColor, setMyColor] = useState<'w' | 'b'>('w');
   const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
@@ -310,7 +312,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
             </div>
-            <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+            <div className="w-32 flex justify-end gap-2">
+                 <div className="hidden md:block w-full"><AIReferee externalLog={refereeLog} /></div>
+                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 h-fit" title="Sync State"><RefreshCw size={16} /></button>
+            </div>
        </div>
 
        {/* Turn Indicator */}

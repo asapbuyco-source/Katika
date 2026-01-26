@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ArrowLeft, Crown } from 'lucide-react';
+import { ArrowLeft, Crown, RefreshCw } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -9,6 +9,7 @@ import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { TurnIndicator } from './TurnIndicator';
 import { ForfeitModal } from './ForfeitModal';
+import { useSocket } from '../services/context';
 
 interface CheckersGameProps {
   table: Table;
@@ -102,6 +103,7 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighte
 });
 
 export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [turn, setTurn] = useState<'me' | 'opponent'>('me');
   const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
@@ -335,7 +337,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
             </div>
-            <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+            <div className="w-32 flex justify-end">
+                <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30" title="Sync State"><RefreshCw size={16} /></button>
+            </div>
        </div>
 
         <TurnIndicator isMyTurn={turn === 'me'} />

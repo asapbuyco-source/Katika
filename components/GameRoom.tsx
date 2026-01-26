@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
+import { ArrowLeft, Dice5, Crown, Star, RefreshCw } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+import { useSocket } from '../services/context';
 
 type PlayerColor = 'Red' | 'Yellow';
 interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
@@ -32,9 +33,6 @@ const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) 
     }
     
     // 2. Victory Road (Steps > 50)
-    // For Red, home entrance is at index 50 -> 51..56
-    // For Yellow, home entrance is at index 24 (relative) -> wait, normalized steps.
-    // Let's assume step is RELATIVE to the player's start. 0 = Start, 50 = End of loop, 51+ = Home Straight.
     if (step >= 51) {
         const depth = step - 51; 
         const offset = 10 + (depth * 6.5);
@@ -43,36 +41,21 @@ const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) 
     }
 
     // 3. Main Track (0-50)
-    // We normalize to a 52-step loop starting from Red's start (Top-Left, moving Clockwise).
-    // Red Start = 0.
-    // Yellow Start = 26.
     let pos = step;
     if (color === 'Yellow') pos = (step + 26) % 52;
 
     // Define visual path coordinates (approximate for 15x15 grid)
-    // 0-5: Red Home Straight Out (Horizontal Top-Left)
     if (pos <= 5) return { x: 8 + (pos * 6.6), y: 40 }; 
-    // 6-11: Top Vertical Up
     if (pos <= 11) return { x: 42, y: 38 - ((pos - 6) * 6.6) };
-    // 12: Top Middle Turn
     if (pos === 12) return { x: 50, y: 5 };
-    // 13-18: Top Vertical Down
     if (pos <= 18) return { x: 58, y: 8 + ((pos - 13) * 6.6) };
-    // 19-24: Right Horizontal Out
     if (pos <= 24) return { x: 62 + ((pos - 19) * 6.6), y: 40 };
-    // 25: Right Middle Turn
     if (pos === 25) return { x: 95, y: 50 };
-    // 26-31: Right Horizontal In
     if (pos <= 31) return { x: 92 - ((pos - 26) * 6.6), y: 60 };
-    // 32-37: Bottom Vertical Down
     if (pos <= 37) return { x: 58, y: 62 + ((pos - 32) * 6.6) };
-    // 38: Bottom Middle Turn
     if (pos === 38) return { x: 50, y: 95 };
-    // 39-44: Bottom Vertical Up
     if (pos <= 44) return { x: 42, y: 92 - ((pos - 39) * 6.6) };
-    // 45-50: Left Horizontal In
     if (pos <= 50) return { x: 38 - ((pos - 45) * 6.6), y: 60 };
-    // 51: Left Middle Turn
     return { x: 5, y: 50 };
 };
 
@@ -85,6 +68,7 @@ interface GameRoomProps {
 }
 
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+  const { requestFullSync } = useSocket();
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [currentTurn, setCurrentTurn] = useState<PlayerColor>('Red');
   const [diceValue, setDiceValue] = useState<number | null>(null);
@@ -93,7 +77,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const [lastMovedPieceId, setLastMovedPieceId] = useState<number | null>(null);
 
   const isP2P = !!socket && !!socketGame;
-  // Determine my color based on player order in socketGame. P1 = Red, P2 = Yellow.
   const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
 
   // Initialize Pieces (Local Fallback)
@@ -132,23 +115,17 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
   const handleRoll = () => {
       if (currentTurn !== myColor || diceRolled) return;
-      
       playSFX('dice');
-      
       if (socket) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
       } else {
-          // Local Mode Logic
           setTimeout(() => {
               const val = Math.ceil(Math.random() * 6);
               setDiceValue(val);
               setDiceRolled(true);
-              
-              // Check if any move is possible
               const myPieces = pieces.filter(p => p.color === myColor);
               const canMove = myPieces.some(p => p.step !== -1 || val === 6);
               if (!canMove) {
-                  // Auto skip after delay
                   setTimeout(() => {
                       setDiceRolled(false);
                       setDiceValue(null);
@@ -163,68 +140,44 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
       if (currentTurn !== myColor || !diceRolled || !diceValue) return;
       if (p.color !== myColor) return;
       
-      // P2P: Send intention to server
       if (socket) {
           socket.emit('game_action', {
               roomId: socketGame.roomId,
-              action: { 
-                  type: 'MOVE_PIECE', 
-                  pieceId: p.id
-              } 
+              action: { type: 'MOVE_PIECE', pieceId: p.id } 
           });
           setLastMovedPieceId(p.id);
           playSFX('move');
           return;
       }
 
-      // Local Logic (Offline/Bot)
-      if (p.step === -1 && diceValue !== 6) {
-          playSFX('error');
-          return;
-      }
-
+      if (p.step === -1 && diceValue !== 6) { playSFX('error'); return; }
       const nextStep = p.step === -1 ? 0 : p.step + diceValue;
-      if (nextStep > 56) {
-          playSFX('error'); // Overshoot
-          return; 
-      }
+      if (nextStep > 56) { playSFX('error'); return; }
 
       let newPieces = pieces.map(piece => piece.id === p.id ? { ...piece, step: nextStep } : piece);
       let captured = false;
 
-      // Check Collision (Only on main track 0-50)
       if (nextStep >= 0 && nextStep <= 50) {
           const myNormalized = p.color === 'Red' ? nextStep : (nextStep + 26) % 52;
-          
           newPieces = newPieces.map(other => {
-              if (other.id === p.id) return other; // Skip self
-              if (other.color === p.color) return other; // Skip friendly
-              if (other.step === -1 || other.step > 50) return other; // Skip home/base
-
+              if (other.id === p.id || other.color === p.color || other.step === -1 || other.step > 50) return other;
               const otherNormalized = other.color === 'Red' ? other.step : (other.step + 26) % 52;
-
               if (myNormalized === otherNormalized) {
-                  if (SAFE_ZONES.includes(myNormalized)) {
-                      return other; // Safe zone, stack
-                  } else {
-                      playSFX('capture');
-                      captured = true;
-                      return { ...other, step: -1 }; // Send home
-                  }
+                  if (SAFE_ZONES.includes(myNormalized)) return other;
+                  playSFX('capture');
+                  captured = true;
+                  return { ...other, step: -1 };
               }
               return other;
           });
       }
 
       setLastMovedPieceId(p.id);
-      
       const bonusTurn = diceValue === 6 || captured;
       setPieces(newPieces);
       setDiceRolled(false);
       setDiceValue(null);
-      if (!bonusTurn) {
-          setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
-      }
+      if (!bonusTurn) setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
       playSFX('move');
   };
 
@@ -239,7 +192,10 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
             </div>
-            <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+            <div className="w-32 flex justify-end gap-2">
+                 <div className="hidden md:block w-full"><AIReferee externalLog={refereeLog} /></div>
+                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 h-fit" title="Sync State"><RefreshCw size={16} /></button>
+            </div>
        </div>
 
         <div className="text-white text-center mb-4">
@@ -251,26 +207,18 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
         <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-xl shadow-2xl overflow-hidden border-8 border-royal-800">
             {/* Ludo Board Art */}
             <div className="absolute inset-0 grid grid-cols-15 grid-rows-15 bg-[#e0f2fe]">
-                
-                {/* Red Base (Top Left) */}
                 <div className="absolute top-0 left-0 w-[40%] h-[40%] bg-white border-r-4 border-b-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-red-100 rounded-3xl border-4 border-red-500 flex items-center justify-center relative">
                         <Crown className="text-red-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
-
-                {/* Yellow Base (Bottom Right) */}
                 <div className="absolute bottom-0 right-0 w-[40%] h-[40%] bg-white border-l-4 border-t-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-yellow-100 rounded-3xl border-4 border-yellow-500 flex items-center justify-center relative">
                         <Crown className="text-yellow-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
-
-                {/* Home Run Tracks (Visual) */}
                 <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center bg-red-100/30"></div>
                 <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center bg-yellow-100/30"></div>
-                
-                {/* Center */}
                 <div className="absolute top-[40%] left-[40%] w-[20%] h-[20%] bg-gradient-to-br from-royal-800 to-royal-950 flex items-center justify-center border-4 border-white shadow-inner z-10">
                     <div className="text-center">
                         <div className="text-white font-black text-xs">VANTAGE</div>
@@ -283,11 +231,8 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             <AnimatePresence>
             {pieces.map((p, i) => {
                 const pos = getSmartPosition(p.color, p.step, i);
-                
-                // Stack handling for pieces on same spot
                 const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
                 const offset = stackIndex * 4;
-
                 const isMyPiece = p.color === myColor;
                 const canMove = isMyPiece && diceRolled && currentTurn === myColor && (p.step !== -1 || diceValue === 6);
 
@@ -296,14 +241,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         key={p.id}
                         layoutId={`p-${p.id}`}
                         initial={{ scale: 0 }}
-                        animate={{ 
-                            top: `${pos.y}%`, 
-                            left: `${pos.x}%`, 
-                            marginLeft: `${offset}px`,
-                            marginTop: `${offset}px`,
-                            scale: 1,
-                            zIndex: 20 + stackIndex
-                        }}
+                        animate={{ top: `${pos.y}%`, left: `${pos.x}%`, marginLeft: `${offset}px`, marginTop: `${offset}px`, scale: 1, zIndex: 20 + stackIndex }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
                         onClick={() => handlePieceClick(p)}
                         className={`
@@ -349,14 +287,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             )}
         </div>
 
-        {isP2P && socketGame && (
-            <GameChat 
-                messages={socketGame.chat || []}
-                onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
-                currentUserId={user.id}
-                profiles={socketGame.profiles || {}}
-            />
-        )}
+        {isP2P && socketGame && <GameChat messages={socketGame.chat || []} onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })} currentUserId={user.id} profiles={socketGame.profiles || {}} />}
     </div>
   );
 };
