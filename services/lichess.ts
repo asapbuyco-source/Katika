@@ -71,9 +71,15 @@ export const makeLichessMove = async (gameId: string, move: string) => {
                 'Authorization': `Bearer ${LICHESS_API_TOKEN}`
             }
         });
-        return response.ok;
+        
+        if (!response.ok) {
+            const err = await response.text();
+            console.error("Lichess Move Failed:", err);
+            return false;
+        }
+        return true;
     } catch (e) {
-        console.error("Lichess Move Error", e);
+        console.error("Lichess Move Network Error", e);
         return false;
     }
 };

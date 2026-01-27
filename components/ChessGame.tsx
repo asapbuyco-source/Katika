@@ -77,7 +77,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       }
   }, [isBotGame, lichessId]);
 
-  // Lichess Polling (Simplified Stream)
+  // Lichess Polling (Robust Stream Simulation)
   useEffect(() => {
       if (lichessId && !isGameOver) {
           const interval = setInterval(async () => {
@@ -89,25 +89,31 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                   // Replay all moves
                   let invalid = false;
                   for (const m of moves) {
+                      if (!m) continue;
                       try {
-                          // Lichess returns long algebraic (e2e4), chess.js needs conversion or robust parsing
-                          // Chess.js .move() handles standard algebraic well, but UCI (e2e4) sometimes needs from/to
-                          // We try to let chess.js figure it out or fallback
+                          // Lichess UCI (e2e4) vs Chess.js
                           const from = m.substring(0, 2);
                           const to = m.substring(2, 4);
                           const promotion = m.length > 4 ? m.substring(4, 5) : undefined;
                           newGame.move({ from, to, promotion });
                       } catch (e) {
-                          // Fallback for SAN if moves are SAN
+                          // Fallback
                           try { newGame.move(m); } catch(e2) { invalid = true; }
                       }
                   }
 
-                  if (!invalid && newGame.fen() !== game.fen()) {
-                      setGame(newGame);
-                      setViewIndex(newGame.history().length - 1);
-                      playSFX('move');
-                      checkGameOver(newGame);
+                  if (!invalid) {
+                      // CRITICAL FIX: Only update local game state if server is AHEAD.
+                      // If we update when server is BEHIND (lag), the piece jumps back.
+                      const localMoves = game.history().length;
+                      const serverMoves = newGame.history().length;
+
+                      if (serverMoves > localMoves) {
+                          setGame(newGame);
+                          setViewIndex(newGame.history().length - 1);
+                          playSFX('move');
+                          checkGameOver(newGame);
+                      }
                   }
               }
           }, 2000); // Poll every 2s
