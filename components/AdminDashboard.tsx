@@ -1,15 +1,16 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, BugReport } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle } from 'lucide-react';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'reports' | 'system'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'reports' | 'system' | 'games'>('overview');
   const [searchQuery, setSearchQuery] = useState('');
   
   // -- STATE MANAGEMENT --
@@ -29,6 +30,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   // Bug Reports State
   const [bugReports, setBugReports] = useState<BugReport[]>([]);
   const [loadingBugs, setLoadingBugs] = useState(false);
+
+  // Game Config State
+  const [gameConfigs, setGameConfigs] = useState<Record<string, string>>({});
 
   // Load Real Data
   useEffect(() => {
@@ -68,6 +72,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
           setLoadingUsers(false);
       };
       fetchData();
+
+      // Subscribe to Game Configs
+      const unsubGames = subscribeToGameConfigs(setGameConfigs);
+      return () => unsubGames();
   }, []);
 
   // Fetch bugs when tab changes
@@ -107,6 +115,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       addLog("Bug Resolved", id, "info");
   };
 
+  const handleGameStatusToggle = async (gameId: string, currentStatus: string) => {
+      const newStatus = currentStatus === 'active' ? 'coming_soon' : 'active';
+      await updateGameStatus(gameId, newStatus);
+      addLog("Game Status", `${gameId}: ${newStatus}`, newStatus === 'active' ? "info" : "warning");
+  };
+
   const formatNumber = (num: number) => {
       if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
       if (num >= 1000) return (num / 1000).toFixed(1) + 'k';
@@ -118,6 +132,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       u.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       u.id.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  // Game List for Management
+  const manageableGames = [
+      { id: 'Dice', name: 'Dice Duel' },
+      { id: 'Chess', name: 'Master Chess' },
+      { id: 'Checkers', name: 'Checkers Pro' },
+      { id: 'Ludo', name: 'Ludo King' },
+      { id: 'TicTacToe', name: 'XO Clash' },
+      { id: 'Cards', name: 'Kmer Cards' },
+      { id: 'Pool', name: '8-Ball Pool' },
+  ];
 
   // Stats
   const stats = [
@@ -149,12 +174,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         </header>
 
         {/* Admin Navigation */}
-        <div className="flex gap-4 mb-8 border-b border-white/10">
-            {['overview', 'users', 'reports', 'system'].map(tab => (
+        <div className="flex gap-4 mb-8 border-b border-white/10 overflow-x-auto">
+            {['overview', 'users', 'reports', 'system', 'games'].map(tab => (
                 <button
                     key={tab}
                     onClick={() => setActiveTab(tab as any)}
-                    className={`pb-4 px-2 text-sm font-bold capitalize transition-all border-b-2 ${
+                    className={`pb-4 px-2 text-sm font-bold capitalize transition-all border-b-2 whitespace-nowrap ${
                         activeTab === tab ? 'text-white border-red-500' : 'text-slate-500 border-transparent hover:text-slate-300'
                     }`}
                 >
@@ -252,6 +277,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             </AnimatePresence>
                         </div>
                     </div>
+                </div>
+            </div>
+        )}
+
+        {/* GAMES MANAGEMENT TAB */}
+        {activeTab === 'games' && (
+            <div className="glass-panel rounded-2xl border border-white/5 p-6">
+                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                    <Gamepad2 size={18} className="text-purple-400" /> Game Availability Control
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {manageableGames.map((game) => {
+                        const status = gameConfigs[game.id] || 'active'; // Default to active if not set
+                        const isActive = status === 'active';
+                        return (
+                            <div key={game.id} className={`p-4 rounded-xl border transition-colors ${isActive ? 'bg-royal-900/50 border-white/10' : 'bg-red-500/5 border-red-500/20'}`}>
+                                <div className="flex justify-between items-center mb-2">
+                                    <h4 className="font-bold text-white">{game.name}</h4>
+                                    <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${isActive ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                                        {isActive ? 'Active' : 'Locked'}
+                                    </div>
+                                </div>
+                                <div className="flex items-center justify-between mt-4">
+                                    <span className="text-xs text-slate-500">
+                                        {isActive ? 'Players can join tables' : 'Marked as "Coming Soon"'}
+                                    </span>
+                                    <button 
+                                        onClick={() => handleGameStatusToggle(game.id, status)}
+                                        className={`w-12 h-6 rounded-full relative transition-colors ${isActive ? 'bg-green-500' : 'bg-royal-800'}`}
+                                    >
+                                        <div className={`absolute left-1 top-1 w-4 h-4 rounded-full bg-white transition-all ${isActive ? 'translate-x-6' : 'translate-x-0'}`}></div>
+                                    </button>
+                                </div>
+                            </div>
+                        );
+                    })}
                 </div>
             </div>
         )}

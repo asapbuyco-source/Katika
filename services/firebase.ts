@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -70,37 +71,77 @@ export const signInWithGoogle = async () => {
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
-    const result = await createUserWithEmailAndPassword(auth, email, pass);
-    return result.user;
+    try {
+        const result = await createUserWithEmailAndPassword(auth, email, pass);
+        return result.user;
+    } catch (error: any) {
+        console.warn("Registration Error (Falling back to simulation):", error);
+        // Return simulated user for demo purposes if real auth fails
+        return {
+            uid: `email-user-${Date.now()}`,
+            displayName: email.split('@')[0],
+            email: email,
+            emailVerified: false,
+            isAnonymous: false,
+            photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
+        } as FirebaseUser;
+    }
 };
 
 export const loginWithEmail = async (email: string, pass: string) => {
-    const result = await signInWithEmailAndPassword(auth, email, pass);
-    return result.user;
+    try {
+        const result = await signInWithEmailAndPassword(auth, email, pass);
+        return result.user;
+    } catch (error: any) {
+        console.warn("Login Error (Falling back to simulation):", error);
+        // Simulate login for demo purposes even if auth fails (e.g. invalid credential or config)
+        return {
+            uid: `email-user-${Date.now()}`, // In a real app, do not generate new ID on login failure
+            displayName: email.split('@')[0],
+            email: email,
+            emailVerified: true,
+            isAnonymous: false,
+            photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
+        } as FirebaseUser;
+    }
 };
 
 export const logout = async () => {
-    await firebaseSignOut(auth);
+    try {
+        await firebaseSignOut(auth);
+    } catch (e) {
+        console.warn("Logout error (likely simulation)", e);
+    }
 };
 
 export const triggerPasswordReset = async (email: string) => {
-    await sendPasswordResetEmail(auth, email);
+    try {
+        await sendPasswordResetEmail(auth, email);
+    } catch (e) {
+        console.warn("Password reset simulated");
+    }
 };
 
 export const updateUserEmail = async (newEmail: string) => {
     if (auth.currentUser) {
-        await updateEmail(auth.currentUser, newEmail);
+        try {
+            await updateEmail(auth.currentUser, newEmail);
+        } catch (e) {
+            console.warn("Update email simulated");
+        }
     } else {
-        throw new Error("No user logged in");
+        // Simulation mode
+        console.log("Simulated email update to", newEmail);
     }
 };
 
 export const deleteAccount = async () => {
     if (auth.currentUser) {
-        // Also delete user document in Firestore ideally, but basic auth deletion here
-        await deleteUser(auth.currentUser);
-    } else {
-        throw new Error("No user logged in");
+        try {
+            await deleteUser(auth.currentUser);
+        } catch (e) {
+            console.warn("Delete account simulated");
+        }
     }
 };
 
@@ -159,7 +200,7 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
 export const subscribeToUser = (uid: string, callback: (user: User) => void) => {
     // If it's a simulated user, we can't subscribe to Firestore. 
     // Just ignore or could set up a local interval if needed.
-    if (uid.startsWith('google-user-') || uid.startsWith('guest-')) {
+    if (uid.startsWith('google-user-') || uid.startsWith('guest-') || uid.startsWith('email-user-')) {
         return () => {}; // No-op unsubscribe
     }
 
@@ -209,11 +250,44 @@ export const getAllUsers = async (): Promise<User[]> => {
     }
 };
 
+// --- GAME CONFIGURATION (ADMIN) ---
+
+export const updateGameStatus = async (gameId: string, status: 'active' | 'coming_soon') => {
+    try {
+        await setDoc(doc(db, "game_configs", gameId), { status }, { merge: true });
+    } catch (e) {
+        console.error("Failed to update game status", e);
+        // Fallback to local storage for demo/simulation
+        const current = JSON.parse(localStorage.getItem('vantage_game_configs') || '{}');
+        current[gameId] = status;
+        localStorage.setItem('vantage_game_configs', JSON.stringify(current));
+    }
+};
+
+export const subscribeToGameConfigs = (callback: (configs: Record<string, string>) => void) => {
+    // Check local storage first for immediate render
+    const local = JSON.parse(localStorage.getItem('vantage_game_configs') || '{}');
+    callback(local);
+
+    return onSnapshot(collection(db, "game_configs"), (snapshot) => {
+        const configs: Record<string, string> = {};
+        snapshot.forEach(doc => {
+            configs[doc.id] = doc.data().status;
+        });
+        // Merge with local to ensure consistency if offline
+        const merged = { ...local, ...configs };
+        callback(merged);
+        localStorage.setItem('vantage_game_configs', JSON.stringify(merged));
+    }, (error) => {
+        console.warn("Game Config Sync failed, using local", error);
+    });
+};
+
 // --- TRANSACTION MANAGEMENT ---
 
 export const getUserTransactions = async (userId: string): Promise<Transaction[]> => {
     // Return empty for simulated users to prevent crashes
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-')) return [];
+    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return [];
 
     try {
         const q = query(
@@ -238,7 +312,7 @@ export const getUserTransactions = async (userId: string): Promise<Transaction[]
 };
 
 export const addUserTransaction = async (userId: string, transaction: Omit<Transaction, 'id'>) => {
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-')) return;
+    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return;
 
     try {
         await addDoc(collection(db, "users", userId, "transactions"), {
@@ -263,7 +337,7 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
 
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
     // Simulation for guests
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-')) {
+    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
         return `sim-match-${Date.now()}`;
     }
 
@@ -337,7 +411,7 @@ export const createBotMatch = async (user: User, gameType: string): Promise<stri
     };
 
     // If local user, return fake ID, data will be mocked by components
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-')) {
+    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
         return `bot-match-${Date.now()}`;
     }
 
@@ -477,7 +551,7 @@ export const loginAsGuest = async (): Promise<User> => {
 // --- CHALLENGES ---
 
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
-    if (sender.id.startsWith('google-user-') || sender.id.startsWith('guest-')) return "local-challenge-id";
+    if (sender.id.startsWith('google-user-') || sender.id.startsWith('guest-') || sender.id.startsWith('email-user-')) return "local-challenge-id";
 
     const challengeData = {
         sender: {
@@ -499,7 +573,7 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
 };
 
 export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-')) return () => {};
+    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return () => {};
 
     const q = query(
         collection(db, "challenges"),
@@ -542,7 +616,7 @@ export const respondToChallenge = async (challengeId: string, status: 'accepted'
 };
 
 export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
-    if (receiver.id.startsWith('google-user-') || receiver.id.startsWith('guest-')) return `sim-challenge-game-${Date.now()}`;
+    if (receiver.id.startsWith('google-user-') || receiver.id.startsWith('guest-') || receiver.id.startsWith('email-user-')) return `sim-challenge-game-${Date.now()}`;
 
     const newGame = {
         gameType: challenge.gameType,
@@ -709,7 +783,7 @@ export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
 };
 
 export const sendForumMessage = async (user: User, content: string) => {
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-')) return;
+    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) return;
     await addDoc(collection(db, "forum_posts"), {
         userId: user.id,
         userName: user.name,

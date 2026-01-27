@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
-import { getUserTransactions } from '../services/firebase';
+import { getUserTransactions, subscribeToGameConfigs } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 
@@ -16,6 +17,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   const { t } = useLanguage();
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [gameOverrides, setGameOverrides] = useState<Record<string, string>>({});
 
   // Simulated Live Winners
   const [winners, setWinners] = useState([
@@ -27,7 +29,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       const generateWinner = () => ({
           name: `Player_${Math.floor(Math.random() * 9000) + 1000}`,
           amount: (Math.floor(Math.random() * 50) * 100).toLocaleString(),
-          game: ['Dice', 'Checkers', 'Chess'][Math.floor(Math.random() * 3)],
+          game: ['Dice', 'Checkers', 'Chess', 'Ludo'][Math.floor(Math.random() * 4)],
           avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`
       });
       
@@ -36,27 +38,31 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           setCurrentWinnerIndex(0); // Reset to show newest
       }, 5000);
 
-      return () => clearInterval(interval);
-  }, []);
-
-  // Fetch Real User History
-  useEffect(() => {
+      // Fetch Real User History
       const fetchHistory = async () => {
           if (user.id.startsWith('guest-')) return;
           const history = await getUserTransactions(user.id);
           setRecentTransactions(history.slice(0, 3));
       };
       fetchHistory();
+
+      // Subscribe to Game Configs (Admin Control)
+      const unsub = subscribeToGameConfigs(setGameOverrides);
+
+      return () => {
+          clearInterval(interval);
+          unsub();
+      };
   }, [user.id]);
 
   const games = [
-    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', status: 'active' },
-    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent', status: 'active' },
-    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent', status: 'active' },
-    { id: 'TicTacToe', name: 'XO Clash', players: 0, icon: X, color: 'text-blue-400', bg: '', gradient: '', status: 'coming_soon' },
-    { id: 'Cards', name: 'Kmer Card', players: 0, icon: Layers, color: 'text-pink-400', bg: '', gradient: '', status: 'coming_soon' },
-    { id: 'Ludo', name: 'Ludo King', players: 0, icon: Grid3x3, color: 'text-red-400', bg: '', gradient: '', status: 'coming_soon' },
-    { id: 'Pool', name: '8-Ball Pool', players: 0, icon: Disc, color: 'text-green-400', bg: '', gradient: '', status: 'coming_soon' },
+    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'hover:bg-red-500/20 hover:border-red-500/50', gradient: 'from-red-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'hover:bg-green-500/20 hover:border-green-500/50', gradient: 'from-green-500/20 to-transparent', defaultStatus: 'active' },
   ];
 
   const containerVariants = {
@@ -164,19 +170,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
         </motion.div>
 
         {/* GAMES GRID */}
-        {games.map((game, i) => (
+        {games.map((game, i) => {
+            const status = gameOverrides[game.id] || game.defaultStatus;
+            const isActive = status === 'active';
+            
+            return (
             <motion.div
                 key={game.id}
                 variants={itemVariants}
-                whileHover={game.status === 'active' ? { y: -5, scale: 1.02 } : {}}
-                onClick={() => game.status === 'active' && onQuickMatch(game.id)}
+                whileHover={isActive ? { y: -5, scale: 1.02 } : {}}
+                onClick={() => isActive && onQuickMatch(game.id)}
                 className={`
                     glass-panel p-5 rounded-2xl border border-white/5 relative overflow-hidden transition-all duration-300
-                    ${game.status === 'active' ? `cursor-pointer group ${game.bg}` : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
+                    ${isActive ? `cursor-pointer group ${game.bg}` : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
                 `}
             >
                 {/* Coming Soon Overlay */}
-                {game.status !== 'active' && (
+                {!isActive && (
                     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
                         <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5">
                             <Lock size={10} className="text-slate-400" />
@@ -186,16 +196,16 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                 )}
 
                 {/* Background Gradient on Hover */}
-                {game.status === 'active' && (
+                {isActive && (
                     <div className={`absolute inset-0 bg-gradient-to-br ${game.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
                 )}
 
                 <div className="relative z-10">
                     <div className="flex justify-between items-start mb-4">
-                        <div className={`w-12 h-12 rounded-xl bg-royal-950 flex items-center justify-center border border-white/10 ${game.status === 'active' ? 'group-hover:scale-110 transition-transform duration-300' : ''} ${game.color}`}>
+                        <div className={`w-12 h-12 rounded-xl bg-royal-950 flex items-center justify-center border border-white/10 ${isActive ? 'group-hover:scale-110 transition-transform duration-300' : ''} ${game.color}`}>
                             <game.icon size={24} />
                         </div>
-                        {game.status === 'active' && (
+                        {isActive && (
                             <div className="flex items-center gap-1 text-[10px] font-bold bg-black/40 px-2 py-1 rounded-full text-slate-300">
                                 <Users size={10} />
                                 {game.players}
@@ -205,19 +215,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                     
                     <h3 className="text-lg font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{game.name}</h3>
                     <p className="text-xs text-slate-500 mb-4 group-hover:text-slate-400">
-                        {game.status === 'active' ? 'Ranked & Casual Tables' : 'Under Development'}
+                        {isActive ? 'Ranked & Casual Tables' : 'Under Development'}
                     </p>
 
                     <button className={`w-full py-2 rounded-lg border text-xs font-bold uppercase tracking-wider transition-colors ${
-                        game.status === 'active' 
+                        isActive 
                         ? `bg-white/5 hover:bg-white/10 border-white/10 ${game.color}`
                         : 'bg-transparent border-white/5 text-slate-600'
                     }`}>
-                        {game.status === 'active' ? t('play_now') : 'Locked'}
+                        {isActive ? t('play_now') : 'Locked'}
                     </button>
                 </div>
             </motion.div>
-        ))}
+        )})}
 
         {/* Recent History (Full Width) */}
         <motion.div variants={itemVariants} className="glass-panel p-6 rounded-2xl md:col-span-3 mt-4">

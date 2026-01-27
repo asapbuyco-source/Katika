@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -6,7 +6,6 @@ import { GameRoom } from './GameRoom'; // Generic room, used for Ludo/Others if 
 import { CheckersGame } from './CheckersGame';
 import { DiceGame } from './DiceGame';
 import { ChessGame } from './ChessGame';
-// Note: CardGame, TicTacToeGame, PoolGame imports kept for compilation safety but logic will skip them
 import { CardGame } from './CardGame'; 
 import { TicTacToeGame } from './TicTacToeGame';
 import { PoolGame } from './PoolGame';
@@ -47,7 +46,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -86,8 +85,8 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 
-// --- Internal Reconnection Modal Component ---
-const ReconnectionModal = ({ timeout }: { timeout: number }) => {
+// --- Enhanced Reconnection Modal ---
+const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: any }) => {
     const [timeLeft, setTimeLeft] = useState(timeout);
 
     useEffect(() => {
@@ -102,28 +101,45 @@ const ReconnectionModal = ({ timeout }: { timeout: number }) => {
             <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="bg-royal-900 border border-red-500/50 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden"
+                className="bg-royal-900 border border-red-500/50 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-900/20"
             >
-                <div className="absolute top-0 left-0 w-full h-1 bg-royal-800">
+                {/* Progress Bar Background */}
+                <div className="absolute top-0 left-0 w-full h-1.5 bg-royal-800">
                     <motion.div 
                         initial={{ width: '100%' }}
                         animate={{ width: '0%' }}
                         transition={{ duration: timeout, ease: 'linear' }}
-                        className="h-full bg-red-500"
+                        className="h-full bg-gradient-to-r from-red-600 to-red-400"
                     />
                 </div>
                 
-                <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
-                    <WifiOff size={40} className="text-red-500" />
+                <div className="relative mb-6 inline-block">
+                    <div className="w-24 h-24 rounded-full border-4 border-royal-800 bg-royal-950 overflow-hidden relative">
+                        <img src={opponent?.avatar || "https://i.pravatar.cc/150?u=opp"} className="w-full h-full object-cover opacity-50 grayscale" alt="Opponent" />
+                    </div>
+                    <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full p-2 border border-red-500/30">
+                        <WifiOff size={24} className="text-red-500 animate-pulse" />
+                    </div>
                 </div>
                 
-                <h2 className="text-2xl font-bold text-white mb-2">Opponent Disconnected</h2>
-                <p className="text-slate-400 text-sm mb-6">
-                    Waiting for them to reconnect. If they don't return, you win automatically.
-                </p>
+                <h2 className="text-xl font-display font-bold text-white mb-1">Connection Lost</h2>
+                <p className="text-gold-400 font-bold text-sm mb-4">Waiting for {opponent?.name || "Opponent"}</p>
+                
+                <div className="bg-white/5 rounded-xl p-4 border border-white/5 mb-6">
+                    <p className="text-slate-400 text-xs leading-relaxed">
+                        Per <span className="text-white font-bold">Vantage Fair Play Rules</span>, if your opponent does not reconnect before the timer expires, the match is forfeited.
+                    </p>
+                    <div className="mt-3 pt-3 border-t border-white/5 text-center">
+                        <span className="text-xs text-slate-500 uppercase tracking-widest">Auto-Win In</span>
+                        <div className="text-3xl font-mono font-bold text-white mt-1 tabular-nums text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">
+                            00:{timeLeft.toString().padStart(2, '0')}
+                        </div>
+                    </div>
+                </div>
 
-                <div className="flex items-center justify-center gap-2 text-3xl font-mono font-bold text-red-400">
-                    <Clock size={28} /> {timeLeft}s
+                <div className="flex gap-2 justify-center">
+                    <Loader2 size={16} className="text-slate-500 animate-spin" />
+                    <span className="text-xs text-slate-500 font-mono">Synchronizing Game State...</span>
                 </div>
             </motion.div>
         </div>
@@ -198,7 +214,11 @@ const AppContent = () => {
       
       const mainContainer = document.getElementById('main-scroll-container');
       if (mainContainer) {
-          mainContainer.scrollTo({ top: 0, behavior: 'instant' });
+          // Use a small timeout to ensure the scroll reset happens AFTER the DOM updates
+          // and the new view is rendered.
+          setTimeout(() => {
+              mainContainer.scrollTo({ top: 0, behavior: 'instant' });
+          }, 50);
       } else {
           window.scrollTo(0, 0);
       }
@@ -403,8 +423,7 @@ const AppContent = () => {
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user) return;
       
-      // Filter out non-launch games just in case
-      const validGames = ['Dice', 'Checkers', 'Chess'];
+      const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
       if (!validGames.includes(gameType)) {
           alert("This game is coming soon!");
           return;
@@ -552,6 +571,13 @@ const AppContent = () => {
   }
 
   const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
+  
+  // Find opponent profile for reconnection modal
+  let opponentProfile = null;
+  if (socketGame && user && socketGame.profiles) {
+      const oppId = socketGame.players.find((id: string) => id !== user.id);
+      if (oppId) opponentProfile = socketGame.profiles[oppId];
+  }
 
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
@@ -561,7 +587,8 @@ const AppContent = () => {
       
       <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
         <GameErrorBoundary onReset={() => { user ? setView('dashboard') : setView('landing'); window.location.reload(); }}>
-            <AnimatePresence>
+            {/* Added mode="wait" to ensure pages unmount before next one mounts, fixing scroll issues */}
+            <AnimatePresence mode="wait">
             {currentView === 'landing' && <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></motion.div>}
             {currentView === 'auth' && <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} /></motion.div>}
             {currentView === 'dashboard' && user && <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></motion.div>}
@@ -573,6 +600,10 @@ const AppContent = () => {
                     {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                      activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                      activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} /> :
+                     activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                      // Fallback for Coming Soon games if somehow reached, or deprecated logic
                      <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                 </motion.div>
@@ -592,7 +623,7 @@ const AppContent = () => {
       </main>
 
       <AnimatePresence>
-          {opponentDisconnected && <ReconnectionModal timeout={60} />}
+          {opponentDisconnected && <ReconnectionModal timeout={60} opponent={opponentProfile} />}
           {gameResult && <GameResultOverlay result={gameResult.result} amount={gameResult.amount} financials={gameResult.financials} onContinue={finalizeGameEnd} onRematch={socketGame && isConnected ? handleRematchRequest : undefined} rematchStatus={rematchStatus} stake={socketGame?.stake} userBalance={user?.balance} />}
           {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}
       </AnimatePresence>

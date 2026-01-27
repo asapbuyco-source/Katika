@@ -1,10 +1,11 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers, Grid3x3, Disc } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
-import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus } from '../services/firebase';
+import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 
@@ -16,14 +17,14 @@ interface LobbyProps {
   onClearInitialGame?: () => void;
 }
 
-const AVAILABLE_GAMES = [
-    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', status: 'active' },
-    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', status: 'active', desc: 'Powered by Lichess' },
-    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', status: 'active', desc: 'Powered by Lidraughts' },
-    { id: 'TicTacToe', name: 'XO Clash', players: 0, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', status: 'coming_soon' },
-    { id: 'Cards', name: 'Kmer Card', players: 0, icon: Layers, color: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', status: 'coming_soon' },
-    { id: 'Ludo', name: 'Ludo King', players: 0, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', status: 'coming_soon' },
-    { id: 'Pool', name: '8-Ball Pool', players: 0, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', status: 'coming_soon' },
+const STATIC_GAME_LIST = [
+    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', defaultStatus: 'active' },
+    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', defaultStatus: 'active', desc: 'Powered by Lichess' },
+    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active', desc: 'Powered by Lidraughts' },
+    { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active' },
+    { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', defaultStatus: 'active' },
+    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', defaultStatus: 'active' },
+    { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', defaultStatus: 'active' },
 ];
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
@@ -31,6 +32,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   const [viewState, setViewState] = useState<'games' | 'stakes'>('games');
   const [selectedGame, setSelectedGame] = useState<string | null>(null);
   const [isMaintenance, setIsMaintenance] = useState(false);
+  const [gameOverrides, setGameOverrides] = useState<Record<string, string>>({});
   
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [neededAmount, setNeededAmount] = useState(0);
@@ -52,10 +54,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   // Payment State
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  // Load Maintenance State
+  // Load Maintenance State and Game Configs
   useEffect(() => {
       const maintenance = localStorage.getItem('vantage_maintenance') === 'true';
       setIsMaintenance(maintenance);
+
+      // Subscribe to admin overrides
+      const unsub = subscribeToGameConfigs(setGameOverrides);
+      return () => unsub();
   }, []);
 
   // Handle Initial Deep Link
@@ -211,13 +217,19 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
       setShowChallengeModal(false);
   };
 
-  const activeGameData = AVAILABLE_GAMES.find(g => g.id === selectedGame);
+  const activeGameData = STATIC_GAME_LIST.find(g => g.id === selectedGame);
 
   const pageVariants = {
       enter: (direction: number) => ({ x: direction > 0 ? 50 : -50, opacity: 0 }),
       center: { x: 0, opacity: 1 },
       exit: (direction: number) => ({ x: direction > 0 ? -50 : 50, opacity: 0 })
   };
+
+  // Merge Configs
+  const availableGames = STATIC_GAME_LIST.map(g => ({
+      ...g,
+      status: gameOverrides[g.id] || g.defaultStatus
+  }));
 
   return (
     <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative overflow-hidden">
@@ -378,7 +390,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                       <div>
                                           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Select Game</label>
                                           <div className="grid grid-cols-4 gap-2">
-                                              {AVAILABLE_GAMES.filter(g => g.status === 'active').map(g => (
+                                              {availableGames.filter(g => g.status === 'active').map(g => (
                                                   <button 
                                                       key={g.id}
                                                       onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
@@ -479,21 +491,23 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                   transition={{ duration: 0.3 }}
                   className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
               >
-                  {AVAILABLE_GAMES.map((game, idx) => (
+                  {availableGames.map((game, idx) => {
+                      const isActive = game.status === 'active';
+                      return (
                       <motion.div
                           key={game.id}
                           layoutId={`game-card-${game.id}`}
                           onClick={() => handleGameSelect(game.id, game.status)}
-                          whileHover={game.status === 'active' && !isMaintenance ? { y: -8, scale: 1.02 } : {}}
+                          whileHover={isActive && !isMaintenance ? { y: -8, scale: 1.02 } : {}}
                           initial={{ opacity: 0, y: 20 }}
                           animate={{ opacity: 1, y: 0 }}
                           transition={{ delay: idx * 0.1 }}
                           className={`glass-panel p-6 rounded-3xl border relative overflow-hidden transition-all duration-300 ${game.bg} ${game.border} 
-                            ${game.status === 'active' ? 'cursor-pointer group' : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
+                            ${isActive ? 'cursor-pointer group' : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
                           `}
                       >
                           {/* Coming Soon Overlay */}
-                          {game.status !== 'active' && (
+                          {!isActive && (
                               <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
                                   <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5">
                                       <Lock size={12} className="text-slate-400" />
@@ -502,14 +516,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                               </div>
                           )}
 
-                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-royal-950 border border-white/10 ${game.status === 'active' ? 'group-hover:scale-110 transition-transform' : ''} ${game.color}`}>
+                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-royal-950 border border-white/10 ${isActive ? 'group-hover:scale-110 transition-transform' : ''} ${game.color}`}>
                               <game.icon size={32} />
                           </div>
                           
                           <h3 className="text-xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{game.name}</h3>
                           
                           {/* Description for active games like Chess */}
-                          {(game as any).desc && game.status === 'active' && (
+                          {(game as any).desc && isActive && (
                               <p className="text-[10px] text-slate-400 font-mono mb-2 uppercase tracking-wide">{(game as any).desc}</p>
                           )}
 
@@ -518,12 +532,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                           </div>
 
                           <button className={`w-full py-3 rounded-xl bg-royal-950/50 border border-white/10 text-sm font-bold uppercase tracking-wider transition-colors ${
-                              game.status === 'active' ? `group-hover:bg-white/10 ${game.color}` : 'text-slate-600'
+                              isActive ? `group-hover:bg-white/10 ${game.color}` : 'text-slate-600'
                           }`}>
-                              {game.status === 'active' ? 'Select Table' : 'Locked'}
+                              {isActive ? 'Select Table' : 'Locked'}
                           </button>
                       </motion.div>
-                  ))}
+                  )})}
               </motion.div>
           )}
 

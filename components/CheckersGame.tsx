@@ -1,12 +1,13 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ArrowLeft, Crown, Clock, BookOpen, X, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Crown, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+import { createLidraughtsGame, fetchLidraughtsState, makeLidraughtsMove, toCoords, toNotation } from '../services/lidraughts';
 
 interface CheckersGameProps {
   table: Table;
@@ -108,13 +109,20 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
   const [isGameOver, setIsGameOver] = useState(false);
   
+  // Lidraughts state
+  const [lidraughtsId, setLidraughtsId] = useState<string | null>(null);
+  const [isLidraughtsLoading, setIsLidraughtsLoading] = useState(false);
+  const lastFen = useRef<string>('');
+  
   const [forwardDir, setForwardDir] = useState(-1);
 
   const isP2P = !!socket && !!socketGame;
-  const isBotGame = !isP2P && table.guest?.id === 'bot';
+  const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest); // Fallback for testing
 
+  // --- INITIALIZATION ---
   useEffect(() => {
     if (isP2P && socketGame) {
+        // ... (P2P Init Logic kept same)
         if (socketGame.gameState && socketGame.gameState.pieces) {
             const mappedPieces = socketGame.gameState.pieces.map((p: any) => ({
                 ...p,
@@ -130,31 +138,115 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (socketGame.winner === user.id) onGameEnd('win');
             else onGameEnd('loss');
         }
-
         if (socketGame.players && socketGame.players.length > 0) {
             const isPlayer1 = socketGame.players[0] === user.id;
             setForwardDir(isPlayer1 ? -1 : 1);
         }
-
     } else {
-        setForwardDir(-1); 
-        if (pieces.length === 0) {
-            const initialPieces: Piece[] = [];
-            let idCounter = 0;
-            for (let r = 0; r < 8; r++) {
-              for (let c = 0; c < 8; c++) {
-                if ((r + c) % 2 === 1) { 
-                  if (r < 3) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
-                  else if (r > 4) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
+        // BOT MODE (Using Lidraughts)
+        setForwardDir(-1); // Always play from bottom as White/Red
+        
+        if (!lidraughtsId && !isLidraughtsLoading) {
+            setIsLidraughtsLoading(true);
+            createLidraughtsGame(1).then(data => {
+                if (data && data.id) {
+                    setLidraughtsId(data.id);
+                    // Initialize pieces for start
+                    const initialPieces: Piece[] = [];
+                    let idCounter = 0;
+                    for (let r = 0; r < 8; r++) {
+                      for (let c = 0; c < 8; c++) {
+                        if ((r + c) % 2 === 1) { 
+                          if (r < 3) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
+                          else if (r > 4) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
+                        }
+                      }
+                    }
+                    setPieces(initialPieces);
                 }
-              }
-            }
-            setPieces(initialPieces);
+                setIsLidraughtsLoading(false);
+            });
         }
     }
-  }, [socketGame, user.id, isP2P]);
+  }, [socketGame, user.id, isP2P, isBotGame]);
 
-  // Sync timers from server
+  // --- LIDRAUGHTS SYNC ---
+  useEffect(() => {
+      if (lidraughtsId && !isGameOver) {
+          const interval = setInterval(async () => {
+              const data = await fetchLidraughtsState(lidraughtsId);
+              // Data format from stream is typically { fen: "...", id: "...", ... }
+              if (data && data.fen && data.fen !== lastFen.current) {
+                  lastFen.current = data.fen;
+                  parseFen(data.fen);
+                  
+                  // Turn detection from FEN (W or B)
+                  // FEN format: Color:Wpieces:Bpieces. e.g. "W:W31,32:B1,2"
+                  const turnColor = data.fen.split(':')[0]; // W or B
+                  // Assuming user is always White (W) in this simple integration
+                  setTurn(turnColor === 'W' ? 'me' : 'opponent');
+                  
+                  if (data.status === 'mate' || data.status === 'resign' || data.status === 'draw') {
+                      setIsGameOver(true);
+                      const winner = data.winner; // 'white', 'black' or null
+                      if (winner === 'white') onGameEnd('win');
+                      else if (winner === 'black') onGameEnd('loss');
+                      else onGameEnd('quit');
+                  }
+              }
+          }, 1500);
+          return () => clearInterval(interval);
+      }
+  }, [lidraughtsId, isGameOver]);
+
+  const parseFen = (fen: string) => {
+      // FEN: W:W31,32,K28:B1,2,K10
+      try {
+          const parts = fen.split(':');
+          if (parts.length < 3) return;
+          
+          const newPieces: Piece[] = [];
+          
+          const parseSection = (section: string, player: 'me' | 'opponent') => {
+              // section might be "W31,32,K28" or just "31,32,K28" depending on Lidraughts formatting details.
+              // Usually in FEN part 2 and 3, first char is color 'W' or 'B' then pieces.
+              // Actually Lidraughts FEN often looks like: W:W31,32,K28:B1,2,K10
+              const clean = section.substring(1); // Remove 'W' or 'B' prefix
+              if (!clean) return;
+              
+              const items = clean.split(',');
+              items.forEach(item => {
+                  let isKing = false;
+                  let numStr = item;
+                  if (item.startsWith('K')) {
+                      isKing = true;
+                      numStr = item.substring(1);
+                  }
+                  const sq = parseInt(numStr);
+                  if (!isNaN(sq)) {
+                      const { r, c } = toCoords(sq);
+                      newPieces.push({
+                          id: `${player}-${sq}`,
+                          player,
+                          isKing,
+                          r,
+                          c
+                      });
+                  }
+              });
+          };
+
+          parseSection(parts[1], 'me'); // W pieces (me)
+          parseSection(parts[2], 'opponent'); // B pieces (opp)
+          
+          setPieces(newPieces);
+          playSFX('move');
+      } catch (e) {
+          console.error("FEN Parse Error", e);
+      }
+  };
+
+  // Sync timers from server (P2P only)
   useEffect(() => {
       if (isP2P && socketGame?.gameState?.timers) {
           const oppId = socketGame.players.find((id: string) => id !== user.id);
@@ -190,15 +282,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       return () => clearInterval(interval);
   }, [turn, isGameOver, isP2P, socket, socketGame]);
 
-  useEffect(() => {
-      if (isBotGame && turn === 'opponent' && !isGameOver) {
-          const timeout = setTimeout(() => {
-              makeBotMove();
-          }, 1000);
-          return () => clearTimeout(timeout);
-      }
-  }, [isBotGame, turn, isGameOver, pieces, mustJumpFrom]);
-
   const handleQuit = () => {
       if (isP2P && socket) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
@@ -207,13 +290,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   };
 
   const handlePieceClick = useCallback((p: Piece) => {
-    if (turn !== 'me' || p.player !== 'me' || isGameOver) return;
+    if (turn !== 'me' || p.player !== 'me' || isGameOver || isLidraughtsLoading) return;
     
+    // For local validation, we keep using getGlobalValidMoves for highlighting
     const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
 
     if (mustJumpFrom && mustJumpFrom !== p.id) {
         playSFX('error');
-        // Hint: Highlight the piece that MUST continue the jump chain
         setHighlightedPieces([mustJumpFrom]);
         setTimeout(() => setHighlightedPieces([]), 1500);
         return;
@@ -222,7 +305,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
     if (hasJump && !canThisPieceJump) {
         playSFX('error');
-        // Hint: Highlight all pieces that CAN make a jump
         const mandatoryPieces = [...new Set(moves.filter(m => m.isJump).map(m => {
             const piece = pieces.find(pi => pi.r === m.fromR && pi.c === m.fromC);
             return piece ? piece.id : '';
@@ -243,14 +325,15 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             playSFX('click');
         }
     }
-  }, [turn, pieces, mustJumpFrom, selectedPieceId, isGameOver, forwardDir]);
+  }, [turn, pieces, mustJumpFrom, selectedPieceId, isGameOver, forwardDir, isLidraughtsLoading]);
 
   const handleMoveClick = useCallback((move: Move) => {
       if (!selectedPieceId || isGameOver) return;
       executeMove(move);
-  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir, timeRemaining]);
+  }, [selectedPieceId, pieces, isP2P, socket, socketGame, user.id, forwardDir, timeRemaining, lidraughtsId]);
 
-  const executeMove = (move: Move) => {
+  const executeMove = async (move: Move) => {
+      // Optimistic Update for UI smoothness
       const pieceId = pieces.find(p => p.r === move.fromR && p.c === move.fromC)?.id;
       if (!pieceId) return;
 
@@ -270,6 +353,19 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       
       if (move.isJump) playSFX('capture'); else playSFX('move');
 
+      // Bot Game: Send to Lidraughts
+      if (lidraughtsId && !isP2P) {
+          const fromSq = toNotation(move.fromR, move.fromC);
+          const toSq = toNotation(move.r, move.c);
+          const moveStr = move.isJump ? `${fromSq}x${toSq}` : `${fromSq}-${toSq}`;
+          
+          await makeLidraughtsMove(lidraughtsId, moveStr);
+          // Don't manually set turn here, wait for FEN poll to confirm
+          setSelectedPieceId(null);
+          return;
+      }
+
+      // P2P Logic (Existing)
       let nextTurn: 'me' | 'opponent' = turn === 'me' ? 'opponent' : 'me';
       let nextMustJump: string | null = null;
 
@@ -331,29 +427,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       }
   };
 
-  const makeBotMove = () => {
-      const { moves } = getGlobalValidMoves('opponent', pieces, mustJumpFrom);
-      if (moves.length === 0) return; 
-
-      let bestMove = moves[0];
-      let bestScore = -Infinity;
-      const shuffled = moves.sort(() => Math.random() - 0.5);
-
-      shuffled.forEach(move => {
-          let score = 0;
-          if (move.isJump) score += 100;
-          const kingRow = forwardDir === -1 ? 7 : 0; 
-          if (move.r === kingRow) score += 50;
-          if (move.c >= 2 && move.c <= 5 && move.r >= 2 && move.r <= 5) score += 10;
-          if (score > bestScore) {
-              bestScore = score;
-              bestMove = move;
-          }
-      });
-
-      executeMove(bestMove);
-  };
-
   const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
   
   const getGlobalValidMoves = (player: 'me' | 'opponent', currentPieces: Piece[], specificId?: string | null) => {
@@ -398,7 +471,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
   // Determine opponent profile
   const getOpponentProfile = () => {
-      if (!isP2P) return { name: "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" };
+      if (!isP2P) return { name: "Lidraughts AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=checkers" };
       if (socketGame?.profiles) {
           const oppId = socketGame.players.find((id: string) => id !== user.id);
           return socketGame.profiles[oppId] || { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
@@ -483,18 +556,24 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
         {/* Turn Indicator */}
         <div className="mb-2 flex flex-col items-center justify-center">
-            <motion.div 
-                key={turn}
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
-                    turn === 'me' 
-                    ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
-                    : 'bg-royal-800 text-slate-400 border border-white/10'
-                }`}
-            >
-                {turn === 'me' ? "Your Turn" : "Opponent's Turn"}
-            </motion.div>
+            {isLidraughtsLoading ? (
+                <div className="px-6 py-2 rounded-full bg-royal-800 text-gold-400 border border-gold-500/30 flex items-center gap-2">
+                    <RefreshCw className="animate-spin" size={16} /> Starting Engine...
+                </div>
+            ) : (
+                <motion.div 
+                    key={turn}
+                    initial={{ scale: 0.8, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
+                        turn === 'me' 
+                        ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
+                        : 'bg-royal-800 text-slate-400 border border-white/10'
+                    }`}
+                >
+                    {turn === 'me' ? "Your Turn" : "Opponent's Turn"}
+                </motion.div>
+            )}
         </div>
 
         {/* OPPONENT BAR */}
@@ -507,6 +586,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                         Captured: <span className="text-white">{capturedCount.opponent}</span>
                     </span>
                 </div>
+                {lidraughtsId && <a href={`https://lidraughts.org/${lidraughtsId}`} target="_blank" className="text-xs text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> View</a>}
             </div>
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${turn === 'opponent' ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
                 <Clock size={16} />
@@ -567,3 +647,4 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     </div>
   );
 };
+    
