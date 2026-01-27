@@ -1,20 +1,22 @@
 import React from 'react';
-import { Home, LayoutGrid, User, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
-import { useNav, useUser } from '../services/context';
+import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
+import { ViewState, User as AppUser } from '../types';
 import { useLanguage } from '../services/i18n';
-import { ViewState } from '../types';
 
-export const Navigation: React.FC = () => {
-  const { currentView, setView } = useNav();
-  const { user } = useUser();
+interface NavigationProps {
+  currentView: ViewState;
+  setView: (view: ViewState) => void;
+  user: AppUser;
+  hasUnreadMessages?: boolean;
+}
+
+export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, user, hasUnreadMessages }) => {
   const { t } = useLanguage();
   
-  if (!user) return null;
-
   const navItems = [
     { id: 'dashboard', icon: Home, label: t('nav_home') },
     { id: 'lobby', icon: LayoutGrid, label: t('nav_lobby') },
-    { id: 'forum', icon: MessageSquare, label: t('nav_forum') },
+    { id: 'forum', icon: MessageSquare, label: t('nav_forum'), hasBadge: hasUnreadMessages },
     { id: 'finance', icon: Wallet, label: t('nav_wallet') },
   ];
 
@@ -35,6 +37,11 @@ export const Navigation: React.FC = () => {
           >
             <div className={`p-2 rounded-xl transition-all relative ${currentView === item.id ? 'bg-royal-800' : 'group-hover:bg-royal-800/50'}`}>
                 <item.icon size={22} className={currentView === item.id ? 'drop-shadow-[0_0_8px_rgba(251,191,36,0.5)]' : ''} />
+                
+                {/* Notification Badge */}
+                {item.hasBadge && (
+                    <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-royal-900 animate-pulse shadow-sm shadow-red-500/50"></div>
+                )}
             </div>
             <span className="text-[9px] md:text-[10px] font-medium tracking-wide">{item.label}</span>
             {currentView === item.id && (

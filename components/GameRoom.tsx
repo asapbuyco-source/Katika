@@ -1,63 +1,11 @@
-
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Dice5, Crown, Star, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-import { useSocket } from '../services/context';
-
-type PlayerColor = 'Red' | 'Yellow';
-interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
-
-// Safe Zones on the 0-51 track (Absolute indices)
-const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47];
-
-// Board Waypoints for visual interpolation
-// We map the 0-51 track steps to visual percentages (top%, left%)
-// The board is a grid. 0 is Red Start.
-const getSmartPosition = (color: PlayerColor, step: number, pieceIndex: number) => {
-    // 1. Home Base Positions
-    if (step === -1) {
-        if (color === 'Red') {
-            // Top Left Quadrant
-            const positions = [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}]; 
-            return positions[pieceIndex % 4];
-        } else {
-            // Bottom Right Quadrant
-            const positions = [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}]; 
-            return positions[pieceIndex % 4];
-        }
-    }
-    
-    // 2. Victory Road (Steps > 50)
-    if (step >= 51) {
-        const depth = step - 51; 
-        const offset = 10 + (depth * 6.5);
-        if (color === 'Red') return { x: offset, y: 50 }; // Left to Center
-        else return { x: 100 - offset, y: 50 }; // Right to Center
-    }
-
-    // 3. Main Track (0-50)
-    let pos = step;
-    if (color === 'Yellow') pos = (step + 26) % 52;
-
-    // Define visual path coordinates (approximate for 15x15 grid)
-    if (pos <= 5) return { x: 8 + (pos * 6.6), y: 40 }; 
-    if (pos <= 11) return { x: 42, y: 38 - ((pos - 6) * 6.6) };
-    if (pos === 12) return { x: 50, y: 5 };
-    if (pos <= 18) return { x: 58, y: 8 + ((pos - 13) * 6.6) };
-    if (pos <= 24) return { x: 62 + ((pos - 19) * 6.6), y: 40 };
-    if (pos === 25) return { x: 95, y: 50 };
-    if (pos <= 31) return { x: 92 - ((pos - 26) * 6.6), y: 60 };
-    if (pos <= 37) return { x: 58, y: 62 + ((pos - 32) * 6.6) };
-    if (pos === 38) return { x: 50, y: 95 };
-    if (pos <= 44) return { x: 42, y: 92 - ((pos - 39) * 6.6) };
-    if (pos <= 50) return { x: 38 - ((pos - 45) * 6.6), y: 60 };
-    return { x: 5, y: 50 };
-};
 
 interface GameRoomProps {
   table: Table;
@@ -67,8 +15,50 @@ interface GameRoomProps {
   socketGame?: any;
 }
 
+type PlayerColor = 'Red' | 'Yellow';
+interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
+
+// Safe Zones on the 0-51 track (Absolute indices)
+const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47];
+
+// Board Waypoints for visual interpolation
+const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) => {
+    // 1. Base Positions (Home)
+    if (step === -1) {
+        if (color === 'Red') {
+            const positions = [{x: 12, y: 12}, {x: 28, y: 12}, {x: 12, y: 28}, {x: 28, y: 28}]; 
+            return positions[pieceIndex % 4];
+        } else {
+            const positions = [{x: 72, y: 72}, {x: 88, y: 72}, {x: 72, y: 88}, {x: 88, y: 88}]; 
+            return positions[pieceIndex % 4];
+        }
+    }
+
+    // 2. Home Straight (Victory Road)
+    if (step >= 51) {
+        const homeIndex = step - 51; 
+        const progress = 10 + (homeIndex * 6.5); 
+        
+        if (color === 'Red') return { x: progress, y: 50 }; 
+        if (color === 'Yellow') return { x: 100 - progress, y: 50 }; 
+    }
+
+    // 3. Main Track
+    let normalizedIndex = step;
+    if (color === 'Yellow') normalizedIndex = (step + 26) % 52;
+
+    if (normalizedIndex < 13) { 
+        return { x: 15 + (normalizedIndex * 5.8), y: 10 };
+    } else if (normalizedIndex < 26) { 
+        return { x: 90, y: 15 + ((normalizedIndex - 13) * 5.8) };
+    } else if (normalizedIndex < 39) { 
+        return { x: 85 - ((normalizedIndex - 26) * 5.8), y: 90 };
+    } else { 
+        return { x: 10, y: 85 - ((normalizedIndex - 39) * 5.8) };
+    }
+};
+
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
-  const { requestFullSync } = useSocket();
   const [pieces, setPieces] = useState<Piece[]>([]);
   const [currentTurn, setCurrentTurn] = useState<PlayerColor>('Red');
   const [diceValue, setDiceValue] = useState<number | null>(null);
@@ -79,9 +69,10 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   const isP2P = !!socket && !!socketGame;
   const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
 
-  // Initialize Pieces (Local Fallback)
+  // Initialize Pieces
   useEffect(() => {
-      if ((!isP2P || (isP2P && !socketGame?.gameState?.pieces)) && pieces.length === 0) {
+      // If synced state is empty or local play, init
+      if ((!isP2P || (isP2P && socketGame?.gameState?.pieces?.length === 0)) && pieces.length === 0) {
           const initPieces: Piece[] = [];
           for(let i=0; i<4; i++) initPieces.push({ id: i, color: 'Red', step: -1 });
           for(let i=0; i<4; i++) initPieces.push({ id: i+4, color: 'Yellow', step: -1 });
@@ -92,12 +83,9 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
   // --- SYNC ---
   useEffect(() => {
       if (isP2P && socketGame) {
-          const gs = socketGame.gameState;
-          if (gs) {
-              if (gs.pieces && gs.pieces.length > 0) setPieces(gs.pieces);
-              if (gs.diceValue !== undefined) setDiceValue(gs.diceValue);
-              if (gs.diceRolled !== undefined) setDiceRolled(gs.diceRolled);
-          }
+          if (socketGame.gameState && socketGame.gameState.pieces && socketGame.gameState.pieces.length > 0) setPieces(socketGame.gameState.pieces);
+          if (socketGame.gameState && socketGame.gameState.diceValue) setDiceValue(socketGame.gameState.diceValue);
+          if (socketGame.gameState) setDiceRolled(socketGame.gameState.diceRolled);
           if (socketGame.turn) setCurrentTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Yellow');
           
           if (socketGame.winner) {
@@ -115,69 +103,79 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
   const handleRoll = () => {
       if (currentTurn !== myColor || diceRolled) return;
-      playSFX('dice');
+      
       if (socket) {
           socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
       } else {
-          setTimeout(() => {
-              const val = Math.ceil(Math.random() * 6);
-              setDiceValue(val);
-              setDiceRolled(true);
-              const myPieces = pieces.filter(p => p.color === myColor);
-              const canMove = myPieces.some(p => p.step !== -1 || val === 6);
-              if (!canMove) {
-                  setTimeout(() => {
-                      setDiceRolled(false);
-                      setDiceValue(null);
-                      setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
-                  }, 1500);
-              }
-          }, 500);
+          const val = Math.ceil(Math.random() * 6);
+          setDiceValue(val);
+          setDiceRolled(true);
       }
+      playSFX('dice');
   };
 
   const handlePieceClick = (p: Piece) => {
       if (currentTurn !== myColor || !diceRolled || !diceValue) return;
       if (p.color !== myColor) return;
       
-      if (socket) {
-          socket.emit('game_action', {
-              roomId: socketGame.roomId,
-              action: { type: 'MOVE_PIECE', pieceId: p.id } 
-          });
-          setLastMovedPieceId(p.id);
-          playSFX('move');
+      if (p.step === -1 && diceValue !== 6) {
+          playSFX('error');
           return;
       }
 
-      if (p.step === -1 && diceValue !== 6) { playSFX('error'); return; }
       const nextStep = p.step === -1 ? 0 : p.step + diceValue;
-      if (nextStep > 56) { playSFX('error'); return; }
+      if (nextStep > 56) {
+          playSFX('error'); 
+          return; 
+      }
 
       let newPieces = pieces.map(piece => piece.id === p.id ? { ...piece, step: nextStep } : piece);
       let captured = false;
 
       if (nextStep >= 0 && nextStep <= 50) {
           const myNormalized = p.color === 'Red' ? nextStep : (nextStep + 26) % 52;
+          
           newPieces = newPieces.map(other => {
-              if (other.id === p.id || other.color === p.color || other.step === -1 || other.step > 50) return other;
+              if (other.id === p.id) return other; 
+              if (other.color === p.color) return other; 
+              if (other.step === -1 || other.step > 50) return other; 
+
               const otherNormalized = other.color === 'Red' ? other.step : (other.step + 26) % 52;
+
               if (myNormalized === otherNormalized) {
-                  if (SAFE_ZONES.includes(myNormalized)) return other;
-                  playSFX('capture');
-                  captured = true;
-                  return { ...other, step: -1 };
+                  if (SAFE_ZONES.includes(myNormalized)) {
+                      return other;
+                  } else {
+                      playSFX('capture');
+                      captured = true;
+                      return { ...other, step: -1 }; 
+                  }
               }
               return other;
           });
       }
 
       setLastMovedPieceId(p.id);
+      
       const bonusTurn = diceValue === 6 || captured;
-      setPieces(newPieces);
-      setDiceRolled(false);
-      setDiceValue(null);
-      if (!bonusTurn) setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
+
+      if (socket) {
+          socket.emit('game_action', {
+              roomId: socketGame.roomId,
+              action: { 
+                  type: 'MOVE_PIECE', 
+                  pieces: newPieces, 
+                  bonusTurn: bonusTurn 
+              } 
+          });
+      } else {
+          setPieces(newPieces);
+          setDiceRolled(false);
+          setDiceValue(null);
+          if (!bonusTurn) {
+              setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
+          }
+      }
       playSFX('move');
   };
 
@@ -192,10 +190,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                  <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
             </div>
-            <div className="w-32 flex justify-end gap-2">
-                 <div className="hidden md:block w-full"><AIReferee externalLog={refereeLog} /></div>
-                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 h-fit" title="Sync State"><RefreshCw size={16} /></button>
-            </div>
+            <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
         <div className="text-white text-center mb-4">
@@ -207,51 +202,86 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
         <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-xl shadow-2xl overflow-hidden border-8 border-royal-800">
             {/* Ludo Board Art */}
             <div className="absolute inset-0 grid grid-cols-15 grid-rows-15 bg-[#e0f2fe]">
+                
+                {/* Red Base (Top Left) */}
                 <div className="absolute top-0 left-0 w-[40%] h-[40%] bg-white border-r-4 border-b-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-red-100 rounded-3xl border-4 border-red-500 flex items-center justify-center relative">
+                        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
+                            {[0,1,2,3].map(i => <div key={i} className="bg-red-200 rounded-full border-2 border-red-400 opacity-50"></div>)}
+                        </div>
                         <Crown className="text-red-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
+
+                {/* Yellow Base (Bottom Right) */}
                 <div className="absolute bottom-0 right-0 w-[40%] h-[40%] bg-white border-l-4 border-t-4 border-royal-800 p-4">
                     <div className="w-full h-full bg-yellow-100 rounded-3xl border-4 border-yellow-500 flex items-center justify-center relative">
+                        <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
+                            {[0,1,2,3].map(i => <div key={i} className="bg-yellow-200 rounded-full border-2 border-yellow-400 opacity-50"></div>)}
+                        </div>
                         <Crown className="text-yellow-500 relative z-10 w-12 h-12" />
                     </div>
                 </div>
-                <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center bg-red-100/30"></div>
-                <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center bg-yellow-100/30"></div>
+
+                {/* Home Run Tracks */}
+                {/* Red Home (Left) */}
+                <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center p-2">
+                    <div className="w-full h-8 bg-red-100 rounded-full flex items-center px-2 space-x-1 border border-red-300">
+                        {[1,2,3,4,5].map(i => <div key={i} className="h-6 w-full bg-red-500 rounded-sm opacity-20"></div>)}
+                    </div>
+                </div>
+                {/* Yellow Home (Right) */}
+                <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center p-2">
+                    <div className="w-full h-8 bg-yellow-100 rounded-full flex items-center px-2 space-x-1 border border-yellow-300">
+                        {[1,2,3,4,5].map(i => <div key={i} className="h-6 w-full bg-yellow-500 rounded-sm opacity-20"></div>)}
+                    </div>
+                </div>
+                
+                {/* Center */}
                 <div className="absolute top-[40%] left-[40%] w-[20%] h-[20%] bg-gradient-to-br from-royal-800 to-royal-950 flex items-center justify-center border-4 border-white shadow-inner z-10">
                     <div className="text-center">
                         <div className="text-white font-black text-xs">VANTAGE</div>
                         <Star className="text-gold-400 w-6 h-6 mx-auto mt-1 animate-pulse" fill="currentColor" />
                     </div>
                 </div>
+
+                {/* Safe Zones (Visual) */}
+                <div className="absolute top-[10%] left-[40%] w-[20%] h-[5%] bg-slate-300/30 flex justify-center"><Shield size={12} className="text-slate-400 opacity-50" /></div>
             </div>
 
             {/* Pieces Layer */}
             <AnimatePresence>
             {pieces.map((p, i) => {
-                const pos = getSmartPosition(p.color, p.step, i);
+                const pos = getPiecePosition(p.color, p.step, i);
                 const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
                 const offset = stackIndex * 4;
-                const isMyPiece = p.color === myColor;
-                const canMove = isMyPiece && diceRolled && currentTurn === myColor && (p.step !== -1 || diceValue === 6);
 
                 return (
                     <motion.div 
                         key={p.id}
                         layoutId={`p-${p.id}`}
                         initial={{ scale: 0 }}
-                        animate={{ top: `${pos.y}%`, left: `${pos.x}%`, marginLeft: `${offset}px`, marginTop: `${offset}px`, scale: 1, zIndex: 20 + stackIndex }}
+                        animate={{ 
+                            top: `${pos.y}%`, 
+                            left: `${pos.x}%`, 
+                            marginLeft: `${offset}px`,
+                            marginTop: `${offset}px`,
+                            scale: 1,
+                            zIndex: 20 + stackIndex
+                        }}
                         transition={{ type: "spring", damping: 25, stiffness: 200 }}
                         onClick={() => handlePieceClick(p)}
                         className={`
-                            absolute w-6 h-6 md:w-8 md:h-8 -ml-3 -mt-3 md:-ml-4 md:-mt-4 rounded-full border-2 border-white shadow-[0_4px_6px_rgba(0,0,0,0.4)]
+                            absolute w-6 h-6 md:w-8 md:h-8 -ml-3 -mt-3 md:-ml-4 md:-mt-4 rounded-full border-2 border-white shadow-[0_4px_6px_rgba(0,0,0,0.4)] cursor-pointer 
                             ${p.color === 'Red' ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-yellow-400 to-yellow-600'}
-                            ${canMove ? 'cursor-pointer ring-4 ring-white/50 animate-pulse' : 'cursor-default'}
+                            ${currentTurn === myColor && p.color === myColor && diceRolled ? 'ring-4 ring-white/50 animate-pulse' : ''}
                             ${lastMovedPieceId === p.id ? 'z-50' : ''}
                         `}
                     >
                         <div className="absolute inset-2 rounded-full bg-white/20"></div>
+                        {p.step !== -1 && SAFE_ZONES.includes(p.color === 'Red' ? p.step : (p.step + 26) % 52) && (
+                            <div className="absolute -top-2 -right-2 text-gold-400 drop-shadow-md"><Shield size={10} fill="currentColor" /></div>
+                        )}
                     </motion.div>
                 )
             })}
@@ -287,7 +317,14 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             )}
         </div>
 
-        {isP2P && socketGame && <GameChat messages={socketGame.chat || []} onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })} currentUserId={user.id} profiles={socketGame.profiles || {}} />}
+        {isP2P && socketGame && (
+            <GameChat 
+                messages={socketGame.chat || []}
+                onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
+                currentUserId={user.id}
+                profiles={socketGame.profiles || {}}
+            />
+        )}
     </div>
   );
 };

@@ -1,15 +1,11 @@
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
 import { Socket } from 'socket.io-client';
-import { GameTimer } from './GameTimer';
-import { TurnIndicator } from './TurnIndicator';
-import { ForfeitModal } from './ForfeitModal';
-import { useSocket } from '../services/context';
 
 interface DiceGameProps {
   table: Table;
@@ -19,8 +15,9 @@ interface DiceGameProps {
   socketGame?: any;
 }
 
-const TURN_TIME_LIMIT = 15;
+const TURN_TIME_LIMIT = 15; // Seconds
 
+// --- 2D DIE COMPONENT ---
 const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ value, rolling, isMe }) => {
     const [displayVal, setDisplayVal] = useState(value);
 
@@ -88,7 +85,6 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 };
 
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
-  const { requestFullSync } = useSocket();
   const isP2P = !!socket && !!socketGame;
   const opponentId = isP2P && Array.isArray(socketGame?.players) 
       ? socketGame.players.find((id: string) => id !== user.id) 
@@ -111,11 +107,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
   const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
 
   const prevRoundState = useRef<string>('');
-  const phaseRef = useRef(phase);
-  const isMyTurnRef = useRef(isMyTurn);
-
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
-  useEffect(() => { isMyTurnRef.current = isMyTurn; }, [isMyTurn]);
 
   const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
     setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
@@ -128,12 +119,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       onGameEnd('quit');
   };
 
+  // Improved Sync with Socket State
   useEffect(() => {
       if (isP2P && socketGame) {
           const amITurn = socketGame.turn === user.id;
           setIsMyTurn(amITurn);
           
-          const gs = socketGame.gameState || {}; 
+          const gs = socketGame.gameState || {}; // Access gameState safely
 
           if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
               setScores({
@@ -155,16 +147,20 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
               if (gs.roundRolls[opponentId] && JSON.stringify(gs.roundRolls[opponentId]) !== JSON.stringify(oppDice)) {
                   setOppDice(gs.roundRolls[opponentId]);
               }
+              // Check if I have already rolled this round
               if (gs.roundRolls[user.id]) {
                   hasRolledSelf = true;
               }
           } else {
+              // Reset dice visual if new round (roundRolls empty)
+              // Only if we are not currently rolling (to avoid visual glitch mid-transition)
               if (phase !== 'rolling') {
                   setMyDice([1,1]);
                   setOppDice([1,1]);
               }
           }
 
+          // Stop rolling animation if we have our dice results
           if (phase === 'rolling' && hasRolledSelf) {
               setPhase('waiting'); 
           }
@@ -189,15 +185,18 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                   }
               }
           } else {
+              // Standard turn switching
               if (phase === 'rolling' && !amITurn && !hasRolledSelf) {
                   setPhase('waiting');
               }
               
+              // Reset from scored to waiting for next round
               if (phase === 'scored' && gs.roundState === 'waiting') {
                   setPhase('waiting');
                   setRoundWinner(null);
                   addLog(`Round ${gs.currentRound} Started`);
                   setTimeLeft(TURN_TIME_LIMIT);
+                  // Ensure dice are reset visually
                   setMyDice([1,1]);
                   setOppDice([1,1]);
               }
@@ -209,45 +208,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           }
       }
   }, [socketGame, user.id, opponentId, isP2P]);
-
-  const roll = useCallback(() => {
-      if (!isMyTurnRef.current || phaseRef.current !== 'waiting' || isProcessing) return;
-      
-      playSFX('dice');
-      
-      if (isP2P && socket) {
-          setPhase('rolling');
-          setIsProcessing(true);
-          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
-          setTimeout(() => setIsProcessing(false), 500);
-      } else {
-          setPhase('rolling');
-          setTimeout(() => {
-              const d1 = Math.ceil(Math.random() * 6);
-              const d2 = Math.ceil(Math.random() * 6);
-              setMyDice([d1, d2]);
-              setPhase('waiting'); 
-              setIsMyTurn(false);
-              setTimeout(() => botPlay([d1, d2]), 1500); 
-          }, 1000);
-      }
-  }, [isMyTurn, phase, isProcessing, isP2P, socket, socketGame]);
-
-  const handleTimeout = useCallback(() => {
-      if (phaseRef.current !== 'waiting') return;
-      
-      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
-      
-      if (isMyTurnRef.current && !hasRolled) {
-          playSFX('error');
-          addLog("Auto-roll triggered", "alert");
-          roll();
-      } else if (!isP2P && !isMyTurnRef.current) {
-          const d1 = Math.ceil(Math.random() * 6);
-          const d2 = Math.ceil(Math.random() * 6);
-          botPlay([d1, d2]);
-      }
-  }, [isP2P, socketGame, roll]);
 
   useEffect(() => {
       if (phase !== 'waiting') return;
@@ -270,16 +230,54 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           clearInterval(timer);
           if (timeoutId) clearTimeout(timeoutId);
       };
-  }, [isMyTurn, round, phase, handleTimeout]);
+  }, [isMyTurn, round, phase]);
 
-  const botPlay = (playerDice: number[]) => {
+  const handleTimeout = () => {
+      if (phase !== 'waiting') return;
+      
+      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+      
+      // Only timeout if it's my turn AND I haven't rolled yet
+      if (isMyTurn && !hasRolled) {
+          playSFX('error');
+          addLog("Auto-roll triggered", "alert");
+          roll();
+      } else if (!isP2P) {
+          botPlay(); 
+      }
+  };
+
+  const roll = () => {
+      if (!isMyTurn || phase !== 'waiting' || isProcessing) return;
+      
+      playSFX('dice');
+      
+      if (isP2P && socket) {
+          setPhase('rolling');
+          setIsProcessing(true);
+          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
+          setTimeout(() => setIsProcessing(false), 500);
+      } else {
+          setPhase('rolling');
+          setTimeout(() => {
+              const d1 = Math.ceil(Math.random() * 6);
+              const d2 = Math.ceil(Math.random() * 6);
+              setMyDice([d1, d2]);
+              setPhase('waiting'); 
+              setIsMyTurn(false);
+              setTimeout(botPlay, 1500); 
+          }, 1000);
+      }
+  };
+
+  const botPlay = () => {
       setPhase('rolling');
       playSFX('dice');
       setTimeout(() => {
           const d1 = Math.ceil(Math.random() * 6);
           const d2 = Math.ceil(Math.random() * 6);
           setOppDice([d1, d2]);
-          evaluateRoundLocal(playerDice, [d1, d2]);
+          evaluateRoundLocal([myDice[0], myDice[1]], [d1, d2]);
       }, 1000);
   };
 
@@ -327,6 +325,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
 
+        {/* --- HEADER --- */}
         <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
             <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                 <ArrowLeft size={20} />
@@ -347,19 +346,30 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                     </div>
                 </div>
             </div>
-            <div className="w-32 hidden md:flex justify-end">
-                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30 h-fit" title="Sync State"><RefreshCw size={16} /></button>
+            <div className="w-32 hidden md:block">
+                 <AIReferee externalLog={refereeLog} />
             </div>
         </div>
 
+        {/* --- TURN INDICATOR --- */}
         <div className="mt-6 flex justify-center w-full relative z-20">
-            <TurnIndicator 
-                isMyTurn={isMyTurn} 
-                myLabel={hasRolledServer ? "WAITING FOR RESULT..." : "YOUR TURN"} 
-                opponentLabel="OPPONENT'S TURN" 
-            />
+            <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                key={isMyTurn ? 'my-turn' : 'opp-turn'}
+                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
+                    isMyTurn 
+                    ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
+                    : 'bg-royal-800 text-slate-400 border border-white/10'
+                }`}
+            >
+                {isMyTurn 
+                    ? (hasRolledServer ? "Waiting for Result..." : "Your Turn") 
+                    : "Opponent's Turn"}
+            </motion.div>
         </div>
 
+        {/* --- ARENA --- */}
         <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-4 gap-8">
             <div className="relative">
                 <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
@@ -395,6 +405,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             <motion.div 
                 className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                 onPanEnd={handleSwipe}
+                onTouchEnd={(e) => {
+                    // Simple swipe logic for touch
+                    if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
+                       roll();
+                    }
+                }}
             >
                 <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
                     {isMyTurn && phase === 'waiting' && !hasRolledServer && (
@@ -414,6 +430,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                     </div>
 
                     <div className="absolute -right-4 top-1/2 -translate-y-1/2">
+                        {/* Show sum if I have rolled (even if waiting for opponent) */}
                         {(hasRolledServer || (!isP2P && phase === 'scored')) && (
                             <motion.div 
                                 initial={{ scale: 0 }} animate={{ scale: 1 }}
@@ -437,6 +454,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             </motion.div>
         </div>
 
+        {/* --- CONTROLS --- */}
         <div className="w-full max-w-md pb-6 relative z-20 h-24 flex items-end justify-center">
             <AnimatePresence mode="wait">
                 {phase === 'waiting' && isMyTurn && !hasRolledServer ? (
@@ -473,6 +491,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             </AnimatePresence>
         </div>
 
+        {/* ROUND RESULT */}
         <AnimatePresence>
             {phase === 'scored' && roundWinner && (
                 <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
@@ -500,8 +519,6 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 </div>
             )}
         </AnimatePresence>
-
-        <ForfeitModal isOpen={showForfeitModal} onClose={() => setShowForfeitModal(false)} onConfirm={handleQuit} />
     </div>
   );
 };

@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction } from '../types';
-import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount, db } from '../services/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { User, ViewState, Transaction } from '../types';
+import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
-import { Settings, CreditCard, Trophy, TrendingUp, LogOut, Edit2, Shield, Wallet, Bell, HelpCircle, ChevronRight, Moon, Sun, Globe, Volume2, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Sun, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 import { useTheme } from '../services/theme';
-import { useUser, useNav } from '../services/context';
+
+interface ProfileProps {
+  user: User;
+  onLogout: () => void;
+  onUpdateProfile: (updates: Partial<User>) => void;
+  onNavigate: (view: ViewState) => void;
+}
 
 // Explicitly define the allowed tab values
 type ProfileTab = 'overview' | 'history' | 'settings';
@@ -24,12 +29,10 @@ const PRESET_AVATARS = [
     'https://i.pravatar.cc/150?u=3',
 ];
 
-export const Profile: React.FC = () => {
-  const { user, logout } = useUser();
-  const { setView } = useNav();
+export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfile, onNavigate }) => {
   const { t, language, setLanguage } = useLanguage();
   const { theme, toggleTheme } = useTheme();
-  
+  // Ensure the state uses the ProfileTab union type
   const [activeTab, setActiveTab] = useState<ProfileTab>('overview');
   const [isEditing, setIsEditing] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -44,10 +47,10 @@ export const Profile: React.FC = () => {
   });
 
   // Edit State
-  const [tempName, setTempName] = useState(user?.name || '');
-  const [tempAvatar, setTempAvatar] = useState(user?.avatar || '');
+  const [tempName, setTempName] = useState(user.name);
+  const [tempAvatar, setTempAvatar] = useState(user.avatar);
   
-  // Settings State
+  // Settings State - Initialize with defaults or load later
   const [preferences, setPreferences] = useState({
       notifications: true,
       sound: getSoundEnabled(),
@@ -59,50 +62,63 @@ export const Profile: React.FC = () => {
   const [isEditingEmail, setIsEditingEmail] = useState(false);
   const [newEmailInput, setNewEmailInput] = useState('');
 
+  // Tabs Configuration - strictly typed
   const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
 
+  // Load Preferences from LocalStorage on Mount
   useEffect(() => {
       const savedPrefs = localStorage.getItem('vantage_profile_prefs');
       if (savedPrefs) {
           try {
               const parsed = JSON.parse(savedPrefs);
+              // Ensure sound state is synced with the service source of truth
               parsed.sound = getSoundEnabled();
               setPreferences(parsed);
           } catch (e) {
               console.error("Failed to load preferences", e);
           }
       }
+      
+      // Sync email if changed elsewhere
       if (auth.currentUser?.email) setCurrentEmail(auth.currentUser.email);
   }, []);
 
+  // Save Preferences to LocalStorage on Change
   useEffect(() => {
       localStorage.setItem('vantage_profile_prefs', JSON.stringify(preferences));
   }, [preferences]);
 
   useEffect(() => {
-    if (!isEditing && user) {
+    if (!isEditing) {
         setTempName(user.name);
         setTempAvatar(user.avatar);
     }
   }, [user, isEditing]);
 
+  // Fetch Data for Profile
   useEffect(() => {
       const fetchData = async () => {
-          if (!user || user.id.startsWith('guest-')) return;
+          if (user.id.startsWith('guest-')) return;
+          
           try {
               const txs = await getUserTransactions(user.id);
               setTransactions(txs);
 
+              // Calculate Stats
               const stakes = txs.filter(t => t.type === 'stake');
               const winnings = txs.filter(t => t.type === 'winnings');
               
               const totalGames = stakes.length;
               const totalWins = winnings.length;
+              // Win rate calculation (simplistic)
               const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
               const totalEarnings = winnings.reduce((acc, curr) => acc + curr.amount, 0);
 
+              // Calculate Streak (Consecutive wins in recent history)
               let streak = 0;
               let pendingWins = 0;
+              
+              // Transactions are sorted desc (newest first)
               for (const tx of txs) {
                    if (tx.type === 'winnings') {
                        pendingWins++;
@@ -111,20 +127,24 @@ export const Profile: React.FC = () => {
                            streak++;
                            pendingWins--; 
                        } else {
-                           break;
+                           break; // Loss found
                        }
                    }
               }
 
-              setStats({ totalGames, winRate, streak, totalEarnings });
+              setStats({
+                  totalGames,
+                  winRate,
+                  streak,
+                  totalEarnings
+              });
+
           } catch (e) {
               console.error("Failed to load profile stats", e);
           }
       };
       fetchData();
-  }, [user?.id]);
-
-  if (!user) return null;
+  }, [user.id]);
 
   const showToast = (msg: string) => {
       setToastMessage(msg);
@@ -134,6 +154,7 @@ export const Profile: React.FC = () => {
   const togglePref = (key: keyof typeof preferences) => {
       const newVal = !preferences[key];
       setPreferences(prev => ({ ...prev, [key]: newVal }));
+      
       if (key === 'sound') {
           setSoundEnabled(newVal as boolean);
           showToast(newVal ? 'Sound Effects Enabled' : 'Sound Effects Disabled');
@@ -152,6 +173,8 @@ export const Profile: React.FC = () => {
       playSFX('click');
       showToast(`Language changed to ${lang === 'en' ? 'English' : 'Français'}`);
   };
+
+  // --- ACCOUNT HANDLERS ---
 
   const handlePasswordReset = async () => {
       if (!currentEmail) return alert("No email associated with this account.");
@@ -183,30 +206,28 @@ export const Profile: React.FC = () => {
 
   const handleDeleteAccount = async () => {
       playSFX('click');
-      if (!window.confirm("Are you sure? This action is permanent and cannot be undone.")) return;
+      if (!window.confirm("Are you sure? This action is permanent and cannot be undone. All funds and data will be lost.")) return;
+      
       try {
           await deleteAccount();
-          logout();
+          onLogout(); // Redirect to landing
       } catch (e: any) {
           console.error(e);
           showToast("Deletion failed: " + e.message);
       }
   };
 
-  const handleSaveProfile = async () => {
+  // ------------------------
+
+  const handleSaveProfile = () => {
       playSFX('click');
       if (!tempName.trim()) {
           alert("Name cannot be empty");
           return;
       }
-      try {
-          await updateDoc(doc(db, "users", user.id), { name: tempName, avatar: tempAvatar });
-          setIsEditing(false);
-          showToast("Profile Updated Successfully");
-      } catch (e) {
-          console.error(e);
-          showToast("Failed to update profile");
-      }
+      onUpdateProfile({ name: tempName, avatar: tempAvatar });
+      setIsEditing(false);
+      showToast("Profile Updated Successfully");
   };
 
   const handleCancelEdit = () => {
@@ -243,6 +264,8 @@ export const Profile: React.FC = () => {
 
   return (
     <div className="p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative text-white">
+       
+       {/* TOAST NOTIFICATION */}
        <AnimatePresence>
            {toastMessage && (
                <motion.div 
@@ -257,13 +280,17 @@ export const Profile: React.FC = () => {
            )}
        </AnimatePresence>
 
+       {/* Profile Header */}
        <header className="relative mb-8 pt-10">
+           {/* Banner/Cover */}
            <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-r from-royal-800 via-royal-700 to-royal-800 rounded-2xl opacity-50 -z-10 overflow-hidden">
                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-30"></div>
            </div>
            
            <div className="flex flex-col md:flex-row items-end md:items-center justify-between px-4 pb-4">
                <div className="flex flex-col md:flex-row items-center md:items-end gap-6 w-full">
+                   
+                   {/* Avatar Section */}
                    <div className="relative group">
                        <motion.div layout className="w-28 h-28 rounded-full border-4 border-royal-950 p-1 bg-royal-800 relative z-10 shadow-2xl overflow-hidden">
                            <img src={isEditing ? tempAvatar : user.avatar} alt="Profile" className="w-full h-full rounded-full object-cover" />
@@ -319,7 +346,7 @@ export const Profile: React.FC = () => {
                                 <button onClick={() => { setIsEditing(true); playSFX('click'); }} className="flex-1 md:flex-none px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-white font-medium transition-all text-sm flex items-center justify-center gap-2">
                                     <Edit2 size={16} /> {t('edit_profile')}
                                 </button>
-                                <button onClick={logout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all flex items-center justify-center">
+                                <button onClick={onLogout} className="px-4 py-3 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-xl border border-red-500/20 transition-all flex items-center justify-center">
                                     <LogOut size={20} />
                                 </button>
                            </>
@@ -328,6 +355,7 @@ export const Profile: React.FC = () => {
                </div>
            </div>
 
+           {/* Avatar Picker Drawer */}
            <AnimatePresence>
                {isEditing && (
                    <motion.div 
@@ -362,6 +390,7 @@ export const Profile: React.FC = () => {
            </AnimatePresence>
        </header>
 
+       {/* Navigation Tabs */}
        <div className="flex items-center gap-8 border-b border-white/10 mb-8 overflow-x-auto">
            {tabs.map((tab) => (
                <button 
@@ -384,6 +413,7 @@ export const Profile: React.FC = () => {
            ))}
        </div>
 
+       {/* Removed mode="wait" from AnimatePresence to prevent tab switching hangs */}
        <AnimatePresence>
            <motion.div 
               key={activeTab}
@@ -393,8 +423,10 @@ export const Profile: React.FC = () => {
               exit={{ opacity: 0, y: 10 }}
               className="grid grid-cols-1 md:grid-cols-3 gap-6"
            >
+               {/* OVERVIEW TAB */}
                {activeTab === 'overview' && (
                    <>
+                      {/* Left Column - Stats */}
                       <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               {[
@@ -422,6 +454,7 @@ export const Profile: React.FC = () => {
                                   </select>
                               </div>
                               <div className="h-48 flex items-end justify-between gap-3 relative z-10 px-2">
+                                  {/* Dummy Chart Data for Visual */}
                                   {[30, 45, 25, 60, 75, 50, 80].map((h, i) => (
                                       <div key={i} className="w-full bg-royal-800/50 rounded-t-lg relative group">
                                           <motion.div 
@@ -430,6 +463,7 @@ export const Profile: React.FC = () => {
                                             transition={{ duration: 1, delay: i * 0.1, ease: "circOut" }}
                                             className="absolute bottom-0 w-full bg-gradient-to-t from-gold-600 to-gold-400 rounded-t-lg opacity-80 group-hover:opacity-100 transition-opacity shadow-[0_0_15px_rgba(251,191,36,0.2)]"
                                           />
+                                          {/* Tooltip */}
                                           <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-royal-950 text-xs font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                                               {h * 100}
                                           </div>
@@ -442,6 +476,7 @@ export const Profile: React.FC = () => {
                           </div>
                       </motion.div>
 
+                      {/* Right Column - Balance & quick actions */}
                       <motion.div variants={itemVariants} className="md:col-span-1 space-y-6">
                           <div className="glass-panel p-6 rounded-2xl bg-gradient-to-br from-royal-900 to-black border border-gold-500/20 relative overflow-hidden group">
                               <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
@@ -459,13 +494,13 @@ export const Profile: React.FC = () => {
                                   </h2>
                                   <div className="space-y-3">
                                       <button 
-                                        onClick={() => { setView('finance'); playSFX('click'); }}
+                                        onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-[0_0_20px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] active:scale-95 flex items-center justify-center gap-2"
                                       >
                                           <Wallet size={18} /> {t('deposit')}
                                       </button>
                                       <button 
-                                        onClick={() => { setView('finance'); playSFX('click'); }}
+                                        onClick={() => { onNavigate('finance'); playSFX('click'); }}
                                         className="w-full py-3.5 bg-white/5 text-white font-bold rounded-xl hover:bg-white/10 transition-colors border border-white/10 flex items-center justify-center gap-2"
                                       >
                                           <CreditCard size={18} /> {t('withdraw')}
@@ -485,6 +520,7 @@ export const Profile: React.FC = () => {
                    </>
                )}
 
+               {/* HISTORY TAB */}
                {activeTab === 'history' && (
                    <motion.div variants={itemVariants} className="md:col-span-3">
                        <div className="glass-panel rounded-2xl overflow-hidden border border-white/5">
@@ -509,12 +545,11 @@ export const Profile: React.FC = () => {
                                                <tr key={tx.id} className="hover:bg-white/5 transition-colors">
                                                    <td className="p-4">
                                                        <div className="flex items-center gap-3">
-                                                           <div className={`p-2.5 rounded-full ${
+                                                           <div className={`p-2 rounded-lg ${
                                                                tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
                                                            }`}>
-                                                               {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
-                                                                tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> :
-                                                                tx.type === 'winnings' ? <Wallet size={16} /> : <CreditCard size={16} />}
+                                                               {tx.type === 'deposit' ? <CreditCard size={16} /> : 
+                                                                tx.type === 'winnings' ? <Trophy size={16} /> : <TrendingUp size={16} />}
                                                            </div>
                                                            <span className="capitalize font-bold text-slate-300">{tx.type}</span>
                                                        </div>
@@ -547,15 +582,19 @@ export const Profile: React.FC = () => {
                    </motion.div>
                )}
                
+               {/* SETTINGS TAB */}
                {activeTab === 'settings' && (
                    <>
                        <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
+                           
+                           {/* Security Section (MODIFIED) */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                                    <Shield className="text-gold-400" size={20} /> {t('security_access')}
                                </h3>
                                
                                <div className="space-y-4">
+                                   {/* Email Address */}
                                    <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5 gap-4">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Mail size={20}/></div>
@@ -585,6 +624,7 @@ export const Profile: React.FC = () => {
                                        )}
                                    </div>
 
+                                   {/* Password Reset */}
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Key size={20}/></div>
@@ -598,6 +638,7 @@ export const Profile: React.FC = () => {
                                        </button>
                                    </div>
 
+                                   {/* Delete Account */}
                                    <div className="flex items-center justify-between p-4 bg-red-500/5 rounded-xl border border-red-500/20">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Trash2 size={20}/></div>
@@ -613,12 +654,14 @@ export const Profile: React.FC = () => {
                                </div>
                            </section>
 
+                           {/* App Preferences */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                                    <Settings className="text-purple-400" size={20} /> {t('app_preferences')}
                                </h3>
                                
                                <div className="space-y-4">
+                                   {/* Theme Toggle */}
                                    <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
@@ -676,6 +719,7 @@ export const Profile: React.FC = () => {
                        </motion.div>
 
                        <motion.div variants={itemVariants} className="md:col-span-1 space-y-6">
+                           {/* Notifications */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                                    <Bell className="text-red-400" size={20} /> {t('notifications')}
@@ -702,25 +746,26 @@ export const Profile: React.FC = () => {
                                </div>
                            </section>
 
+                           {/* Support */}
                            <section className="glass-panel p-6 rounded-2xl border border-white/5">
                                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                                    <HelpCircle className="text-blue-400" size={20} /> {t('support')}
                                </h3>
                                <div className="space-y-2">
                                    <button 
-                                     onClick={() => { setView('help-center'); playSFX('click'); }}
+                                     onClick={() => { onNavigate('help-center'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        {t('help_center')} <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => { setView('report-bug'); playSFX('click'); }}
+                                     onClick={() => { onNavigate('report-bug'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        {t('report_bug')} <ChevronRight size={16} />
                                    </button>
                                    <button 
-                                     onClick={() => { setView('terms'); playSFX('click'); }}
+                                     onClick={() => { onNavigate('terms'); playSFX('click'); }}
                                      className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center"
                                    >
                                        {t('terms')} <ChevronRight size={16} />
@@ -728,6 +773,7 @@ export const Profile: React.FC = () => {
                                </div>
                            </section>
 
+                           {/* Version Info */}
                            <div className="text-center text-xs text-slate-600 font-mono">
                                Vantage App v1.4.3 (Build 20240320)
                                <br />

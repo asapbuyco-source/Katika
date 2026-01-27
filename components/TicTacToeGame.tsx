@@ -1,15 +1,11 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { ArrowLeft, X, Circle, Clock, Loader2, Wifi, Cpu, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
-import { GameTimer } from './GameTimer';
-import { TurnIndicator } from './TurnIndicator';
-import { ForfeitModal } from './ForfeitModal';
-import { useSocket } from '../services/context';
 
 interface TicTacToeGameProps {
   table: Table;
@@ -25,7 +21,6 @@ type WinningLine = number[] | null;
 const TURN_DURATION = 15; 
 
 export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
-  const { requestFullSync } = useSocket();
   const [board, setBoard] = useState<CellValue[]>(Array(9).fill(null));
   const [isXNext, setIsXNext] = useState(true); 
   const [winner, setWinner] = useState<CellValue>(null);
@@ -49,7 +44,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
   useEffect(() => {
       if (isP2P && socketGame) {
-          const serverBoard = socketGame.gameState?.board;
+          // Fix: Access board from gameState
+          const serverBoard = socketGame.gameState?.board || socketGame.board;
           if (serverBoard) setBoard(serverBoard);
           
           if (socketGame.turn) setIsXNext(socketGame.turn === socketGame.players[0]);
@@ -71,6 +67,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
               playSFX('notification');
               addLog("Draw! Rematch...", "scanning");
           } else {
+              // Reset
               if (serverBoard && serverBoard.every((c: any) => c === null) && (winner || isDraw)) {
                   setWinner(null);
                   setIsDraw(false);
@@ -104,7 +101,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   }, [isXNext, winner, isDraw]);
 
   const handleTimeout = () => {
-      if (winner || isDraw) return; 
       playSFX('error');
       if (isMyTurn) {
           addLog("Time Expired! You lost.", "alert");
@@ -115,21 +111,13 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
       }
   };
 
-  const makeBotMove = useCallback((currentBoard: CellValue[]) => {
-      if (winner || isDraw) return; 
-      const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
-      if (emptyIndices.length === 0) return;
-      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; 
-      processMove(targetIndex, mySymbol === 'X' ? 'O' : 'X');
-  }, [winner, isDraw, mySymbol]);
-
   useEffect(() => {
       if (isBotGame && !isMyTurn && !winner && !isDraw) {
           const delay = Math.random() * 1000 + 500;
           const timeout = setTimeout(() => makeBotMove(board), delay);
           return () => clearTimeout(timeout);
       }
-  }, [isBotGame, isMyTurn, board, winner, isDraw, makeBotMove]);
+  }, [isBotGame, isMyTurn, board, winner, isDraw]);
 
   const checkWinnerLocal = (squares: CellValue[]) => {
     const lines = [
@@ -163,54 +151,86 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
   };
 
   const processMove = (index: number, symbol: CellValue) => {
-      setBoard(prevBoard => {
-          const newBoard = [...prevBoard];
-          newBoard[index] = symbol;
-          
-          playSFX(symbol === mySymbol ? 'click' : 'move');
-          
-          const result = checkWinnerLocal(newBoard);
-          if (result) {
-              setWinner(result.winner);
-              setWinningLine(result.line);
-              if (result.winner === mySymbol) {
-                  playSFX('win');
-                  setTimeout(() => onGameEnd('win'), 2500);
-              } else {
-                  playSFX('loss');
-                  setTimeout(() => onGameEnd('loss'), 2500);
-              }
-          } else if (!newBoard.includes(null)) {
-              if (isP2P && socket) {
-                  socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
-              } else {
-                  const nextStreak = drawStreak + 1;
-                  setDrawStreak(nextStreak);
-                  setIsDraw(true); 
-                  if (nextStreak >= 3) {
-                      playSFX('loss');
-                      setTimeout(() => onGameEnd('quit'), 2500);
-                  } else {
-                      playSFX('notification');
-                      setTimeout(() => {
-                          setBoard(Array(9).fill(null));
-                          setWinner(null);
-                          setWinningLine(null);
-                          setIsDraw(false);
-                          setIsXNext(prev => !prev);
-                      }, 2000);
-                  }
-              }
+      const newBoard = [...board];
+      newBoard[index] = symbol;
+      setBoard(newBoard);
+      playSFX(symbol === mySymbol ? 'click' : 'move');
+      
+      const result = checkWinnerLocal(newBoard);
+      if (result) {
+          setWinner(result.winner);
+          setWinningLine(result.line);
+          if (result.winner === mySymbol) {
+              playSFX('win');
+              setTimeout(() => onGameEnd('win'), 2500);
           } else {
-              setIsXNext(prev => !prev);
+              playSFX('loss');
+              setTimeout(() => onGameEnd('loss'), 2500);
           }
-          
-          return newBoard;
-      });
+      } else if (!newBoard.includes(null)) {
+          if (isP2P && socket) {
+              socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
+          } else {
+              const nextStreak = drawStreak + 1;
+              setDrawStreak(nextStreak);
+              setIsDraw(true); 
+              if (nextStreak >= 3) {
+                  playSFX('loss');
+                  setTimeout(() => onGameEnd('quit'), 2500);
+              } else {
+                  playSFX('notification');
+                  setTimeout(() => {
+                      setBoard(Array(9).fill(null));
+                      setWinner(null);
+                      setWinningLine(null);
+                      setIsDraw(false);
+                      setIsXNext(prev => !prev);
+                  }, 2000);
+              }
+          }
+      } else {
+          setIsXNext(!isXNext);
+      }
+  };
+
+  const makeBotMove = (currentBoard: CellValue[]) => {
+      const emptyIndices = currentBoard.map((val, idx) => val === null ? idx : null).filter(val => val !== null) as number[];
+      if (emptyIndices.length === 0) return;
+      const targetIndex = emptyIndices[Math.floor(Math.random() * emptyIndices.length)]; 
+      processMove(targetIndex, mySymbol === 'X' ? 'O' : 'X');
   };
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        {/* FORFEIT MODAL */}
+        <AnimatePresence>
+          {showForfeitModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowForfeitModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
+                  >
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <AlertTriangle className="text-red-500 mb-4" size={32} />
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
+                          </p>
+                      </div>
+                      <div className="flex gap-3">
+                          <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 rounded-xl text-slate-300 font-bold">Cancel</button>
+                          <button onClick={() => onGameEnd('quit')} className="flex-1 py-3 bg-red-600 rounded-xl text-white font-bold">Forfeit</button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
         {/* Header */}
         <div className="w-full max-w-lg flex justify-between items-center mb-8 mt-4">
              <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
@@ -222,8 +242,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                  </div>
                  <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
              </div>
-             <div className="w-32 flex justify-end">
-                 <button onClick={requestFullSync} className="p-2 bg-blue-500/20 text-blue-400 rounded-lg hover:bg-blue-500/30" title="Sync State"><RefreshCw size={16} /></button>
+             <div className="w-32 hidden md:block">
+                 <AIReferee externalLog={refereeLog} />
              </div>
         </div>
 
@@ -239,7 +259,11 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     </div>
                 </div>
                 <span className="text-sm font-bold text-white">You</span>
-                {isXNext && <GameTimer seconds={timeLeft} isActive={true} />}
+                {isXNext && (
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${timeLeft <= 5 ? 'bg-red-500 text-white animate-pulse' : 'bg-gold-500 text-black'}`}>
+                        <Clock size={10} /> {timeLeft}s
+                    </div>
+                )}
             </div>
 
             <div className="flex flex-col items-center">
@@ -261,7 +285,11 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     </div>
                 </div>
                 <span className="text-sm font-bold text-white">{table.host?.id === user.id ? table.guest?.name : table.host?.name || "Opponent"}</span>
-                {!isXNext && <GameTimer seconds={timeLeft} isActive={true} />}
+                {!isXNext && (
+                    <div className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${timeLeft <= 5 ? 'bg-red-500 text-white animate-pulse' : 'bg-purple-500 text-white'}`}>
+                        <Clock size={10} /> {timeLeft}s
+                    </div>
+                )}
             </div>
         </div>
 
@@ -346,8 +374,6 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 )}
             </AnimatePresence>
         </div>
-
-        <ForfeitModal isOpen={showForfeitModal} onClose={() => setShowForfeitModal(false)} onConfirm={() => onGameEnd('quit')} />
     </div>
   );
 };

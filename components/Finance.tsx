@@ -1,14 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { Transaction } from '../types';
-import { getUserTransactions } from '../services/firebase'; 
+import { User, Transaction } from '../types';
+import { getUserTransactions, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment } from '../services/fapshi';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
-import { useUser } from '../services/context';
 
-export const Finance: React.FC = () => {
-  const { user } = useUser();
+interface FinanceProps {
+  user: User;
+  onTopUp: () => void;
+}
+
+export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   const { t } = useLanguage();
   const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
   const [amount, setAmount] = useState('');
@@ -24,14 +27,12 @@ export const Finance: React.FC = () => {
   // Fetch Transactions on Mount
   useEffect(() => {
       const fetchHistory = async () => {
-          if (!user || user.id.startsWith('guest-')) return;
+          if (user.id.startsWith('guest-')) return;
           const history = await getUserTransactions(user.id);
           setTransactions(history);
       };
       fetchHistory();
-  }, [user, activeTab]);
-
-  if (!user) return null;
+  }, [user.id, activeTab]);
 
   const handleDeposit = async () => {
       if(!amount) return;
@@ -51,9 +52,18 @@ export const Finance: React.FC = () => {
           setPaymentLink(response.link);
           window.open(response.link, '_blank');
           
-          // Use Backend Verification (Simulated via Webhook/Socket in this demo environment)
+          // --- SIMULATE PAYMENT CONFIRMATION ---
+          // This is for demonstration to show the user the flow works without real money
           setTimeout(async () => {
-              // Trigger refresh assuming backend handled it
+              if (!user.id.startsWith('guest-')) {
+                  await addUserTransaction(user.id, {
+                      type: 'deposit',
+                      amount: depositAmount,
+                      status: 'completed',
+                      date: new Date().toISOString()
+                  });
+              }
+              onTopUp(); // Refresh balance in parent
               setShowSuccess(true);
               setPaymentLink(null);
               setAmount('');
@@ -62,8 +72,9 @@ export const Finance: React.FC = () => {
               const history = await getUserTransactions(user.id);
               setTransactions(history);
               
+              // Hide success message after 3s
               setTimeout(() => setShowSuccess(false), 3000);
-          }, 5000); 
+          }, 3000); 
       } else {
           alert("Failed to initiate payment. Please try again.");
       }
@@ -75,12 +86,22 @@ export const Finance: React.FC = () => {
 
       setIsLoading(true);
       
-      // Simulate API Call to Backend Request
+      // Simulate API Call
       setTimeout(async () => {
           setIsLoading(false);
-          // Backend handles withdrawal request logic securely
-          alert('Withdrawal request sent for processing.');
+          if (!user.id.startsWith('guest-')) {
+              await addUserTransaction(user.id, {
+                  type: 'withdrawal',
+                  amount: -Number(amount),
+                  status: 'completed',
+                  date: new Date().toISOString()
+              });
+          }
+          alert('Withdrawal processed successfully! Funds sent to ' + phone);
           setAmount('');
+          // Refresh transactions
+          const history = await getUserTransactions(user.id);
+          setTransactions(history);
       }, 2000);
   };
 
@@ -97,7 +118,7 @@ export const Finance: React.FC = () => {
                    className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-royal-950 px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
                >
                    <CheckCircle size={20} />
-                   Deposit Processing... Check balance shortly.
+                   Deposit Successful! Balance Updated.
                </motion.div>
            )}
        </AnimatePresence>
@@ -107,7 +128,6 @@ export const Finance: React.FC = () => {
            <p className="text-slate-400">{t('manage_funds')}</p>
        </header>
 
-       {/* ... (Keep existing UI for Wallet Card, Tabs, Forms) ... */}
        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
            
            {/* LEFT COLUMN: WALLET CARD & ACTIONS */}
@@ -249,7 +269,8 @@ export const Finance: React.FC = () => {
                                        </div>
                                        <h3 className="text-xl font-bold text-white mb-2">{t('payment_initiated')}</h3>
                                        <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
-                                           Confirm the prompt on your phone.
+                                           Confirm the prompt on your phone. <br/>
+                                           <span className="text-xs text-slate-500">(Simulation: Wait 3 seconds)</span>
                                        </p>
                                        <div className="flex flex-col gap-3">
                                             <a 
@@ -390,7 +411,6 @@ export const Finance: React.FC = () => {
 
            {/* RIGHT COLUMN: INFO */}
            <div className="space-y-6">
-                {/* Stats */}
                 <div className="p-6 rounded-2xl bg-gradient-to-b from-royal-800 to-royal-900 border border-white/5">
                     <h3 className="font-bold text-white mb-4 flex items-center gap-2">
                         <History size={18} className="text-gold-400" /> {t('quick_stats')}
