@@ -1,13 +1,15 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
-import { GameRoom } from './GameRoom'; 
+import { GameRoom } from './GameRoom'; // Generic room, used for Ludo/Others if active
 import { CheckersGame } from './CheckersGame';
 import { DiceGame } from './DiceGame';
-import { TicTacToeGame } from './TicTacToeGame';
 import { ChessGame } from './ChessGame';
-import { CardGame } from './CardGame';
+// Note: CardGame, TicTacToeGame, PoolGame imports kept for compilation safety but logic will skip them
+import { CardGame } from './CardGame'; 
+import { TicTacToeGame } from './TicTacToeGame';
+import { PoolGame } from './PoolGame';
 import { Finance } from './Finance';
 import { Navigation } from './Navigation';
 import { LandingPage } from './LandingPage';
@@ -45,8 +47,11 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -151,13 +156,13 @@ const AppContent = () => {
   // Notification State
   const [unreadForum, setUnreadForum] = useState(false);
   const lastForumMsgId = useRef<string | null>(null);
-  const viewRef = useRef<ViewState>('landing'); // Ref to track view inside listeners
+  const viewRef = useRef<ViewState>('landing'); 
 
   // --- SOCKET.IO STATE ---
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
-  const [socketGame, setSocketGame] = useState<any>(null); // Simplified Socket Game State
+  const [socketGame, setSocketGame] = useState<any>(null); 
   const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   
@@ -165,36 +170,32 @@ const AppContent = () => {
   const [bypassConnection, setBypassConnection] = useState(false);
   const [connectionTime, setConnectionTime] = useState(0);
 
-  // Theme Hook
   const { theme } = useTheme();
 
   // Apply Theme CSS Variables
   useEffect(() => {
     const root = document.documentElement;
     if (theme === 'dark') {
-      root.style.setProperty('--c-royal-950', '15 10 31'); // #0f0a1f
-      root.style.setProperty('--c-royal-900', '26 16 60'); // #1a103c
-      root.style.setProperty('--c-royal-800', '45 27 105'); // #2d1b69
+      root.style.setProperty('--c-royal-950', '15 10 31'); 
+      root.style.setProperty('--c-royal-900', '26 16 60'); 
+      root.style.setProperty('--c-royal-800', '45 27 105'); 
       root.style.setProperty('--c-text-white', '255 255 255');
       root.style.setProperty('--c-text-base', '226 232 240');
     } else {
-      // Light Mode Mapping
-      root.style.setProperty('--c-royal-950', '248 250 252'); // Slate 50 (Main BG)
-      root.style.setProperty('--c-royal-900', '255 255 255'); // White (Cards)
-      root.style.setProperty('--c-royal-800', '226 232 240'); // Slate 200 (Accents/Borders)
-      root.style.setProperty('--c-text-white', '15 23 42'); // Slate 900 (Headings)
-      root.style.setProperty('--c-text-base', '51 65 85'); // Slate 700 (Body)
+      root.style.setProperty('--c-royal-950', '248 250 252'); 
+      root.style.setProperty('--c-royal-900', '255 255 255'); 
+      root.style.setProperty('--c-royal-800', '226 232 240'); 
+      root.style.setProperty('--c-text-white', '15 23 42'); 
+      root.style.setProperty('--c-text-base', '51 65 85'); 
     }
   }, [theme]);
 
-  // Update view ref whenever view changes (for the forum listener) and handle scrolling
   useEffect(() => {
       viewRef.current = currentView;
       if (currentView === 'forum') {
           setUnreadForum(false);
       }
       
-      // Auto-scroll to top when view changes
       const mainContainer = document.getElementById('main-scroll-container');
       if (mainContainer) {
           mainContainer.scrollTo({ top: 0, behavior: 'instant' });
@@ -203,16 +204,11 @@ const AppContent = () => {
       }
   }, [currentView]);
 
-  // 1. Initialize Socket Connection (Singleton Logic)
   useEffect(() => {
-    // Use Environment Variable or Fallback
     const SOCKET_URL = (import.meta as any).env?.VITE_SOCKET_URL || "https://katika-production.up.railway.app";
-    
     const timerInterval = setInterval(() => {
         setConnectionTime(prev => prev + 1);
     }, 1000);
-
-    console.log("Attempting socket connection to:", SOCKET_URL);
 
     const newSocket = io(SOCKET_URL, {
         reconnectionAttempts: 10,
@@ -240,7 +236,6 @@ const AppContent = () => {
     };
   }, []); 
 
-  // 1.1 Attach Game Listeners (Depends on socket & user to ensure fresh closure)
   useEffect(() => {
       if (!socket) return;
 
@@ -249,18 +244,13 @@ const AppContent = () => {
           setIsWaitingForSocketMatch(false);
           setBypassConnection(false);
           setOpponentDisconnected(false);
-          // Clear old results if this is a rematch or new game
           setGameResult(null);
           setRematchStatus('idle');
           setView('game');
       };
 
       const handleGameUpdate = (gameState: any) => {
-          // Guard: Only update if we are in game mode or waiting for one
-          // This prevents stray updates from resurrecting game state after user leaves
           if (viewRef.current !== 'game' && viewRef.current !== 'matchmaking') return;
-
-          // Robust state merging: Prioritize incoming roomId, fallback to id, then previous state
           setSocketGame((prev: any) => ({
               ...(prev || {}),
               ...gameState,
@@ -277,7 +267,6 @@ const AppContent = () => {
 
       const handleRematchStatus = ({ requestorId, status }: { requestorId: string, status: string }) => {
           if (status === 'requested') {
-              // Now 'user' is fresh because this effect depends on [user]
               if (requestorId !== user?.id) {
                   setRematchStatus('opponent_requested');
                   playSFX('notification');
@@ -317,16 +306,14 @@ const AppContent = () => {
           socket.off('rematch_status', handleRematchStatus);
           socket.off('game_over', handleGameOver);
       };
-  }, [socket, user]); // Re-bind when user or socket changes
+  }, [socket, user]); 
 
-  // 1.5 Automatic Rejoin
   useEffect(() => {
       if (socket && isConnected && user) {
           socket.emit('rejoin_game', { userProfile: user });
       }
   }, [socket, isConnected, user]);
 
-  // Prevent Refresh
   useEffect(() => {
       const handleBeforeUnload = (e: BeforeUnloadEvent) => {
           if (currentView === 'game' && socketGame && !gameResult) {
@@ -340,15 +327,12 @@ const AppContent = () => {
       return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [currentView, socketGame, gameResult]);
 
-  // 2. Automatic Fallback
   useEffect(() => {
       if (connectionTime >= 20 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
           setBypassConnection(true);
       }
   }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
 
-
-  // 5. Firebase Auth
   useEffect(() => {
       let unsubscribeSnapshot: (() => void) | undefined;
       let unsubscribeChallenges: (() => void) | undefined;
@@ -401,7 +385,6 @@ const AppContent = () => {
       };
   }, []);
 
-  // 6. Navigation Guard
   useEffect(() => {
       if (authLoading) return;
 
@@ -417,9 +400,16 @@ const AppContent = () => {
       }
   }, [user, currentView, authLoading]);
 
-  // Actions
   const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
       if (!user) return;
+      
+      // Filter out non-launch games just in case
+      const validGames = ['Dice', 'Checkers', 'Chess'];
+      if (!validGames.includes(gameType)) {
+          alert("This game is coming soon!");
+          return;
+      }
+
       if ((!isConnected || bypassConnection) && stake !== -1) {
           alert("Offline Mode active. P2P unavailable.");
           return;
@@ -468,11 +458,8 @@ const AppContent = () => {
   const handleAcceptChallenge = async () => {
       if (!incomingChallenge || !user) return;
       const gameId = incomingChallenge.id;
-      
       await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
-      
       startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
-      
       setIncomingChallenge(null);
   };
 
@@ -499,15 +486,11 @@ const AppContent = () => {
 
   const handleRematchRequest = () => {
       if (!user || !socket || !socketGame) return;
-      
       const stake = socketGame.stake || 0;
-      
-      // Balance Check
       if (user.balance < stake) {
           alert(`Insufficient funds for rematch. You need ${stake} FCFA.`);
           return;
       }
-
       setRematchStatus('requested');
       socket.emit('game_action', { 
           roomId: socketGame.roomId, 
@@ -532,7 +515,7 @@ const AppContent = () => {
       const opponentId = game.players.find((id: string) => id !== user.id);
       const hostProfile = game.profiles ? game.profiles[opponentId] : { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' };
       return {
-          id: game.roomId || game.id, // Prefer roomId, fallback to id
+          id: game.roomId || game.id,
           gameType: game.gameType,
           stake: game.stake,
           players: 2,
@@ -542,8 +525,6 @@ const AppContent = () => {
       };
   };
 
-  // --- RENDER ---
-
   if (authLoading) {
       return (
           <div className="min-h-screen bg-royal-950 flex items-center justify-center">
@@ -552,22 +533,11 @@ const AppContent = () => {
       );
   }
 
-  // Socket Connection Loading
   if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
               <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
               <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
-              <p className="text-slate-400 max-w-md mb-8">
-                  {connectionTime > 5 ? "Waking up server..." : "Establishing connection..."}
-                  <br/><span className="text-xs text-slate-600">({connectionTime}s)</span>
-                  {connectionError && (
-                      <span className="block text-red-400 text-xs mt-2 bg-red-900/20 p-1 rounded">
-                          {connectionError}
-                      </span>
-                  )}
-              </p>
-              
               <div className="flex flex-col gap-3">
                   <button 
                     onClick={() => { setConnectionError(null); socket?.connect(); }}
@@ -575,189 +545,56 @@ const AppContent = () => {
                   >
                       <RefreshCw size={16} /> Retry Connection
                   </button>
-                  <button 
-                    onClick={() => setBypassConnection(true)}
-                    className="text-white/50 hover:text-white text-sm underline mt-2"
-                  >
-                      Play Offline
-                  </button>
+                  <button onClick={() => setBypassConnection(true)} className="text-white/50 hover:text-white text-sm underline mt-2">Play Offline</button>
               </div>
           </div>
       );
   }
 
+  const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
+
   return (
     <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
       {user && currentView !== 'game' && currentView !== 'matchmaking' && (
-        <Navigation 
-            currentView={currentView} 
-            setView={setView} 
-            user={user} 
-            hasUnreadMessages={unreadForum}
-        />
+        <Navigation currentView={currentView} setView={setView} user={user} hasUnreadMessages={unreadForum} />
       )}
       
       <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
-        <GameErrorBoundary onReset={() => {
-            if (user) setView('dashboard');
-            else setView('landing');
-            window.location.reload();
-        }}>
-            {/* Removed mode="wait" to prevent exit animations from blocking new route mounting */}
+        <GameErrorBoundary onReset={() => { user ? setView('dashboard') : setView('landing'); window.location.reload(); }}>
             <AnimatePresence>
-            {currentView === 'landing' && (
-                <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <LandingPage onLogin={() => setView('auth')} onNavigate={setView} />
-                </motion.div>
-            )}
+            {currentView === 'landing' && <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></motion.div>}
+            {currentView === 'auth' && <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} /></motion.div>}
+            {currentView === 'dashboard' && user && <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></motion.div>}
+            {currentView === 'lobby' && user && <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} /></motion.div>}
+            {currentView === 'matchmaking' && matchmakingConfig && user && <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} /></motion.div>}
 
-            {currentView === 'auth' && (
-                <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} />
-                </motion.div>
-            )}
-
-            {currentView === 'dashboard' && user && (
-                <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <Dashboard 
-                    user={user} 
-                    setView={setView} 
-                    onTopUp={() => setView('finance')} 
-                    onQuickMatch={handleDashboardQuickMatch}
-                />
-                </motion.div>
-            )}
-
-            {currentView === 'lobby' && user && (
-                <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <Lobby 
-                    user={user} 
-                    setView={setView} 
-                    onQuickMatch={startMatchmaking} 
-                    initialGameId={preSelectedGame}
-                    onClearInitialGame={() => setPreSelectedGame(null)}
-                />
-                </motion.div>
-            )}
-
-            {currentView === 'matchmaking' && matchmakingConfig && user && (
-                <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <MatchmakingScreen
-                    user={user}
-                    gameType={matchmakingConfig.gameType}
-                    stake={matchmakingConfig.stake}
-                    onMatchFound={handleMatchFound}
-                    onCancel={cancelMatchmaking}
-                    isSocketMode={matchmakingConfig.stake !== -1}
-                />
-                </motion.div>
-            )}
-
-            {currentView === 'game' && user && (activeTable || socketGame) && (
+            {currentView === 'game' && user && activeGameTable && (
                 <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
-                    {/* Game-specific rendering */}
-                    {(activeTable?.gameType === 'Checkers' || socketGame?.gameType === 'Checkers') ? (
-                        <CheckersGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    ) : (activeTable?.gameType === 'Dice' || socketGame?.gameType === 'Dice') ? (
-                        <DiceGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    ) : (activeTable?.gameType === 'TicTacToe' || socketGame?.gameType === 'TicTacToe') ? (
-                        <TicTacToeGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    ) : (activeTable?.gameType === 'Chess' || socketGame?.gameType === 'Chess') ? (
-                        <ChessGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    ) : (activeTable?.gameType === 'Cards' || socketGame?.gameType === 'Cards') ? (
-                        <CardGame table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    ) : (
-                        <GameRoom table={activeTable || constructTableFromSocket(socketGame)} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} />
-                    )}
+                    {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                     // Fallback for Coming Soon games if somehow reached, or deprecated logic
+                     <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                 </motion.div>
             )}
 
-            {currentView === 'profile' && user && (
-                <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} className="w-full min-h-full">
-                <Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({...user, ...u})} onNavigate={setView} />
-                </motion.div>
-            )}
-
-            {currentView === 'finance' && user && (
-                <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <Finance user={user} onTopUp={() => {}} />
-                </motion.div>
-            )}
-
-            {currentView === 'how-it-works' && (
-                <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} />
-                </motion.div>
-            )}
-
-            {currentView === 'admin' && user && user.isAdmin && (
-                <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <AdminDashboard user={user} />
-                </motion.div>
-            )}
-
-            {currentView === 'help-center' && (
-                <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} />
-                </motion.div>
-            )}
-
-            {currentView === 'report-bug' && (
-                <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <ReportBug onBack={() => setView(user ? 'profile' : 'landing')} />
-                </motion.div>
-            )}
-
-            {currentView === 'terms' && (
-                <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} />
-                </motion.div>
-            )}
-
-            {currentView === 'privacy' && (
-                <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} />
-                </motion.div>
-            )}
-
-            {currentView === 'forum' && user && (
-                <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
-                <Forum user={user} />
-                </motion.div>
-            )}
-
+            {currentView === 'profile' && user && <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({...user, ...u})} onNavigate={setView} /></motion.div>}
+            {currentView === 'finance' && user && <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Finance user={user} onTopUp={() => {}} /></motion.div>}
+            {currentView === 'how-it-works' && <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></motion.div>}
+            {currentView === 'admin' && user?.isAdmin && <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AdminDashboard user={user} /></motion.div>}
+            {currentView === 'help-center' && <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'report-bug' && <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><ReportBug onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'terms' && <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'privacy' && <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'forum' && user && <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Forum user={user} /></motion.div>}
             </AnimatePresence>
         </GameErrorBoundary>
       </main>
 
-      {/* GLOBAL OVERLAYS */}
       <AnimatePresence>
-          {opponentDisconnected && (
-              <ReconnectionModal timeout={60} />
-          )}
-          {gameResult && (
-              <GameResultOverlay 
-                  result={gameResult.result} 
-                  amount={gameResult.amount}
-                  financials={gameResult.financials}
-                  onContinue={finalizeGameEnd}
-                  // Rematch Props (Only for P2P games with active socket)
-                  onRematch={socketGame && isConnected ? handleRematchRequest : undefined}
-                  rematchStatus={rematchStatus}
-                  stake={socketGame?.stake}
-                  userBalance={user?.balance}
-              />
-          )}
-          {incomingChallenge && (
-              <ChallengeRequestModal 
-                  challenge={incomingChallenge}
-                  onAccept={handleAcceptChallenge}
-                  onDecline={async () => {
-                      if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined');
-                      setIncomingChallenge(null);
-                  }}
-              />
-          )}
+          {opponentDisconnected && <ReconnectionModal timeout={60} />}
+          {gameResult && <GameResultOverlay result={gameResult.result} amount={gameResult.amount} financials={gameResult.financials} onContinue={finalizeGameEnd} onRematch={socketGame && isConnected ? handleRematchRequest : undefined} rematchStatus={rematchStatus} stake={socketGame?.stake} userBalance={user?.balance} />}
+          {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}
       </AnimatePresence>
     </div>
   );
