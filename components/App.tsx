@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -98,7 +98,7 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: 
             <motion.div 
                 initial={{ scale: 0.9, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
-                className="bg-royal-900 border border-red-500/50 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-900/20"
+                className="bg-royal-900 border border-red-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-900/50"
             >
                 {/* Progress Bar Background */}
                 <div className="absolute top-0 left-0 w-full h-1.5 bg-royal-800">
@@ -111,30 +111,32 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: 
                 </div>
                 
                 <div className="relative mb-6 inline-block">
-                    <div className="w-24 h-24 rounded-full border-4 border-royal-800 bg-royal-950 overflow-hidden relative">
-                        <img src={opponent?.avatar || "https://i.pravatar.cc/150?u=opp"} className="w-full h-full object-cover opacity-50 grayscale" alt="Opponent" />
+                    <div className="w-24 h-24 rounded-full border-4 border-red-500 bg-royal-950 overflow-hidden relative">
+                        <img src={opponent?.avatar || "https://i.pravatar.cc/150?u=opp"} className="w-full h-full object-cover opacity-70 grayscale" alt="Opponent" />
                     </div>
-                    <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full p-2 border border-red-500/30">
-                        <WifiOff size={24} className="text-red-500 animate-pulse" />
+                    <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full p-2 border border-red-500 shadow-lg animate-bounce">
+                        <WifiOff size={24} className="text-red-500" />
                     </div>
                 </div>
                 
-                <h2 className="text-xl font-display font-bold text-white mb-1">Connection Lost</h2>
-                <p className="text-gold-400 font-bold text-sm mb-4">Waiting for {opponent?.name || "Opponent"}</p>
+                <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
+                <p className="text-slate-300 text-sm mb-6">
+                    Waiting for <span className="text-gold-400 font-bold text-base">{opponent?.name || "Opponent"}</span> to reconnect...
+                </p>
                 
-                <div className="bg-white/5 rounded-xl p-4 border border-white/5 mb-6">
-                    <p className="text-slate-400 text-xs leading-relaxed">
-                        Per <span className="text-white font-bold">Vantage Fair Play Rules</span>, if your opponent does not reconnect before the timer expires, the match is forfeited.
+                <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20 mb-6">
+                    <p className="text-red-300 text-xs font-bold uppercase tracking-wider mb-1">
+                        Auto-Win Timer
                     </p>
-                    <div className="mt-3 pt-3 border-t border-white/5 text-center">
-                        <span className="text-xs text-slate-500 uppercase tracking-widest">Auto-Win In</span>
-                        <div className="text-3xl font-mono font-bold text-white mt-1 tabular-nums text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-orange-400">
-                            00:{timeLeft.toString().padStart(2, '0')}
-                        </div>
+                    <div className="text-4xl font-mono font-bold text-white tabular-nums">
+                        00:{timeLeft.toString().padStart(2, '0')}
                     </div>
+                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                        If they do not return before the timer expires, you will automatically win the match and the pot.
+                    </p>
                 </div>
 
-                <div className="flex gap-2 justify-center">
+                <div className="flex gap-2 justify-center items-center">
                     <Loader2 size={16} className="text-slate-500 animate-spin" />
                     <span className="text-xs text-slate-500 font-mono">Synchronizing Game State...</span>
                 </div>

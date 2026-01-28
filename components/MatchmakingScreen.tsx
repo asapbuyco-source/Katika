@@ -2,7 +2,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { User, Table, PlayerProfile } from '../types';
-import { Search, Lock, AlertCircle } from 'lucide-react';
+import { Search, Lock, AlertTriangle, Wifi, ShieldAlert } from 'lucide-react';
 import { findOrCreateMatch, subscribeToGame } from '../services/firebase';
 
 interface MatchmakingScreenProps {
@@ -189,17 +189,29 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
 
         </div>
 
-        {/* Action Buttons */}
-        <div className="mt-16 space-y-3">
+        {/* Warning Block */}
+        <div className="mt-16 w-full max-w-sm">
             {status !== 'found' && (
-                <motion.button 
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    onClick={onCancel}
-                    className="text-slate-500 hover:text-white text-sm font-medium transition-colors"
-                >
-                    Cancel Matchmaking
-                </motion.button>
+                <>
+                    <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
+                        <ShieldAlert className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                        <div className="space-y-1">
+                            <p className="text-xs font-bold text-yellow-500 uppercase tracking-wide">Do not leave this screen</p>
+                            <p className="text-[11px] text-yellow-200/70 leading-relaxed">
+                                Minimizing the app or closing the browser during matchmaking may result in a connection drop or forfeit of your stake.
+                            </p>
+                        </div>
+                    </div>
+
+                    <motion.button 
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        onClick={onCancel}
+                        className="w-full text-slate-500 hover:text-white text-sm font-medium transition-colors py-2"
+                    >
+                        Cancel Matchmaking
+                    </motion.button>
+                </>
             )}
         </div>
 
