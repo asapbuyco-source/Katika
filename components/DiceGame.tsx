@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw, BookOpen, X, AlertTriangle } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -93,10 +93,17 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
   const [scores, setScores] = useState({ me: 0, opp: 0 });
   const [round, setRound] = useState(1);
   const [phase, setPhase] = useState<'waiting' | 'rolling' | 'scored'>('waiting');
+  
+  // Use Refs for dice values to ensure stability in timeouts
+  const myDiceRef = useRef([1, 1]);
   const [myDice, setMyDice] = useState([1, 1]);
+  
+  const oppDiceRef = useRef([1, 1]);
   const [oppDice, setOppDice] = useState([1, 1]);
+  
   const [roundWinner, setRoundWinner] = useState<'me' | 'opp' | 'tie' | null>(null);
   const [showForfeitModal, setShowForfeitModal] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   
   const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
@@ -119,13 +126,23 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       onGameEnd('quit');
   };
 
+  // Helper to update both state and ref
+  const updateMyDice = (vals: number[]) => {
+      myDiceRef.current = vals;
+      setMyDice(vals);
+  };
+  const updateOppDice = (vals: number[]) => {
+      oppDiceRef.current = vals;
+      setOppDice(vals);
+  };
+
   // Improved Sync with Socket State
   useEffect(() => {
       if (isP2P && socketGame) {
           const amITurn = socketGame.turn === user.id;
           setIsMyTurn(amITurn);
           
-          const gs = socketGame.gameState || {}; // Access gameState safely
+          const gs = socketGame.gameState || {}; 
 
           if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
               setScores({
@@ -142,10 +159,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
           if (gs.roundRolls) {
               if (gs.roundRolls[user.id] && JSON.stringify(gs.roundRolls[user.id]) !== JSON.stringify(myDice)) {
-                  setMyDice(gs.roundRolls[user.id]);
+                  updateMyDice(gs.roundRolls[user.id]);
               }
               if (gs.roundRolls[opponentId] && JSON.stringify(gs.roundRolls[opponentId]) !== JSON.stringify(oppDice)) {
-                  setOppDice(gs.roundRolls[opponentId]);
+                  updateOppDice(gs.roundRolls[opponentId]);
               }
               // Check if I have already rolled this round
               if (gs.roundRolls[user.id]) {
@@ -155,8 +172,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
               // Reset dice visual if new round (roundRolls empty)
               // Only if we are not currently rolling (to avoid visual glitch mid-transition)
               if (phase !== 'rolling') {
-                  setMyDice([1,1]);
-                  setOppDice([1,1]);
+                  updateMyDice([1,1]);
+                  updateOppDice([1,1]);
               }
           }
 
@@ -197,8 +214,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                   addLog(`Round ${gs.currentRound} Started`);
                   setTimeLeft(TURN_TIME_LIMIT);
                   // Ensure dice are reset visually
-                  setMyDice([1,1]);
-                  setOppDice([1,1]);
+                  updateMyDice([1,1]);
+                  updateOppDice([1,1]);
               }
           }
           prevRoundState.current = gs.roundState;
@@ -262,7 +279,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
           setTimeout(() => {
               const d1 = Math.ceil(Math.random() * 6);
               const d2 = Math.ceil(Math.random() * 6);
-              setMyDice([d1, d2]);
+              updateMyDice([d1, d2]);
               setPhase('waiting'); 
               setIsMyTurn(false);
               setTimeout(botPlay, 1500); 
@@ -276,8 +293,9 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       setTimeout(() => {
           const d1 = Math.ceil(Math.random() * 6);
           const d2 = Math.ceil(Math.random() * 6);
-          setOppDice([d1, d2]);
-          evaluateRoundLocal([myDice[0], myDice[1]], [d1, d2]);
+          updateOppDice([d1, d2]);
+          // Use Ref values to ensure we aren't using stale closure state
+          evaluateRoundLocal(myDiceRef.current, [d1, d2]);
       }, 1000);
   };
 
@@ -325,14 +343,98 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
         <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
 
+        {/* FORFEIT MODAL */}
+        <AnimatePresence>
+          {showForfeitModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowForfeitModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
+                  >
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+                      <div className="flex flex-col items-center text-center mb-6">
+                          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                              <AlertTriangle className="text-red-500" size={32} />
+                          </div>
+                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                          <p className="text-sm text-slate-400">
+                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
+                          </p>
+                      </div>
+                      <div className="flex gap-3">
+                          <button 
+                            onClick={() => setShowForfeitModal(false)}
+                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
+                          >
+                              Stay
+                          </button>
+                          <button 
+                            onClick={handleQuit}
+                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
+                          >
+                              Forfeit
+                          </button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
+       {/* Rules Modal */}
+       <AnimatePresence>
+          {showRulesModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowRulesModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                              <BookOpen size={20} className="text-gold-400"/> Dice Duel Rules
+                          </h2>
+                          <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white">
+                              <X size={20}/>
+                          </button>
+                      </div>
+                      <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Objective</h3>
+                              <p>Be the first player to reach 3 points (win 3 rounds).</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Gameplay</h3>
+                              <ul className="list-disc pl-4 space-y-1">
+                                  <li>Each round, both players roll two dice.</li>
+                                  <li>The player with the higher total sum wins the round.</li>
+                                  <li>In case of a tie, no points are awarded, and the round is replayed or skipped depending on game mode.</li>
+                              </ul>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Controls</h3>
+                              <p>Swipe up on the dice area or tap the "ROLL DICE" button when it is your turn.</p>
+                          </section>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
+
         {/* --- HEADER --- */}
         <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
-            <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
-                <ArrowLeft size={20} />
-            </button>
+            <div className="flex items-center gap-2">
+                <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
+                    <ArrowLeft size={20} />
+                </button>
+                <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
+                    <BookOpen size={20} />
+                </button>
+            </div>
             <div className="flex flex-col items-center">
                 <div className="text-gold-400 font-bold text-xs uppercase tracking-widest mb-1 flex items-center gap-2">
-                    Round {round} of 5
+                    Round {round}
                 </div>
                 <div className="bg-black/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 flex items-center gap-4">
                     <div className="flex flex-col items-center">

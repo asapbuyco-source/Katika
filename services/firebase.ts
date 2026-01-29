@@ -338,7 +338,7 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
     // Simulation for guests
     if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
-        return `sim-match-${Date.now()}`;
+        return `sim-match-${gameType}-${Date.now()}`;
     }
 
     try {
@@ -398,11 +398,11 @@ export const findOrCreateMatch = async (user: User, gameType: string, stake: num
         return docRef.id;
     } catch (e) {
         console.error("Matchmaking error", e);
-        return `local-match-${Date.now()}`;
+        return `local-match-${gameType}-${Date.now()}`;
     }
 };
 
-export const createBotMatch = async (user: User, gameType: string): Promise<string> => {
+export const createBotMatch = async (user: User, gameType: string, difficulty?: string): Promise<string> => {
     const botProfile: PlayerProfile = {
         name: "Vantage AI",
         avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000",
@@ -412,7 +412,7 @@ export const createBotMatch = async (user: User, gameType: string): Promise<stri
 
     // If local user, return fake ID, data will be mocked by components
     if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
-        return `bot-match-${Date.now()}`;
+        return `bot-match-${gameType}-${Date.now()}${difficulty ? `-${difficulty}` : ''}`;
     }
 
     try {
@@ -434,29 +434,37 @@ export const createBotMatch = async (user: User, gameType: string): Promise<stri
             players: [user.id, 'bot'],
             createdAt: serverTimestamp(),
             turn: user.id,
-            gameState: {}
+            gameState: {
+                difficulty: difficulty || 'medium'
+            }
         };
 
         const docRef = await addDoc(collection(db, "games"), newGame);
         return docRef.id;
     } catch(e) {
-        return `bot-match-fallback-${Date.now()}`;
+        return `bot-match-fallback-${gameType}-${Date.now()}`;
     }
 };
 
 export const subscribeToGame = (gameId: string, callback: (data: any) => void) => {
     if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) {
+        const parts = gameId.split('-');
+        // Extract gameType from ID: bot-match-Chess-12345 or sim-match-Ludo-12345
+        const gameType = parts.length > 2 ? parts[2] : 'Dice';
+        const difficulty = parts.find(p => ['easy', 'medium', 'hard'].includes(p)) || 'medium';
         // Return dummy data for local matches
         setTimeout(() => {
             callback({
                 id: gameId,
                 status: 'active',
-                gameType: 'Dice', // Default
+                gameType: gameType,
                 stake: 100,
                 host: { id: 'local-host', name: 'You', avatar: 'https://i.pravatar.cc/150' },
                 guest: { id: 'bot', name: 'Vantage AI', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=bot' },
                 turn: 'local-host',
-                gameState: {}
+                gameState: {
+                    difficulty: difficulty
+                }
             });
         }, 500);
         return () => {};
@@ -472,15 +480,20 @@ export const subscribeToGame = (gameId: string, callback: (data: any) => void) =
 export const getGame = async (gameId: string): Promise<any> => {
     // Local Fallback
     if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) {
+        const parts = gameId.split('-');
+        // Extract gameType from ID: bot-match-Chess-12345 or sim-match-Ludo-12345
+        // Index 0: bot/sim/local, Index 1: match, Index 2: gameType
+        const gameType = parts.length > 2 ? parts[2] : 'Dice';
+        const difficulty = parts.find(p => ['easy', 'medium', 'hard'].includes(p)) || 'medium';
         return {
             id: gameId,
             status: 'active',
-            gameType: 'Dice',
+            gameType: gameType,
             stake: 0,
             host: { id: 'local-me', name: 'You', avatar: 'https://i.pravatar.cc/150' },
             guest: { id: 'bot', name: 'Vantage AI', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=bot' },
             turn: 'local-me',
-            gameState: {}
+            gameState: { difficulty }
         };
     }
 

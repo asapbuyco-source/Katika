@@ -419,7 +419,7 @@ const AppContent = () => {
       }
   }, [user, currentView, authLoading]);
 
-  const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string) => {
+  const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
       if (!user) return;
       
       const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
@@ -434,7 +434,7 @@ const AppContent = () => {
       }
       if (stake === -1) {
           try {
-              const gameId = await createBotMatch(user, gameType);
+              const gameId = await createBotMatch(user, gameType, difficulty);
               const gameData = await getGame(gameId);
               if (gameData) {
                   const table: Table = {
@@ -491,14 +491,21 @@ const AppContent = () => {
   };
 
   const finalizeGameEnd = () => {
+    // 1. Decline potential rematch if socket active
     if (socket && socketGame) {
         socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
     }
-    setGameResult(null);
+    
+    // 2. Clear all game-related state
     setActiveTable(null);
     setSocketGame(null);
+    setGameResult(null); // This hides the overlay
+    setMatchmakingConfig(null);
     setOpponentDisconnected(false);
     setRematchStatus('idle');
+    
+    // 3. Navigate back to dashboard
+    // Using setTimeout to allow state updates to settle if needed, but synchronous usually fine for React 18
     setView('dashboard');
   };
 

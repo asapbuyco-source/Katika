@@ -1,5 +1,4 @@
 
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -115,6 +114,69 @@ const ChessSquare = React.memo(({
 
     return true;
 });
+
+const getBestMove = (game: Chess, difficulty: string): { from: string, to: string, promotion?: string } | null => {
+    const moves = game.moves({ verbose: true });
+    if (moves.length === 0) return null;
+
+    if (difficulty === 'easy') {
+        return moves[Math.floor(Math.random() * moves.length)];
+    }
+
+    // Medium: Greedy (Best immediate capture)
+    if (difficulty === 'medium') {
+        // Sort moves by capture value
+        moves.sort((a, b) => {
+            const valA = a.captured ? (PIECE_VALUES[a.captured] || 0) : 0;
+            const valB = b.captured ? (PIECE_VALUES[b.captured] || 0) : 0;
+            return valB - valA; // Descending
+        });
+        // Add some randomness if no captures to avoid repetitive play
+        const bestValue = moves[0].captured ? (PIECE_VALUES[moves[0].captured] || 0) : 0;
+        const candidates = moves.filter(m => (m.captured ? PIECE_VALUES[m.captured] : 0) === bestValue);
+        return candidates[Math.floor(Math.random() * candidates.length)];
+    }
+
+    // Hard: Depth 2 (Minimize opponent's max response)
+    if (difficulty === 'hard') {
+        let bestScore = -Infinity;
+        let bestMoves: any[] = [];
+
+        // Simplified evaluation: Material Balance.
+        // We want to Maximize (My Material - Opponent Material).
+        
+        for (const move of moves) {
+            game.move(move);
+            
+            // Opponent's turn now. Find their best response (Minimizing our gain)
+            const oppMoves = game.moves({ verbose: true });
+            let maxOppResponse = -Infinity;
+            
+            // Heuristic: Opponent will capture best piece available
+            for (const oppMove of oppMoves) {
+                const val = oppMove.captured ? (PIECE_VALUES[oppMove.captured] || 0) : 0;
+                if (val > maxOppResponse) maxOppResponse = val;
+            }
+            // If no captures, response is 0 loss.
+            if (oppMoves.length === 0 || maxOppResponse === -Infinity) maxOppResponse = 0;
+
+            const myGain = move.captured ? (PIECE_VALUES[move.captured] || 0) : 0;
+            const netScore = myGain - maxOppResponse; // Simple material trade calc
+
+            game.undo();
+
+            if (netScore > bestScore) {
+                bestScore = netScore;
+                bestMoves = [move];
+            } else if (netScore === bestScore) {
+                bestMoves.push(move);
+            }
+        }
+        return bestMoves[Math.floor(Math.random() * bestMoves.length)];
+    }
+
+    return moves[Math.floor(Math.random() * moves.length)];
+};
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
@@ -283,16 +345,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   useEffect(() => {
       if (isBotGame && !isGameOver && game.turn() !== myColor) {
           const timer = setTimeout(() => {
-              const moves = game.moves({ verbose: true });
-              if (moves.length > 0) {
-                  // Simple AI: Random move for now
-                  const randomMove = moves[Math.floor(Math.random() * moves.length)];
-                  executeMove(randomMove.from, randomMove.to, randomMove.promotion);
+              const difficulty = socketGame?.gameState?.difficulty || 'medium';
+              const move = getBestMove(game, difficulty);
+              
+              if (move) {
+                  executeMove(move.from as Square, move.to as Square, move.promotion);
               }
           }, 1000); // 1 second think time
           return () => clearTimeout(timer);
       }
-  }, [game, isBotGame, isGameOver, myColor, executeMove]);
+  }, [game, isBotGame, isGameOver, myColor, executeMove, socketGame]);
 
   const onSquareClick = useCallback((square: Square) => {
     const { 
@@ -395,6 +457,55 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 </div>
             )}
         </AnimatePresence>
+
+        {/* Rules Modal - Added missing component */}
+        <AnimatePresence>
+          {showRulesModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
+                    onClick={() => setShowRulesModal(false)} 
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm" 
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} 
+                    className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]"
+                  >
+                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                              <BookOpen size={20} className="text-gold-400"/> Chess Rules
+                          </h2>
+                          <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white">
+                              <X size={20}/>
+                          </button>
+                      </div>
+                      <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Objective</h3>
+                              <p>Checkmate the opponent's King. The game ends when the King is under attack and cannot escape.</p>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Standard Movement</h3>
+                              <ul className="list-disc pl-4 space-y-1">
+                                  <li><strong>King:</strong> One square in any direction.</li>
+                                  <li><strong>Queen:</strong> Any number of squares in any direction.</li>
+                                  <li><strong>Rook:</strong> Horizontally or vertically.</li>
+                                  <li><strong>Bishop:</strong> Diagonally.</li>
+                                  <li><strong>Knight:</strong> L-shape (2 squares one way, 1 square perpendicular). Jumps over pieces.</li>
+                                  <li><strong>Pawn:</strong> Moves forward 1 (or 2 on first move). Captures diagonally.</li>
+                              </ul>
+                          </section>
+                          <section>
+                              <h3 className="text-white font-bold mb-1">Special Moves</h3>
+                              <p><strong className="text-gold-400">Promotion:</strong> When a pawn reaches the opposite end, it must be exchanged for a Queen, Rook, Bishop, or Knight.</p>
+                              <p><strong className="text-gold-400">Castling:</strong> Moving the King two squares towards a Rook, and the Rook jumping over the King. Allowed if neither piece has moved and the path is clear/safe.</p>
+                              <p><strong className="text-gold-400">En Passant:</strong> Capturing a pawn that has just moved two squares as if it had only moved one.</p>
+                          </section>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+       </AnimatePresence>
 
         {/* Header */}
         <div className="w-full max-w-2xl flex justify-between items-center mb-4 mt-2">

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers, Grid3x3, Disc } from 'lucide-react';
+import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers, Grid3x3, Disc, Zap } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
@@ -12,7 +12,7 @@ import { useLanguage } from '../services/i18n';
 interface LobbyProps {
   user: User;
   setView: (view: ViewState) => void;
-  onQuickMatch: (stake: number, gameType: string, specificGameId?: string) => void;
+  onQuickMatch: (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => void;
   initialGameId?: string | null;
   onClearInitialGame?: () => void;
 }
@@ -36,6 +36,9 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [neededAmount, setNeededAmount] = useState(0);
+
+  // Difficulty Modal
+  const [showDifficultyModal, setShowDifficultyModal] = useState(false);
 
   // Challenge Mode State
   const [showChallengeModal, setShowChallengeModal] = useState(false);
@@ -147,7 +150,21 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
   const handleBotPlay = async () => {
       playSFX('click');
       if (!selectedGame) return;
+      
+      // For Chess, show difficulty selector
+      if (selectedGame === 'Chess') {
+          setShowDifficultyModal(true);
+          return;
+      }
+      
       onQuickMatch(-1, selectedGame);
+  };
+
+  const handleDifficultySelect = (difficulty: string) => {
+      playSFX('click');
+      if (!selectedGame) return;
+      setShowDifficultyModal(false);
+      onQuickMatch(-1, selectedGame, undefined, difficulty);
   };
 
   const handleDeposit = async () => {
@@ -251,6 +268,57 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
               </div>
           </div>
       )}
+
+      {/* --- DIFFICULTY MODAL --- */}
+      <AnimatePresence>
+          {showDifficultyModal && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                    onClick={() => setShowDifficultyModal(false)}
+                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                    className="relative bg-royal-900 border border-purple-500 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+                  >
+                      <div className="text-center mb-6">
+                          <h2 className="text-xl font-bold text-white mb-1">Select Difficulty</h2>
+                          <p className="text-slate-400 text-sm">Choose your AI opponent level</p>
+                      </div>
+                      <div className="space-y-3">
+                          <button onClick={() => handleDifficultySelect('easy')} className="w-full p-4 bg-white/5 hover:bg-green-500/20 border border-white/10 hover:border-green-500 rounded-xl flex items-center gap-4 transition-all group">
+                              <div className="p-3 bg-green-500/20 text-green-400 rounded-lg group-hover:bg-green-500 group-hover:text-white transition-colors">
+                                  <Bot size={20} />
+                              </div>
+                              <div className="text-left">
+                                  <div className="font-bold text-white">Easy</div>
+                                  <div className="text-xs text-slate-400">Casual play</div>
+                              </div>
+                          </button>
+                          <button onClick={() => handleDifficultySelect('medium')} className="w-full p-4 bg-white/5 hover:bg-yellow-500/20 border border-white/10 hover:border-yellow-500 rounded-xl flex items-center gap-4 transition-all group">
+                              <div className="p-3 bg-yellow-500/20 text-yellow-400 rounded-lg group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                                  <Zap size={20} />
+                              </div>
+                              <div className="text-left">
+                                  <div className="font-bold text-white">Medium</div>
+                                  <div className="text-xs text-slate-400">Tactical play</div>
+                              </div>
+                          </button>
+                          <button onClick={() => handleDifficultySelect('hard')} className="w-full p-4 bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500 rounded-xl flex items-center gap-4 transition-all group">
+                              <div className="p-3 bg-red-500/20 text-red-400 rounded-lg group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                  <Swords size={20} />
+                              </div>
+                              <div className="text-left">
+                                  <div className="font-bold text-white">Hard</div>
+                                  <div className="text-xs text-slate-400">Grandmaster Mode</div>
+                              </div>
+                          </button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+      </AnimatePresence>
 
       {/* --- DEPOSIT MODAL --- */}
       <AnimatePresence>

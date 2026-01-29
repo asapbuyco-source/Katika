@@ -189,25 +189,32 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     } else {
         setForwardDir(-1);
         
-        if (!lidraughtsId && !isLidraughtsLoading) {
-            setIsLidraughtsLoading(true);
-            createLidraughtsGame(1).then(data => {
-                if (data && data.id) {
-                    setLidraughtsId(data.id);
-                    const initialPieces: Piece[] = [];
-                    let idCounter = 0;
-                    for (let r = 0; r < 8; r++) {
-                      for (let c = 0; c < 8; c++) {
-                        if ((r + c) % 2 === 1) { 
-                          if (r < 3) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
-                          else if (r > 4) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
-                        }
-                      }
-                    }
-                    setPieces(initialPieces);
+        // Initialize board locally regardless of AI connection success
+        if (pieces.length === 0) {
+            const initialPieces: Piece[] = [];
+            let idCounter = 0;
+            for (let r = 0; r < 8; r++) {
+              for (let c = 0; c < 8; c++) {
+                if ((r + c) % 2 === 1) { 
+                  if (r < 3) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
+                  else if (r > 4) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
                 }
-                setIsLidraughtsLoading(false);
-            });
+              }
+            }
+            setPieces(initialPieces);
+
+            if (!lidraughtsId && !isLidraughtsLoading) {
+                setIsLidraughtsLoading(true);
+                createLidraughtsGame(1).then(data => {
+                    if (data && data.id) {
+                        setLidraughtsId(data.id);
+                    }
+                    setIsLidraughtsLoading(false);
+                }).catch(() => {
+                    console.warn("Lidraughts API failed, falling back to local bot.");
+                    setIsLidraughtsLoading(false);
+                });
+            }
         }
     }
   }, [socketGame, user.id, isP2P, isBotGame]);
@@ -324,10 +331,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
   const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
   
   const getGlobalValidMoves = (player: 'me' | 'opponent', currentPieces: Piece[], specificId?: string | null) => {
-      // Use forwardDir from ref if called within callback, or state if rendering. 
-      // Since this is a helper, we pass dir or rely on closure. 
-      // We will access forwardDir via stateRef if called inside callback, but we need it pure.
-      // So we will pass forwardDir as arg.
       const dir = stateRef.current.forwardDir;
       
       let allMoves: Move[] = [];
@@ -366,52 +369,10 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       return { moves: finalMoves, hasJump: jumps.length > 0 };
   };
 
-  // Stable handlers using refs to prevent board re-renders
-  const handlePieceClick = useCallback((p: Piece) => {
-    const { turn, pieces, mustJumpFrom, selectedPieceId, isGameOver, isLidraughtsLoading } = stateRef.current;
+  const executeMove = useCallback((move: Move) => {
+      const { pieces, forwardDir, turn, timeRemaining, lidraughtsId, isGameOver } = stateRef.current;
+      if (isGameOver) return;
 
-    if (turn !== 'me' || p.player !== 'me' || isGameOver || isLidraughtsLoading) return;
-    
-    const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
-
-    if (mustJumpFrom && mustJumpFrom !== p.id) {
-        playSFX('error');
-        setHighlightedPieces([mustJumpFrom]);
-        setTimeout(() => setHighlightedPieces([]), 1500);
-        return;
-    }
-    
-    const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
-    if (hasJump && !canThisPieceJump) {
-        playSFX('error');
-        const mandatoryPieces = [...new Set(moves.filter(m => m.isJump).map(m => {
-            const piece = pieces.find(pi => pi.r === m.fromR && pi.c === m.fromC);
-            return piece ? piece.id : '';
-        }))].filter(id => id !== '');
-        
-        setHighlightedPieces(mandatoryPieces);
-        setTimeout(() => setHighlightedPieces([]), 1500);
-        return; 
-    }
-    
-    if (selectedPieceId === p.id && !mustJumpFrom) {
-        setSelectedPieceId(null); 
-        setValidMoves([]);
-    } else {
-        const pieceMoves = moves.filter(m => m.fromR === p.r && m.fromC === p.c);
-        if (pieceMoves.length > 0) {
-            setSelectedPieceId(p.id);
-            setValidMoves(pieceMoves);
-            playSFX('click');
-        }
-    }
-  }, []);
-
-  const handleMoveClick = useCallback((move: Move) => {
-      const { selectedPieceId, isGameOver, pieces, forwardDir, turn, timeRemaining, lidraughtsId } = stateRef.current;
-      if (!selectedPieceId || isGameOver) return;
-      
-      // Execute Move Logic (moved inside due to complex state deps)
       const pieceId = pieces.find(p => p.r === move.fromR && p.c === move.fromC)?.id;
       if (!pieceId) return;
 
@@ -431,7 +392,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       
       if (move.isJump) playSFX('capture'); else playSFX('move');
 
-      if (lidraughtsId && !isP2P) {
+      if (lidraughtsId && !isP2P && turn === 'me') {
           const fromSq = toNotation(move.fromR, move.fromC);
           const toSq = toNotation(move.r, move.c);
           const moveStr = move.isJump ? `${fromSq}x${toSq}` : `${fromSq}-${toSq}`;
@@ -501,11 +462,85 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
       }
   }, [isP2P, socket, socketGame, user.id]);
 
+  // Handle UI move clicks
+  const handleMoveClick = useCallback((move: Move) => {
+      const { selectedPieceId, isGameOver } = stateRef.current;
+      if (!selectedPieceId || isGameOver) return;
+      executeMove(move);
+  }, [executeMove]);
+
+  // Stable handlers using refs to prevent board re-renders
+  const handlePieceClick = useCallback((p: Piece) => {
+    const { turn, pieces, mustJumpFrom, selectedPieceId, isGameOver, isLidraughtsLoading } = stateRef.current;
+
+    if (turn !== 'me' || p.player !== 'me' || isGameOver || isLidraughtsLoading) return;
+    
+    const { moves, hasJump } = getGlobalValidMoves('me', pieces, mustJumpFrom);
+
+    if (mustJumpFrom && mustJumpFrom !== p.id) {
+        playSFX('error');
+        setHighlightedPieces([mustJumpFrom]);
+        setTimeout(() => setHighlightedPieces([]), 1500);
+        return;
+    }
+    
+    const canThisPieceJump = moves.some(m => m.fromR === p.r && m.fromC === p.c && m.isJump);
+    if (hasJump && !canThisPieceJump) {
+        playSFX('error');
+        const mandatoryPieces = [...new Set(moves.filter(m => m.isJump).map(m => {
+            const piece = pieces.find(pi => pi.r === m.fromR && pi.c === m.fromC);
+            return piece ? piece.id : '';
+        }))].filter(id => id !== '');
+        
+        setHighlightedPieces(mandatoryPieces);
+        setTimeout(() => setHighlightedPieces([]), 1500);
+        return; 
+    }
+    
+    if (selectedPieceId === p.id && !mustJumpFrom) {
+        setSelectedPieceId(null); 
+        setValidMoves([]);
+    } else {
+        const pieceMoves = moves.filter(m => m.fromR === p.r && m.fromC === p.c);
+        if (pieceMoves.length > 0) {
+            setSelectedPieceId(p.id);
+            setValidMoves(pieceMoves);
+            playSFX('click');
+        }
+    }
+  }, []);
+
+  // Local Bot Fallback (When API fails or is not used)
+  useEffect(() => {
+      const { isGameOver, lidraughtsId, isLidraughtsLoading } = stateRef.current;
+      
+      if (isBotGame && !lidraughtsId && !isGameOver && turn === 'opponent' && !isLidraughtsLoading) {
+          const timer = setTimeout(() => {
+              // Recalculate based on current state (via refs or fresh access)
+              const { pieces } = stateRef.current;
+              const { moves } = getGlobalValidMoves('opponent', pieces);
+              
+              if (moves.length > 0) {
+                  // Prioritize jumps for basic smarts
+                  const jumps = moves.filter(m => m.isJump);
+                  const candidates = jumps.length > 0 ? jumps : moves;
+                  const randomMove = candidates[Math.floor(Math.random() * candidates.length)];
+                  executeMove(randomMove);
+              } else {
+                  // No moves available for bot -> Player Wins
+                  setIsGameOver(true);
+                  onGameEnd('win');
+              }
+          }, 1000);
+          return () => clearTimeout(timer);
+      }
+  }, [turn, isBotGame, pieces]);
+
   const pieceMap = useMemo(() => new Map(pieces.map(p => [`${p.r},${p.c}`, p])), [pieces]);
   const validMoveMap = useMemo(() => new Map(validMoves.map(m => [`${m.r},${m.c}`, m])), [validMoves]);
 
   const getOpponentProfile = () => {
-      if (!isP2P) return { name: "Lidraughts AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=checkers" };
+      if (!isP2P) return { name: lidraughtsId ? "Lidraughts AI" : "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=checkers" };
       if (socketGame?.profiles) {
           const oppId = socketGame.players.find((id: string) => id !== user.id);
           return socketGame.profiles[oppId] || { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" };
