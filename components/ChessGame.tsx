@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
@@ -8,7 +9,6 @@ import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { Chess } from 'chess.js';
 import type { Square } from 'chess.js';
-import { createLichessAiGame, makeLichessMove, fetchLichessGameState } from '../services/lichess';
 
 interface ChessGameProps {
   table: Table;
@@ -26,6 +26,95 @@ const formatTime = (seconds: number) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
 };
 
+// --- Optimized Square Component ---
+const ChessSquare = React.memo(({ 
+    square, 
+    isDark, 
+    isSelected, 
+    isLastMove, 
+    isKingInCheck, 
+    piece, 
+    moveOption, 
+    onClick,
+    rankLabel,
+    fileLabel
+}: any) => {
+    
+    // Stable symbol map
+    const symbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+    
+    const handleClick = () => {
+        onClick(square);
+    };
+
+    return (
+        <div 
+            onClick={handleClick}
+            className={`
+                relative flex items-center justify-center w-full h-full
+                ${isDark ? 'bg-royal-900/60' : 'bg-slate-300/10'}
+                ${isSelected ? 'ring-inset ring-4 ring-gold-500/50' : ''}
+                ${isKingInCheck ? 'bg-red-500/50 animate-pulse' : ''}
+                ${isLastMove ? 'bg-yellow-500/20' : ''}
+                cursor-pointer
+            `}
+        >
+            {/* Move Hint / Option */}
+            {moveOption && (
+                <div 
+                    className="absolute inset-0 z-10 pointer-events-none"
+                    style={{ background: moveOption.background }}
+                />
+            )}
+
+            {/* Piece Render */}
+            {piece && (
+                <motion.span 
+                    layoutId={`piece-${square}`} // Framer Motion layout animation for smooth sliding
+                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
+                    className={`text-3xl md:text-5xl select-none relative z-20 ${piece.color === 'w' ? 'text-[#e2e8f0] drop-shadow-md' : 'text-[#a855f7] drop-shadow-md'}`}
+                    style={{ textShadow: piece.color === 'w' ? '0 2px 4px rgba(0,0,0,0.5)' : '0 2px 4px rgba(0,0,0,0.8)' }}
+                >
+                    {symbolMap[piece.type]}
+                </motion.span>
+            )}
+            
+            {/* Labels */}
+            {rankLabel && (
+                <span className="absolute top-0.5 left-0.5 text-[8px] text-slate-500 font-mono select-none">{rankLabel}</span>
+            )}
+            {fileLabel && (
+                <span className="absolute bottom-0.5 right-0.5 text-[8px] text-slate-500 font-mono select-none">{fileLabel}</span>
+            )}
+        </div>
+    );
+}, (prev, next) => {
+    // Custom Comparison for Performance
+    if (prev.square !== next.square) return false;
+    if (prev.isDark !== next.isDark) return false;
+    if (prev.isSelected !== next.isSelected) return false;
+    if (prev.isLastMove !== next.isLastMove) return false;
+    if (prev.isKingInCheck !== next.isKingInCheck) return false;
+    
+    // Deep check piece
+    const p1 = prev.piece;
+    const p2 = next.piece;
+    if (p1 !== p2) {
+        if (!p1 || !p2) return false;
+        if (p1.type !== p2.type || p1.color !== p2.color) return false;
+    }
+
+    // Check move option style
+    const m1 = prev.moveOption;
+    const m2 = next.moveOption;
+    if (m1 !== m2) {
+        if (!m1 || !m2) return false;
+        if (m1.background !== m2.background) return false;
+    }
+
+    return true;
+});
+
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
   const [game, setGame] = useState(new Chess());
   const [viewIndex, setViewIndex] = useState<number>(-1);
@@ -36,90 +125,51 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
   const [showRulesModal, setShowRulesModal] = useState(false);
   const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
   
-  // Lichess State
-  const [lichessId, setLichessId] = useState<string | null>(null);
-  const [isLichessLoading, setIsLichessLoading] = useState(false);
-
   const [isGameOver, setIsGameOver] = useState(false);
   const [pendingPromotion, setPendingPromotion] = useState<{from: Square, to: Square} | null>(null);
   const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
 
   const isP2P = !!socket && !!socketGame;
-  const isBotGame = !isP2P && table.guest?.id === 'bot';
+  const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest);
 
   const moveHistory = game.history();
   const displayGame = useMemo(() => {
-      if (viewIndex === moveHistory.length - 1) return game;
-      if (viewIndex === -1) return new Chess();
+      if (viewIndex === moveHistory.length - 1 || viewIndex === -1) return game;
       const tempGame = new Chess();
       for (let i = 0; i <= viewIndex; i++) {
           tempGame.move(moveHistory[i]);
       }
       return tempGame;
-  }, [game, viewIndex, moveHistory]);
+  }, [game, viewIndex, moveHistory.length]); // Optimized dep array
 
   const board = displayGame.board();
-  const isViewingLatest = viewIndex === moveHistory.length - 1;
+  
+  // State Ref to allow stable callbacks
+  const stateRef = useRef({
+      game,
+      viewIndex,
+      myColor,
+      selectedSquare,
+      optionSquares,
+      isGameOver,
+      socket,
+      socketGame,
+      timeRemaining
+  });
 
-  // Lichess Integration Hook
   useEffect(() => {
-      // If playing against Bot, initialize Lichess Game
-      if (isBotGame && !lichessId && !isLichessLoading) {
-          setIsLichessLoading(true);
-          createLichessAiGame(1, 'white').then(data => {
-              if (data && data.id) {
-                  setLichessId(data.id);
-                  setMyColor('w'); // Assuming we play white for simplicity against AI
-                  console.log("Lichess Game Started:", data.id);
-              }
-              setIsLichessLoading(false);
-          });
-      }
-  }, [isBotGame, lichessId]);
-
-  // Lichess Polling (Robust Stream Simulation)
-  useEffect(() => {
-      if (lichessId && !isGameOver) {
-          const interval = setInterval(async () => {
-              const state = await fetchLichessGameState(lichessId);
-              if (state && state.moves) {
-                  const moves = state.moves.split(' ');
-                  const newGame = new Chess();
-                  
-                  // Replay all moves
-                  let invalid = false;
-                  for (const m of moves) {
-                      if (!m) continue;
-                      try {
-                          // Lichess UCI (e2e4) vs Chess.js
-                          const from = m.substring(0, 2);
-                          const to = m.substring(2, 4);
-                          const promotion = m.length > 4 ? m.substring(4, 5) : undefined;
-                          newGame.move({ from, to, promotion });
-                      } catch (e) {
-                          // Fallback
-                          try { newGame.move(m); } catch(e2) { invalid = true; }
-                      }
-                  }
-
-                  if (!invalid) {
-                      // CRITICAL FIX: Only update local game state if server is AHEAD.
-                      // If we update when server is BEHIND (lag), the piece jumps back.
-                      const localMoves = game.history().length;
-                      const serverMoves = newGame.history().length;
-
-                      if (serverMoves > localMoves) {
-                          setGame(newGame);
-                          setViewIndex(newGame.history().length - 1);
-                          playSFX('move');
-                          checkGameOver(newGame);
-                      }
-                  }
-              }
-          }, 2000); // Poll every 2s
-          return () => clearInterval(interval);
-      }
-  }, [lichessId, game, isGameOver]);
+      stateRef.current = {
+          game,
+          viewIndex,
+          myColor,
+          selectedSquare,
+          optionSquares,
+          isGameOver,
+          socket,
+          socketGame,
+          timeRemaining
+      };
+  }, [game, viewIndex, myColor, selectedSquare, optionSquares, isGameOver, socket, socketGame, timeRemaining]);
 
   // Socket State Sync
   useEffect(() => {
@@ -154,7 +204,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       }
   }, [socketGame, user.id, isP2P]);
 
-  // Local Timer
   useEffect(() => {
       if (isGameOver) return;
       const interval = setInterval(() => {
@@ -181,35 +230,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       }
   };
 
-  const getMoveOptions = (square: Square) => {
-    if (!isViewingLatest) {
-        setOptionSquares({});
-        return false;
-    }
-    const sourcePiece = game.get(square);
-    if (!sourcePiece) return false;
-
-    const moves = game.moves({ square, verbose: true });
-    if (moves.length === 0) {
-      setOptionSquares({});
-      return false;
-    }
-    const newSquares: any = {};
-    moves.map((move: any) => {
-      const targetPiece = game.get(move.to);
-      newSquares[move.to] = {
-        background: targetPiece && targetPiece.color !== sourcePiece.color
-            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
-            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
-      };
-      return move;
-    });
-    newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
-    setOptionSquares(newSquares);
-    return true;
-  };
-
-  const executeMove = async (from: Square, to: Square, promotion?: string) => {
+  // Stable Move Execution
+  const executeMove = useCallback(async (from: Square, to: Square, promotion?: string) => {
+      const { game, isP2P, socket, socketGame, timeRemaining } = stateRef.current;
+      
       try {
           const moveAttempt = { from, to, promotion: promotion || 'q' };
           const move = game.move(moveAttempt);
@@ -226,7 +250,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
               if (move.captured) playSFX('capture'); else playSFX('move');
               checkGameOver(newGame);
 
-              // 1. P2P Logic
               if (isP2P && socket && socketGame) {
                   const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
                   const updatedTimers = {
@@ -246,25 +269,44 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                       }
                   });
               } 
-              // 2. Lichess Logic
-              else if (lichessId) {
-                  await makeLichessMove(lichessId, move.from + move.to + (move.promotion || ''));
-              }
           }
       } catch (e) {
           setSelectedSquare(null);
           setOptionSquares({});
       }
-  };
+  }, []);
 
-  const onSquareClick = (square: Square) => {
-    if (isGameOver || (isLichessLoading)) return;
+  // Local Bot AI Logic
+  useEffect(() => {
+      if (isBotGame && !isGameOver && game.turn() !== myColor) {
+          const timer = setTimeout(() => {
+              const moves = game.moves({ verbose: true });
+              if (moves.length > 0) {
+                  // Simple AI: Random move for now
+                  const randomMove = moves[Math.floor(Math.random() * moves.length)];
+                  executeMove(randomMove.from, randomMove.to, randomMove.promotion);
+              }
+          }, 1000); // 1 second think time
+          return () => clearTimeout(timer);
+      }
+  }, [game, isBotGame, isGameOver, myColor, executeMove]);
+
+  const onSquareClick = useCallback((square: Square) => {
+    const { 
+        game, viewIndex, myColor, selectedSquare, optionSquares, 
+        isGameOver
+    } = stateRef.current;
+
+    const moveHistory = game.history();
+    const isViewingLatest = viewIndex === moveHistory.length - 1 || viewIndex === -1;
+
+    if (isGameOver) return;
     if (!isViewingLatest) { setViewIndex(moveHistory.length - 1); return; }
 
     if (selectedSquare === square) { setSelectedSquare(null); setOptionSquares({}); return; }
 
-    const moveOptions = Object.keys(optionSquares);
-    if (selectedSquare && moveOptions.includes(square)) {
+    // Execute Move if option clicked
+    if (selectedSquare && optionSquares[square]) {
         const piece = game.get(selectedSquare);
         if (piece && piece.type === 'p') {
             const isLastRank = (piece.color === 'w' && square[1] === '8') || (piece.color === 'b' && square[1] === '1');
@@ -277,18 +319,35 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         return;
     }
 
+    // Select Piece
     const clickedPiece = game.get(square);
     if (clickedPiece) {
         if (clickedPiece.color !== myColor) return;
         if (game.turn() !== myColor) return;
+        
         setSelectedSquare(square);
-        getMoveOptions(square);
+        
+        // Calculate Options Inline to avoid state thrashing
+        const moves = game.moves({ square, verbose: true });
+        const newSquares: any = {};
+        if (moves.length > 0) {
+            moves.forEach((move: any) => {
+                const targetPiece = game.get(move.to);
+                newSquares[move.to] = {
+                    background: targetPiece && targetPiece.color !== clickedPiece.color
+                        ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
+                        : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
+                };
+            });
+            newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
+        }
+        setOptionSquares(newSquares);
         playSFX('click');
     } else {
         setSelectedSquare(null);
         setOptionSquares({});
     }
-  };
+  }, [executeMove]); // Stable handler
 
   const handleQuit = () => {
       if (isP2P && socket) {
@@ -297,24 +356,15 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       onGameEnd('quit');
   };
 
-  const getPieceComponent = (piece: { type: string, color: string } | null) => {
-      if (!piece) return null;
-      const symbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
-      return (
-          <motion.span 
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className={`text-3xl md:text-5xl select-none relative z-20 ${piece.color === 'w' ? 'text-[#e2e8f0] drop-shadow-md' : 'text-[#a855f7] drop-shadow-md'}`}
-              style={{ textShadow: piece.color === 'w' ? '0 2px 4px rgba(0,0,0,0.5)' : '0 2px 4px rgba(0,0,0,0.8)' }}
-          >
-              {symbolMap[piece.type]}
-          </motion.span>
-      );
-  };
-
   const opponentColor = myColor === 'w' ? 'b' : 'w';
-  const opponent = !isP2P ? { name: "Lichess AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" } 
+  const opponent = !isP2P ? { name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" } 
       : (socketGame?.profiles ? socketGame.profiles[socketGame.players.find((id: string) => id !== user.id)] : { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" });
+
+  // Get piece symbol for promotion modal
+  const getPieceSymbol = (type: string) => {
+      const map: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+      return map[type];
+  };
 
   return (
     <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
@@ -334,7 +384,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     onClick={() => { executeMove(pendingPromotion.from, pendingPromotion.to, type); setPendingPromotion(null); }}
                                     className="w-16 h-16 bg-white/10 hover:bg-gold-500/20 border border-white/20 hover:border-gold-500 rounded-xl flex items-center justify-center text-4xl transition-all"
                                 >
-                                    {getPieceComponent({ type, color: myColor })}
+                                    <span className={myColor === 'w' ? 'text-white' : 'text-purple-500'}>{getPieceSymbol(type)}</span>
                                 </button>
                             ))}
                         </div>
@@ -360,26 +410,20 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
        </div>
 
-       {/* Turn Indicator & Lichess Status */}
+       {/* Turn Indicator */}
        <div className="mb-2 flex flex-col items-center justify-center">
-            {isLichessLoading ? (
-                <div className="px-6 py-2 rounded-full bg-royal-800 text-gold-400 border border-gold-500/30 flex items-center gap-2">
-                    <RefreshCw className="animate-spin" size={16} /> Connecting to Lichess...
-                </div>
-            ) : (
-                <motion.div
-                    key={game.turn()} 
-                    initial={{ scale: 0.9 }}
-                    animate={{ scale: 1 }}
-                    className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest shadow-lg border transition-colors duration-300 ${
-                        game.turn() === myColor 
-                        ? 'bg-gold-500 text-royal-950 border-gold-400' 
-                        : 'bg-royal-800 text-slate-400 border-white/10'
-                    }`}
-                >
-                    {game.turn() === myColor ? "Your Turn" : "Opponent's Turn"}
-                </motion.div>
-            )}
+            <motion.div
+                key={game.turn()} 
+                initial={{ scale: 0.9 }}
+                animate={{ scale: 1 }}
+                className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest shadow-lg border transition-colors duration-300 ${
+                    game.turn() === myColor 
+                    ? 'bg-gold-500 text-royal-950 border-gold-400' 
+                    : 'bg-royal-800 text-slate-400 border-white/10'
+                }`}
+            >
+                {game.turn() === myColor ? "Your Turn" : "Opponent's Turn"}
+            </motion.div>
        </div>
 
        {/* OPPONENT BAR */}
@@ -390,7 +434,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <span className="text-sm font-bold text-white">{opponent.name}</span>
                     <span className="text-[10px] text-slate-400 font-bold">{opponentColor === 'w' ? 'White' : 'Black'}</span>
                 </div>
-                {lichessId && <a href={`https://lichess.org/${lichessId}`} target="_blank" className="text-xs text-blue-400 flex items-center gap-1"><ExternalLink size={10}/> Lichess</a>}
             </div>
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === opponentColor ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
                 <Clock size={16} />
@@ -399,7 +442,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
        </div>
 
        {/* Board */}
-       <div className={`relative w-full max-w-[600px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${isViewingLatest ? 'border-royal-800' : 'border-gold-500/50'} transition-colors duration-300`}>
+       <div className={`relative w-full max-w-[600px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${viewIndex === moveHistory.length - 1 || viewIndex === -1 ? 'border-royal-800' : 'border-gold-500/50'} transition-colors duration-300`}>
             {/* Board Grid */}
             <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10`}>
                 {board.map((row: any[], rowIndex: number) => 
@@ -417,43 +460,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                         const isKingInCheck = visualPiece?.type === 'k' && visualPiece.color === displayGame.turn() && displayGame.inCheck();
                         
                         let isLastMove = false;
-                        if (viewIndex >= 0 && moveHistory?.[viewIndex]) {
+                        if ((viewIndex === -1 && moveHistory.length > 0) || (viewIndex >= 0 && moveHistory?.[viewIndex])) {
                             const hist = displayGame.history({ verbose: true });
-                            const lastMoveDetails = hist?.[viewIndex];
+                            const idx = viewIndex === -1 ? hist.length - 1 : viewIndex;
+                            const lastMoveDetails = hist?.[idx];
                             if (lastMoveDetails && (lastMoveDetails.to === square || lastMoveDetails.from === square)) {
                                 isLastMove = true;
                             }
                         }
 
                         return (
-                            <div 
+                            <ChessSquare 
                                 key={square}
-                                onClick={() => onSquareClick(square)}
-                                className={`
-                                    relative flex items-center justify-center 
-                                    ${isDark ? 'bg-royal-900/60' : 'bg-slate-300/10'}
-                                    ${selectedSquare === square ? 'ring-inset ring-4 ring-gold-500/50' : ''}
-                                    ${isKingInCheck ? 'bg-red-500/50 animate-pulse' : ''}
-                                    ${isLastMove ? 'bg-yellow-500/20' : ''}
-                                    cursor-pointer
-                                `}
-                            >
-                                {option && (
-                                    <div 
-                                        className="absolute inset-0 z-10 pointer-events-none"
-                                        style={{ background: option.background }}
-                                    />
-                                )}
-
-                                {visualPiece && getPieceComponent(visualPiece)}
-                                
-                                {(actualCol === 0 && myColor === 'w') || (actualCol === 7 && myColor === 'b') ? (
-                                    <span className="absolute top-0.5 left-0.5 text-[8px] text-slate-500 font-mono select-none">{rank}</span>
-                                ) : null}
-                                {(actualRow === 7 && myColor === 'w') || (actualRow === 0 && myColor === 'b') ? (
-                                    <span className="absolute bottom-0.5 right-0.5 text-[8px] text-slate-500 font-mono select-none">{file}</span>
-                                ) : null}
-                            </div>
+                                square={square}
+                                isDark={isDark}
+                                isSelected={selectedSquare === square}
+                                isLastMove={isLastMove}
+                                isKingInCheck={isKingInCheck}
+                                piece={visualPiece}
+                                moveOption={option}
+                                onClick={onSquareClick}
+                                rankLabel={(actualCol === 0 && myColor === 'w') || (actualCol === 7 && myColor === 'b') ? rank : null}
+                                fileLabel={(actualRow === 7 && myColor === 'w') || (actualRow === 0 && myColor === 'b') ? file : null}
+                            />
                         );
                     })
                 )}
@@ -475,9 +504,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             </div>
        </div>
 
-        {/* ... Modal Code (Rules/Forfeit) hidden for brevity ... */}
-        {/* Forfeit Modal */}
-        <AnimatePresence>
+       {/* Forfeit Modal */}
+       <AnimatePresence>
           {showForfeitModal && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowForfeitModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
