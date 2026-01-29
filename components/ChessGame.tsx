@@ -1,4 +1,5 @@
 
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -154,7 +155,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
       isGameOver,
       socket,
       socketGame,
-      timeRemaining
+      timeRemaining,
+      isP2P
   });
 
   useEffect(() => {
@@ -167,9 +169,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
           isGameOver,
           socket,
           socketGame,
-          timeRemaining
+          timeRemaining,
+          isP2P
       };
-  }, [game, viewIndex, myColor, selectedSquare, optionSquares, isGameOver, socket, socketGame, timeRemaining]);
+  }, [game, viewIndex, myColor, selectedSquare, optionSquares, isGameOver, socket, socketGame, timeRemaining, isP2P]);
 
   // Socket State Sync
   useEffect(() => {
