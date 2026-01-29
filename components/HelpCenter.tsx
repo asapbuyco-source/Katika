@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, Search, ChevronDown, MessageCircle, CreditCard, Shield, Gamepad2, Wifi } from 'lucide-react';
@@ -107,7 +106,8 @@ export const HelpCenter: React.FC<HelpCenterProps> = ({ onBack }) => {
                                                         exit={{ height: 0, opacity: 0 }}
                                                         className="overflow-hidden"
                                                     >
-                                                        <div className="p-4 pt-0 text-slate-400 text-sm leading-relaxed border-t border-white/5">
+                                                        {/* Changed text-slate-400 to text-slate-200 for better visibility in light mode */}
+                                                        <div className="p-4 pt-0 text-slate-200 text-sm leading-relaxed border-t border-white/5">
                                                             {item.a}
                                                         </div>
                                                     </motion.div>
@@ -130,7 +130,7 @@ export const HelpCenter: React.FC<HelpCenterProps> = ({ onBack }) => {
             <div className="mt-12 bg-gradient-to-r from-royal-800 to-royal-900 rounded-2xl p-6 border border-white/5 flex flex-col md:flex-row items-center justify-between gap-6">
                 <div>
                     <h3 className="text-lg font-bold text-white mb-1">Still need help?</h3>
-                    <p className="text-sm text-slate-400">Our support team is available 24/7 via WhatsApp or Email.</p>
+                    <p className="text-sm text-slate-200">Our support team is available 24/7 via WhatsApp or Email.</p>
                 </div>
                 <button 
                     onClick={() => window.open('https://wa.me/237657960690', '_blank')}
