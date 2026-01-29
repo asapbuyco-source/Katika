@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -46,7 +46,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -82,16 +82,17 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
   }
 }
 
-// --- Enhanced Reconnection Modal ---
+// --- Enhanced Reconnection Modal (For Opponent Disconnection) ---
 const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: any }) => {
     const [timeLeft, setTimeLeft] = useState(timeout);
 
     useEffect(() => {
+        setTimeLeft(timeout); // Reset on mount or prop change
         const timer = setInterval(() => {
             setTimeLeft(prev => Math.max(0, prev - 1));
         }, 1000);
         return () => clearInterval(timer);
-    }, []);
+    }, [timeout]);
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
@@ -119,31 +120,66 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: 
                     </div>
                 </div>
                 
-                <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
+                <h2 className="text-xl font-display font-bold text-white mb-2">Opponent Offline</h2>
                 <p className="text-slate-300 text-sm mb-6">
-                    Waiting for <span className="text-gold-400 font-bold text-base">{opponent?.name || "Opponent"}</span> to reconnect...
+                    <span className="text-gold-400 font-bold">{opponent?.name || "Opponent"}</span> lost connection.
                 </p>
                 
                 <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20 mb-6">
                     <p className="text-red-300 text-xs font-bold uppercase tracking-wider mb-1">
-                        Auto-Win Timer
+                        Waiting for Reconnect
                     </p>
                     <div className="text-4xl font-mono font-bold text-white tabular-nums">
-                        00:{timeLeft.toString().padStart(2, '0')}
+                        {Math.floor(timeLeft / 60)}:{Math.floor(timeLeft % 60).toString().padStart(2, '0')}
                     </div>
                     <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                        If they do not return before the timer expires, you will automatically win the match and the pot.
+                        If they do not return, you will win by default.
                     </p>
                 </div>
 
                 <div className="flex gap-2 justify-center items-center">
                     <Loader2 size={16} className="text-slate-500 animate-spin" />
-                    <span className="text-xs text-slate-500 font-mono">Synchronizing Game State...</span>
+                    <span className="text-xs text-slate-500 font-mono">Syncing Game State...</span>
                 </div>
             </motion.div>
         </div>
     );
 };
+
+// --- Weak Network Modal (For Local Disconnection) ---
+const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-xl">
+        <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className="bg-royal-900 border border-yellow-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-yellow-900/50"
+        >
+            <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-yellow-500/30">
+                <WifiOff size={40} className="text-yellow-500" />
+            </div>
+            <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
+            <p className="text-slate-300 text-sm mb-6 leading-relaxed">
+                Your device has lost connection to the server. <br/>
+                <span className="text-yellow-400 font-bold">Please check your internet.</span>
+            </p>
+            
+            <div className="space-y-3">
+                <button 
+                    onClick={() => window.location.reload()}
+                    className="w-full py-3.5 bg-yellow-500 hover:bg-yellow-400 text-royal-950 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors"
+                >
+                    <RefreshCw size={18} /> Refresh Page
+                </button>
+                <button 
+                    onClick={onReconnect}
+                    className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors"
+                >
+                    Try Reconnecting
+                </button>
+            </div>
+        </motion.div>
+    </div>
+);
 
 // Internal app content wrapper to access useTheme context
 const AppContent = () => {
@@ -161,6 +197,7 @@ const AppContent = () => {
 
   // Disconnection State
   const [opponentDisconnected, setOpponentDisconnected] = useState(false);
+  const [opponentTimeout, setOpponentTimeout] = useState(240); // 4 minutes
   
   // State to handle game selection from Dashboard -> Lobby
   const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
@@ -278,8 +315,9 @@ const AppContent = () => {
           }));
       };
 
-      const handleOpponentDisconnected = () => {
+      const handleOpponentDisconnected = (data?: { timeoutSeconds?: number }) => {
           setOpponentDisconnected(true);
+          setOpponentTimeout(data?.timeoutSeconds || 240);
           setRematchStatus('declined');
           playSFX('error');
       };
@@ -491,22 +529,12 @@ const AppContent = () => {
   };
 
   const finalizeGameEnd = () => {
-    // 1. Decline potential rematch if socket active
     if (socket && socketGame) {
         socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
     }
     
-    // 2. Clear all game-related state
-    setActiveTable(null);
-    setSocketGame(null);
-    setGameResult(null); // This hides the overlay
-    setMatchmakingConfig(null);
-    setOpponentDisconnected(false);
-    setRematchStatus('idle');
-    
-    // 3. Navigate back to dashboard
-    // Using setTimeout to allow state updates to settle if needed, but synchronous usually fine for React 18
-    setView('dashboard');
+    // Safety Reload
+    window.location.reload();
   };
 
   const handleRematchRequest = () => {
@@ -558,6 +586,7 @@ const AppContent = () => {
       );
   }
 
+  // Initial Connection Screen (Only shown if never connected)
   if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
       return (
           <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
@@ -593,7 +622,6 @@ const AppContent = () => {
       
       <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
         <GameErrorBoundary onReset={() => { user ? setView('dashboard') : setView('landing'); window.location.reload(); }}>
-            {/* Added mode="wait" to ensure pages unmount before next one mounts, fixing scroll issues */}
             <AnimatePresence mode="wait">
             {currentView === 'landing' && <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></motion.div>}
             {currentView === 'auth' && <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} /></motion.div>}
@@ -610,7 +638,6 @@ const AppContent = () => {
                      activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                      activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} /> :
                      activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                     // Fallback for Coming Soon games if somehow reached, or deprecated logic
                      <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                 </motion.div>
             )}
@@ -629,7 +656,12 @@ const AppContent = () => {
       </main>
 
       <AnimatePresence>
-          {opponentDisconnected && <ReconnectionModal timeout={60} opponent={opponentProfile} />}
+          {/* Show when the opponent is the one disconnected */}
+          {opponentDisconnected && <ReconnectionModal timeout={opponentTimeout} opponent={opponentProfile} />}
+          
+          {/* Show when I am the one disconnected (Local Failure) */}
+          {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { setConnectionError(null); socket?.connect(); }} />}
+
           {gameResult && <GameResultOverlay result={gameResult.result} amount={gameResult.amount} financials={gameResult.financials} onContinue={finalizeGameEnd} onRematch={socketGame && isConnected ? handleRematchRequest : undefined} rematchStatus={rematchStatus} stake={socketGame?.stake} userBalance={user?.balance} />}
           {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}
       </AnimatePresence>

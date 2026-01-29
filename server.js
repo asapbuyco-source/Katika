@@ -546,12 +546,12 @@ io.on('connection', (socket) => {
             for (const [roomId, room] of rooms.entries()) {
                 if (room.players.includes(userId) && room.status === 'active') {
                     // Start Disconnect Timer
-                    console.log(`Starting 60s forfeit timer for ${userId}`);
+                    console.log(`Starting 240s forfeit timer for ${userId}`);
                     
                     // Notify other player immediately
                     io.to(roomId).emit('opponent_disconnected', { 
                         disconnectedUserId: userId,
-                        timeoutSeconds: 60 
+                        timeoutSeconds: 240 // 4 minutes
                     });
 
                     const timerId = setTimeout(() => {
@@ -560,7 +560,7 @@ io.on('connection', (socket) => {
                         const winner = room.players.find(id => id !== userId);
                         endGame(roomId, winner, 'Opponent Disconnected');
                         disconnectTimers.delete(userId);
-                    }, 60000); // 60 seconds
+                    }, 240000); // 240 seconds
 
                     disconnectTimers.set(userId, timerId);
                     break;
