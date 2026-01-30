@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+
+import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
 import { getUserTransactions, addUserTransaction } from '../services/firebase';
-import { initiateFapshiPayment } from '../services/fapshi';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle } from 'lucide-react';
+import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 
@@ -19,7 +20,9 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
   const [phone, setPhone] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [paymentLink, setPaymentLink] = useState<string | null>(null);
+  const [transId, setTransId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+  const pollIntervalRef = useRef<number | null>(null);
   
   // Real Data State
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -34,6 +37,13 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
       fetchHistory();
   }, [user.id, activeTab]);
 
+  // Cleanup polling on unmount
+  useEffect(() => {
+      return () => {
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      };
+  }, []);
+
   const handleDeposit = async () => {
       if(!amount) return;
       const depositAmount = parseInt(amount);
@@ -42,41 +52,67 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
           return;
       }
 
+      // Calculate Fee (3%)
+      const fee = Math.ceil(depositAmount * 0.03);
+      const totalToPay = depositAmount + fee;
+
       setIsLoading(true);
       
-      const response = await initiateFapshiPayment(depositAmount, user);
+      const response = await initiateFapshiPayment(totalToPay, user);
       
       setIsLoading(false);
       
       if (response && response.link) {
           setPaymentLink(response.link);
+          setTransId(response.transId);
           window.open(response.link, '_blank');
           
-          // --- SIMULATE PAYMENT CONFIRMATION ---
-          // This is for demonstration to show the user the flow works without real money
-          setTimeout(async () => {
-              if (!user.id.startsWith('guest-')) {
-                  await addUserTransaction(user.id, {
-                      type: 'deposit',
-                      amount: depositAmount,
-                      status: 'completed',
-                      date: new Date().toISOString()
-                  });
+          // Start Polling for Real Payment Status
+          if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          
+          pollIntervalRef.current = window.setInterval(async () => {
+              if (!response.transId) return;
+              
+              const status = await checkPaymentStatus(response.transId);
+              
+              if (status === 'SUCCESSFUL') {
+                  if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+                  
+                  if (!user.id.startsWith('guest-')) {
+                      await addUserTransaction(user.id, {
+                          type: 'deposit',
+                          amount: depositAmount, // Credit only the base amount
+                          status: 'completed',
+                          date: new Date().toISOString()
+                      });
+                  }
+                  
+                  onTopUp(); // Refresh balance in parent
+                  setShowSuccess(true);
+                  setPaymentLink(null);
+                  setTransId(null);
+                  setAmount('');
+                  
+                  // Refresh local history
+                  const history = await getUserTransactions(user.id);
+                  setTransactions(history);
+                  
+                  setTimeout(() => setShowSuccess(false), 3000);
+              } else if (status === 'FAILED' || status === 'EXPIRED') {
+                  if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+                  alert("Payment Failed or Expired. Please try again.");
+                  setPaymentLink(null);
+                  setTransId(null);
               }
-              onTopUp(); // Refresh balance in parent
-              setShowSuccess(true);
-              setPaymentLink(null);
-              setAmount('');
-              
-              // Refresh local history
-              const history = await getUserTransactions(user.id);
-              setTransactions(history);
-              
-              // Hide success message after 3s
-              setTimeout(() => setShowSuccess(false), 3000);
-          }, 3000); 
+          }, 5000); // Check every 5 seconds
+
+          // Stop polling after 5 minutes
+          setTimeout(() => {
+              if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+          }, 300000);
+
       } else {
-          alert("Failed to initiate payment. Please try again.");
+          alert("Failed to initiate payment. Please check your connection.");
       }
   };
 
@@ -86,24 +122,36 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
       setIsLoading(true);
       
-      // Simulate API Call
+      // Withdrawals are usually manual or require a different API call
+      // For now, we record the request
       setTimeout(async () => {
           setIsLoading(false);
           if (!user.id.startsWith('guest-')) {
               await addUserTransaction(user.id, {
                   type: 'withdrawal',
                   amount: -Number(amount),
-                  status: 'completed',
+                  status: 'pending', // Pending manual review or auto-process
                   date: new Date().toISOString()
               });
           }
-          alert('Withdrawal processed successfully! Funds sent to ' + phone);
+          alert('Withdrawal request submitted for ' + phone);
           setAmount('');
           // Refresh transactions
           const history = await getUserTransactions(user.id);
           setTransactions(history);
-      }, 2000);
+      }, 1500);
   };
+
+  const cancelPayment = () => {
+      setPaymentLink(null);
+      setTransId(null);
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+  };
+
+  // Helper values for UI
+  const inputAmount = parseInt(amount || '0');
+  const fee = Math.ceil(inputAmount * 0.03);
+  const total = inputAmount + fee;
 
   return (
     <div className="p-6 max-w-5xl mx-auto min-h-screen pb-24 md:pb-6 relative">
@@ -168,7 +216,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                    {['deposit', 'withdraw', 'history'].map(tab => (
                        <button
                            key={tab}
-                           onClick={() => { setActiveTab(tab as any); setPaymentLink(null); }}
+                           onClick={() => { setActiveTab(tab as any); cancelPayment(); }}
                            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all capitalize ${
                                activeTab === tab 
                                ? 'bg-royal-800 text-white shadow-lg' 
@@ -252,13 +300,38 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                </div>
                                            </div>
 
+                                           {/* Charge Summary */}
+                                           {inputAmount > 0 && (
+                                               <div className="p-4 bg-royal-950/50 rounded-xl border border-white/5 space-y-2">
+                                                   <div className="flex justify-between text-sm">
+                                                       <span className="text-slate-400">Deposit Amount</span>
+                                                       <span className="font-bold text-white">{inputAmount.toLocaleString()} FCFA</span>
+                                                   </div>
+                                                   <div className="flex justify-between text-sm">
+                                                       <span className="text-slate-400">Processing Fee (3%)</span>
+                                                       <span className="font-bold text-red-400">+{fee.toLocaleString()} FCFA</span>
+                                                   </div>
+                                                   <div className="border-t border-white/10 my-1"></div>
+                                                   <div className="flex justify-between text-base font-bold">
+                                                       <span className="text-white">Total Charge</span>
+                                                       <span className="text-gold-400">{total.toLocaleString()} FCFA</span>
+                                                   </div>
+                                                   <div className="flex items-start gap-2 mt-2 p-2 bg-yellow-500/10 rounded-lg">
+                                                       <Info size={14} className="text-yellow-500 shrink-0 mt-0.5" />
+                                                       <p className="text-[10px] text-yellow-200/80 leading-tight">
+                                                           A 3% fee is applied by the payment processor. You will be charged {total.toLocaleString()} FCFA but your wallet will be credited with {inputAmount.toLocaleString()} FCFA.
+                                                       </p>
+                                                   </div>
+                                               </div>
+                                           )}
+
                                            <button 
                                                onClick={handleDeposit}
                                                disabled={isLoading || !amount}
                                                className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                            >
                                                {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
-                                               {isLoading ? t('processing') : t('proceed_payment')}
+                                               {isLoading ? t('processing') : `${t('proceed_payment')} (${total.toLocaleString()} FCFA)`}
                                            </button>
                                        </div>
                                    </>
@@ -269,8 +342,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                        </div>
                                        <h3 className="text-xl font-bold text-white mb-2">{t('payment_initiated')}</h3>
                                        <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
-                                           Confirm the prompt on your phone. <br/>
-                                           <span className="text-xs text-slate-500">(Simulation: Wait 3 seconds)</span>
+                                           Checking transaction status... <br/>
+                                           <span className="text-xs text-slate-500">Transaction ID: {transId}</span>
                                        </p>
                                        <div className="flex flex-col gap-3">
                                             <a 
@@ -282,7 +355,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                 <ExternalLink size={18} /> {t('open_payment')}
                                             </a>
                                             <button 
-                                                onClick={() => setPaymentLink(null)}
+                                                onClick={cancelPayment}
                                                 className="text-slate-400 text-sm hover:text-white"
                                             >
                                                 {t('cancel_pay')}

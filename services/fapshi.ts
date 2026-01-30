@@ -1,9 +1,9 @@
 
 import { User } from '../types';
 
-const FAPSHI_API_KEY = "FAK_TEST_cb0744684a45502c5ec0";
-const FAPSHI_USER_TOKEN = "8d4b58dd-eeae-4eee-8708-c02f366a7d14";
-const BASE_URL = "https://live.fapshi.com/initiate-pay"; 
+const FAPSHI_API_KEY = "FAK_b3f06f6e729eae34cb17800b55fac2fb";
+const FAPSHI_USER_TOKEN = "121f2619-e47f-4c26-8bbb-479d70eafe4b";
+const BASE_URL = "https://live.fapshi.com"; 
 
 export interface PaymentResponse {
     link: string;
@@ -12,7 +12,7 @@ export interface PaymentResponse {
 
 export const initiateFapshiPayment = async (amount: number, user: User): Promise<PaymentResponse | null> => {
     try {
-        const response = await fetch(BASE_URL, {
+        const response = await fetch(`${BASE_URL}/initiate-pay`, {
             method: 'POST',
             headers: {
                 'apiuser': FAPSHI_USER_TOKEN,
@@ -23,12 +23,13 @@ export const initiateFapshiPayment = async (amount: number, user: User): Promise
                 amount: amount,
                 email: user.id.includes('@') ? user.id : 'guest@vantageludo.cm',
                 userId: user.id,
-                redirectUrl: window.location.href // Redirect back to app after payment
+                redirectUrl: window.location.href // Works dynamically on any domain
             })
         });
 
         if (!response.ok) {
-            // If CORS fails or API errors, we throw to hit the catch block for simulation
+            const errorText = await response.text();
+            console.error("Fapshi API Error:", errorText);
             throw new Error(`Fapshi API Error: ${response.statusText}`);
         }
 
@@ -38,18 +39,26 @@ export const initiateFapshiPayment = async (amount: number, user: User): Promise
             transId: data.transId
         };
     } catch (error) {
-        console.warn("Fapshi Payment Initiation failed (likely CORS or Network). Switching to Simulation Mode.", error);
-        
-        // --- SIMULATION FALLBACK ---
-        // In a frontend-only preview environment, calling payment APIs often fails due to CORS.
-        // We simulate a successful response to ensure the "Program" flow works for the user.
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                resolve({
-                    link: `https://fapshi.com/pay/simulated-${Date.now()}`, 
-                    transId: `sim-${Date.now()}`
-                });
-            }, 1500);
+        console.error("Fapshi Payment Initiation failed:", error);
+        return null;
+    }
+};
+
+export const checkPaymentStatus = async (transId: string): Promise<'SUCCESSFUL' | 'FAILED' | 'PENDING' | 'EXPIRED' | null> => {
+    try {
+        const response = await fetch(`${BASE_URL}/payment-status/${transId}`, {
+            method: 'GET',
+            headers: {
+                'apiuser': FAPSHI_USER_TOKEN,
+                'apikey': FAPSHI_API_KEY
+            }
         });
+        
+        if (!response.ok) return null;
+        const data = await response.json();
+        return data.status; 
+    } catch (error) {
+        console.error("Status check failed", error);
+        return null;
     }
 };

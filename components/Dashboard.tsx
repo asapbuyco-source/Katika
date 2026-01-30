@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
-import { getUserTransactions, subscribeToGameConfigs } from '../services/firebase';
+import { getUserTransactions, subscribeToGameConfigs, subscribeToGlobalWinners } from '../services/firebase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 
@@ -19,41 +19,42 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const [gameOverrides, setGameOverrides] = useState<Record<string, string>>({});
 
-  // Simulated Live Winners
-  const [winners, setWinners] = useState([
-      { name: "Player_992", amount: "5,000", game: "Dice", avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}` }
-  ]);
+  // Real Live Winners
+  const [winners, setWinners] = useState<any[]>([]);
 
   useEffect(() => {
-      // Initialize dynamic winners
-      const generateWinner = () => ({
-          name: `Player_${Math.floor(Math.random() * 9000) + 1000}`,
-          amount: (Math.floor(Math.random() * 50) * 100).toLocaleString(),
-          game: ['Dice', 'Checkers', 'Chess', 'Ludo'][Math.floor(Math.random() * 4)],
-          avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Math.random()}`
+      // 1. Subscribe to Real Winners
+      const unsubWinners = subscribeToGlobalWinners((newWinners) => {
+          setWinners(newWinners);
+          setCurrentWinnerIndex(0);
       });
-      
-      const interval = setInterval(() => {
-          setWinners(prev => [generateWinner(), ...prev].slice(0, 5));
-          setCurrentWinnerIndex(0); // Reset to show newest
-      }, 5000);
 
-      // Fetch Real User History
+      // 2. Fetch User History
       const fetchHistory = async () => {
-          if (user.id.startsWith('guest-')) return;
+          if (!user.id) return;
           const history = await getUserTransactions(user.id);
           setRecentTransactions(history.slice(0, 3));
       };
       fetchHistory();
 
-      // Subscribe to Game Configs (Admin Control)
-      const unsub = subscribeToGameConfigs(setGameOverrides);
+      // 3. Subscribe to Game Configs (Admin Control)
+      const unsubConfigs = subscribeToGameConfigs(setGameOverrides);
 
       return () => {
-          clearInterval(interval);
-          unsub();
+          unsubWinners();
+          unsubConfigs();
       };
   }, [user.id]);
+
+  // Rotate Winners Ticker
+  useEffect(() => {
+      if (winners.length > 1) {
+          const interval = setInterval(() => {
+              setCurrentWinnerIndex(prev => (prev + 1) % winners.length);
+          }, 5000);
+          return () => clearInterval(interval);
+      }
+  }, [winners]);
 
   const games = [
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', defaultStatus: 'active' },
@@ -78,7 +79,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
       show: { y: 0, opacity: 1 }
   };
 
-  // We use a plain div as root to isolate the motion context from the parent App wrapper
+  const currentWinner = winners[currentWinnerIndex];
+
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 pb-24 md:pb-6">
       <motion.div
@@ -106,30 +108,30 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
         </header>
 
         {/* Live Winners Ticker */}
-        <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
-            <div className="flex items-center gap-2 text-gold-400 font-bold text-[10px] md:text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-3 border-r border-white/10 shrink-0">
-                <Flame size={12} className="animate-bounce" /> {t('live_wins')}
-            </div>
-            <div className="flex-1 h-6 relative overflow-hidden">
-                <AnimatePresence mode='wait'>
-                    {winners.length > 0 && (
+        {winners.length > 0 && currentWinner && (
+            <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
+                <div className="flex items-center gap-2 text-gold-400 font-bold text-[10px] md:text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-3 border-r border-white/10 shrink-0">
+                    <Flame size={12} className="animate-bounce" /> {t('live_wins')}
+                </div>
+                <div className="flex-1 h-6 relative overflow-hidden">
+                    <AnimatePresence mode='wait'>
                         <motion.div
-                            key={winners[0].name + Date.now()} 
+                            key={currentWinnerIndex} 
                             initial={{ y: 20, opacity: 0 }}
                             animate={{ y: 0, opacity: 1 }}
                             exit={{ y: -20, opacity: 0 }}
                             className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
                         >
-                            <img src={winners[0].avatar} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
-                            <span className="text-white font-bold truncate max-w-[80px]">{winners[0].name}</span>
+                            <img src={currentWinner.avatar || "https://i.pravatar.cc/150"} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
+                            <span className="text-white font-bold truncate max-w-[100px]">{currentWinner.name}</span>
                             <span className="shrink-0">{t('won')}</span>
-                            <span className="text-gold-400 font-mono font-bold shrink-0">{winners[0].amount} FCFA</span>
-                            <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {winners[0].game}</span>
+                            <span className="text-gold-400 font-mono font-bold shrink-0">{currentWinner.amount} FCFA</span>
+                            <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {currentWinner.game}</span>
                         </motion.div>
-                    )}
-                </AnimatePresence>
-            </div>
-        </motion.div>
+                    </AnimatePresence>
+                </div>
+            </motion.div>
+        )}
 
         {/* Bento Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

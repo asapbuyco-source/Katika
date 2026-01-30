@@ -10,7 +10,8 @@ import {
   sendPasswordResetEmail,
   updateEmail,
   deleteUser,
-  User as FirebaseUser
+  User as FirebaseUser,
+  signInAnonymously
 } from "firebase/auth";
 import { 
   getFirestore, 
@@ -52,96 +53,37 @@ const googleProvider = new GoogleAuthProvider();
 // --- AUTH ---
 
 export const signInWithGoogle = async () => {
-  try {
     const result = await signInWithPopup(auth, googleProvider);
     return result.user;
-  } catch (error: any) {
-    console.warn("Google Sign In Error (Falling back to simulation):", error);
-    // Simulate successful login for demo/preview environments where Google Auth might be blocked
-    const mockUser: Partial<FirebaseUser> = {
-        uid: `google-user-${Date.now()}`,
-        displayName: "Google User (Sim)",
-        photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${Date.now()}`,
-        email: "demo.user@gmail.com",
-        emailVerified: true,
-        isAnonymous: false,
-    };
-    return mockUser as FirebaseUser;
-  }
 };
 
 export const registerWithEmail = async (email: string, pass: string) => {
-    try {
-        const result = await createUserWithEmailAndPassword(auth, email, pass);
-        return result.user;
-    } catch (error: any) {
-        console.warn("Registration Error (Falling back to simulation):", error);
-        // Return simulated user for demo purposes if real auth fails
-        return {
-            uid: `email-user-${Date.now()}`,
-            displayName: email.split('@')[0],
-            email: email,
-            emailVerified: false,
-            isAnonymous: false,
-            photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
-        } as FirebaseUser;
-    }
+    const result = await createUserWithEmailAndPassword(auth, email, pass);
+    return result.user;
 };
 
 export const loginWithEmail = async (email: string, pass: string) => {
-    try {
-        const result = await signInWithEmailAndPassword(auth, email, pass);
-        return result.user;
-    } catch (error: any) {
-        console.warn("Login Error (Falling back to simulation):", error);
-        // Simulate login for demo purposes even if auth fails (e.g. invalid credential or config)
-        return {
-            uid: `email-user-${Date.now()}`, // In a real app, do not generate new ID on login failure
-            displayName: email.split('@')[0],
-            email: email,
-            emailVerified: true,
-            isAnonymous: false,
-            photoURL: `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`
-        } as FirebaseUser;
-    }
+    const result = await signInWithEmailAndPassword(auth, email, pass);
+    return result.user;
 };
 
 export const logout = async () => {
-    try {
-        await firebaseSignOut(auth);
-    } catch (e) {
-        console.warn("Logout error (likely simulation)", e);
-    }
+    await firebaseSignOut(auth);
 };
 
 export const triggerPasswordReset = async (email: string) => {
-    try {
-        await sendPasswordResetEmail(auth, email);
-    } catch (e) {
-        console.warn("Password reset simulated");
-    }
+    await sendPasswordResetEmail(auth, email);
 };
 
 export const updateUserEmail = async (newEmail: string) => {
     if (auth.currentUser) {
-        try {
-            await updateEmail(auth.currentUser, newEmail);
-        } catch (e) {
-            console.warn("Update email simulated");
-        }
-    } else {
-        // Simulation mode
-        console.log("Simulated email update to", newEmail);
+        await updateEmail(auth.currentUser, newEmail);
     }
 };
 
 export const deleteAccount = async () => {
     if (auth.currentUser) {
-        try {
-            await deleteUser(auth.currentUser);
-        } catch (e) {
-            console.warn("Delete account simulated");
-        }
+        await deleteUser(auth.currentUser);
     }
 };
 
@@ -151,59 +93,36 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
     // 1. Determine if Admin based on email
     const isAdmin = firebaseUser.email === 'abrackly@gmail.com' || firebaseUser.email?.includes('admin');
 
-    try {
-        // 2. Try to fetch/create in Firestore
-        const userRef = doc(db, "users", firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
+    const userRef = doc(db, "users", firebaseUser.uid);
+    const userSnap = await getDoc(userRef);
 
-        if (userSnap.exists()) {
-            const data = userSnap.data() as User;
-            // Force admin upgrade if email matches but record doesn't
-            if (isAdmin && !data.isAdmin) {
-                await setDoc(userRef, { ...data, isAdmin: true, rankTier: 'Diamond' }, { merge: true });
-                return { ...data, isAdmin: true, rankTier: 'Diamond' };
-            }
-            return data;
-        } else {
-            // New User Registration in DB
-            const newUser: User = {
-                id: firebaseUser.uid,
-                name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
-                avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-                balance: isAdmin ? 1000000 : 1000, 
-                elo: 1000,
-                rankTier: 'Bronze',
-                isAdmin: isAdmin,
-                isBanned: false
-            };
-            await setDoc(userRef, newUser);
-            return newUser;
+    if (userSnap.exists()) {
+        const data = userSnap.data() as User;
+        // Force admin upgrade if email matches but record doesn't
+        if (isAdmin && !data.isAdmin) {
+            await setDoc(userRef, { ...data, isAdmin: true, rankTier: 'Diamond' }, { merge: true });
+            return { ...data, isAdmin: true, rankTier: 'Diamond' };
         }
-    } catch (e) {
-        console.warn("Profile sync failed (using local fallback):", e);
-        
-        // 3. Fallback for when Firestore is unreachable or Permission Denied (e.g. Simulated Auth)
-        // This ensures the user can still enter the app with a valid profile
-        return {
+        return data;
+    } else {
+        // New User Registration in DB
+        const newUser: User = {
             id: firebaseUser.uid,
-            name: firebaseUser.displayName || `Guest-${firebaseUser.uid.slice(0, 4)}`,
+            name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            balance: isAdmin ? 1000000 : 2500, // Slightly higher starting balance for demo
+            balance: isAdmin ? 1000000 : 1000, 
             elo: 1000,
             rankTier: 'Bronze',
             isAdmin: isAdmin,
             isBanned: false
         };
+        await setDoc(userRef, newUser);
+        return newUser;
     }
 };
 
 export const subscribeToUser = (uid: string, callback: (user: User) => void) => {
-    // If it's a simulated user, we can't subscribe to Firestore. 
-    // Just ignore or could set up a local interval if needed.
-    if (uid.startsWith('google-user-') || uid.startsWith('guest-') || uid.startsWith('email-user-')) {
-        return () => {}; // No-op unsubscribe
-    }
-
+    if (!uid) return () => {};
     return onSnapshot(doc(db, "users", uid), (doc) => {
         if (doc.exists()) {
             callback(doc.data() as User);
@@ -214,81 +133,52 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
     
-    try {
-        const q = query(collection(db, "users"), limit(50)); 
-        const snapshot = await getDocs(q);
-        
-        const results: PlayerProfile[] = [];
-        snapshot.forEach(doc => {
-            const data = doc.data() as User;
-            if (data.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-                results.push({
-                    id: data.id,
-                    name: data.name,
-                    elo: data.elo,
-                    avatar: data.avatar,
-                    rankTier: data.rankTier
-                });
-            }
-        });
-        return results;
-    } catch (e) {
-        console.warn("Search failed", e);
-        return [];
-    }
+    const q = query(collection(db, "users"), limit(50)); 
+    const snapshot = await getDocs(q);
+    
+    const results: PlayerProfile[] = [];
+    snapshot.forEach(doc => {
+        const data = doc.data() as User;
+        if (data.name.toLowerCase().includes(searchTerm.toLowerCase())) {
+            results.push({
+                id: data.id,
+                name: data.name,
+                elo: data.elo,
+                avatar: data.avatar,
+                rankTier: data.rankTier
+            });
+        }
+    });
+    return results;
 };
 
 export const getAllUsers = async (): Promise<User[]> => {
-    try {
-        // Remove limit for accurate admin stats
-        const q = query(collection(db, "users"));
-        const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => doc.data() as User);
-    } catch (e) {
-        console.error("Failed to fetch users", e);
-        return [];
-    }
+    // Remove limit for accurate admin stats
+    const q = query(collection(db, "users"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => doc.data() as User);
 };
 
 // --- GAME CONFIGURATION (ADMIN) ---
 
 export const updateGameStatus = async (gameId: string, status: 'active' | 'coming_soon') => {
-    try {
-        await setDoc(doc(db, "game_configs", gameId), { status }, { merge: true });
-    } catch (e) {
-        console.error("Failed to update game status", e);
-        // Fallback to local storage for demo/simulation
-        const current = JSON.parse(localStorage.getItem('vantage_game_configs') || '{}');
-        current[gameId] = status;
-        localStorage.setItem('vantage_game_configs', JSON.stringify(current));
-    }
+    await setDoc(doc(db, "game_configs", gameId), { status }, { merge: true });
 };
 
 export const subscribeToGameConfigs = (callback: (configs: Record<string, string>) => void) => {
-    // Check local storage first for immediate render
-    const local = JSON.parse(localStorage.getItem('vantage_game_configs') || '{}');
-    callback(local);
-
     return onSnapshot(collection(db, "game_configs"), (snapshot) => {
         const configs: Record<string, string> = {};
         snapshot.forEach(doc => {
             configs[doc.id] = doc.data().status;
         });
-        // Merge with local to ensure consistency if offline
-        const merged = { ...local, ...configs };
-        callback(merged);
-        localStorage.setItem('vantage_game_configs', JSON.stringify(merged));
-    }, (error) => {
-        console.warn("Game Config Sync failed, using local", error);
+        callback(configs);
     });
 };
 
 // --- TRANSACTION MANAGEMENT ---
 
 export const getUserTransactions = async (userId: string): Promise<Transaction[]> => {
-    // Return empty for simulated users to prevent crashes
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return [];
-
+    if (!userId) return [];
     try {
         const q = query(
             collection(db, "users", userId, "transactions"),
@@ -307,99 +197,84 @@ export const getUserTransactions = async (userId: string): Promise<Transaction[]
             } as Transaction;
         });
     } catch (e) {
+        console.error("Error fetching transactions", e);
         return [];
     }
 };
 
 export const addUserTransaction = async (userId: string, transaction: Omit<Transaction, 'id'>) => {
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return;
+    await addDoc(collection(db, "users", userId, "transactions"), {
+        ...transaction,
+        timestamp: serverTimestamp(),
+        date: new Date().toLocaleString()
+    });
 
-    try {
-        await addDoc(collection(db, "users", userId, "transactions"), {
-            ...transaction,
-            timestamp: serverTimestamp(),
-            date: new Date().toLocaleString()
-        });
-
-        const userRef = doc(db, "users", userId);
-        await runTransaction(db, async (transactionDb) => {
-            const sfDoc = await transactionDb.get(userRef);
-            if (!sfDoc.exists()) return;
-            const newBalance = (sfDoc.data().balance || 0) + transaction.amount;
-            transactionDb.update(userRef, { balance: newBalance });
-        });
-    } catch (e) {
-        console.error("Transaction failed", e);
-    }
+    const userRef = doc(db, "users", userId);
+    await runTransaction(db, async (transactionDb) => {
+        const sfDoc = await transactionDb.get(userRef);
+        if (!sfDoc.exists()) return;
+        const newBalance = (sfDoc.data().balance || 0) + transaction.amount;
+        transactionDb.update(userRef, { balance: newBalance });
+    });
 };
 
 // --- REAL-TIME GAME MATCHMAKING & STATE ---
 
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
-    // Simulation for guests
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
-        return `sim-match-${gameType}-${Date.now()}`;
-    }
+    // 1. Look for waiting games
+    const gamesRef = collection(db, "games");
+    const q = query(
+        gamesRef, 
+        where("gameType", "==", gameType), 
+        where("stake", "==", stake),
+        where("status", "==", "waiting"),
+        limit(1)
+    );
+    
+    const snapshot = await getDocs(q);
 
-    try {
-        // 1. Look for waiting games
-        const gamesRef = collection(db, "games");
-        const q = query(
-            gamesRef, 
-            where("gameType", "==", gameType), 
-            where("stake", "==", stake),
-            where("status", "==", "waiting"),
-            limit(1)
-        );
+    // 2. Join existing if found (and not created by self)
+    if (!snapshot.empty) {
+        const gameDoc = snapshot.docs[0];
+        const gameData = gameDoc.data();
         
-        const snapshot = await getDocs(q);
-
-        // 2. Join existing if found (and not created by self)
-        if (!snapshot.empty) {
-            const gameDoc = snapshot.docs[0];
-            const gameData = gameDoc.data();
-            
-            if (gameData.host.id !== user.id) {
-                await updateDoc(doc(db, "games", gameDoc.id), {
-                    status: "active",
-                    guest: {
-                        id: user.id,
-                        name: user.name,
-                        avatar: user.avatar,
-                        elo: user.elo,
-                        rankTier: user.rankTier
-                    },
-                    players: [gameData.host.id, user.id],
-                    updatedAt: serverTimestamp()
-                });
-                return gameDoc.id;
-            }
+        if (gameData.host.id !== user.id) {
+            await updateDoc(doc(db, "games", gameDoc.id), {
+                status: "active",
+                guest: {
+                    id: user.id,
+                    name: user.name,
+                    avatar: user.avatar,
+                    elo: user.elo,
+                    rankTier: user.rankTier
+                },
+                players: [gameData.host.id, user.id],
+                updatedAt: serverTimestamp()
+            });
+            return gameDoc.id;
         }
-
-        // 3. Create new game
-        const newGame = {
-            gameType,
-            stake,
-            status: "waiting",
-            host: {
-                id: user.id,
-                name: user.name,
-                avatar: user.avatar,
-                elo: user.elo,
-                rankTier: user.rankTier
-            },
-            players: [user.id],
-            createdAt: serverTimestamp(),
-            turn: user.id,
-            gameState: {} 
-        };
-
-        const docRef = await addDoc(collection(db, "games"), newGame);
-        return docRef.id;
-    } catch (e) {
-        console.error("Matchmaking error", e);
-        return `local-match-${gameType}-${Date.now()}`;
     }
+
+    // 3. Create new game
+    const newGame = {
+        gameType,
+        stake,
+        status: "waiting",
+        host: {
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            elo: user.elo,
+            rankTier: user.rankTier
+        },
+        players: [user.id],
+        createdAt: serverTimestamp(),
+        turn: user.id,
+        gameState: {} 
+    };
+
+    const docRef = await addDoc(collection(db, "games"), newGame);
+    return docRef.id;
 };
 
 export const createBotMatch = async (user: User, gameType: string, difficulty?: string): Promise<string> => {
@@ -410,66 +285,34 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
         rankTier: 'Silver'
     };
 
-    // If local user, return fake ID, data will be mocked by components
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) {
-        return `bot-match-${gameType}-${Date.now()}${difficulty ? `-${difficulty}` : ''}`;
-    }
+    const newGame = {
+        gameType,
+        stake: 0,
+        status: "active",
+        host: {
+            id: user.id,
+            name: user.name,
+            avatar: user.avatar,
+            elo: user.elo,
+            rankTier: user.rankTier
+        },
+        guest: {
+            id: 'bot',
+            ...botProfile
+        },
+        players: [user.id, 'bot'],
+        createdAt: serverTimestamp(),
+        turn: user.id,
+        gameState: {
+            difficulty: difficulty || 'medium'
+        }
+    };
 
-    try {
-        const newGame = {
-            gameType,
-            stake: 0,
-            status: "active",
-            host: {
-                id: user.id,
-                name: user.name,
-                avatar: user.avatar,
-                elo: user.elo,
-                rankTier: user.rankTier
-            },
-            guest: {
-                id: 'bot',
-                ...botProfile
-            },
-            players: [user.id, 'bot'],
-            createdAt: serverTimestamp(),
-            turn: user.id,
-            gameState: {
-                difficulty: difficulty || 'medium'
-            }
-        };
-
-        const docRef = await addDoc(collection(db, "games"), newGame);
-        return docRef.id;
-    } catch(e) {
-        return `bot-match-fallback-${gameType}-${Date.now()}`;
-    }
+    const docRef = await addDoc(collection(db, "games"), newGame);
+    return docRef.id;
 };
 
 export const subscribeToGame = (gameId: string, callback: (data: any) => void) => {
-    if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) {
-        const parts = gameId.split('-');
-        // Extract gameType from ID: bot-match-Chess-12345 or sim-match-Ludo-12345
-        const gameType = parts.length > 2 ? parts[2] : 'Dice';
-        const difficulty = parts.find(p => ['easy', 'medium', 'hard'].includes(p)) || 'medium';
-        // Return dummy data for local matches
-        setTimeout(() => {
-            callback({
-                id: gameId,
-                status: 'active',
-                gameType: gameType,
-                stake: 100,
-                host: { id: 'local-host', name: 'You', avatar: 'https://i.pravatar.cc/150' },
-                guest: { id: 'bot', name: 'Vantage AI', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=bot' },
-                turn: 'local-host',
-                gameState: {
-                    difficulty: difficulty
-                }
-            });
-        }, 500);
-        return () => {};
-    }
-
     return onSnapshot(doc(db, "games", gameId), (doc) => {
         if (doc.exists()) {
             callback({ id: doc.id, ...doc.data() });
@@ -478,94 +321,44 @@ export const subscribeToGame = (gameId: string, callback: (data: any) => void) =
 };
 
 export const getGame = async (gameId: string): Promise<any> => {
-    // Local Fallback
-    if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) {
-        const parts = gameId.split('-');
-        // Extract gameType from ID: bot-match-Chess-12345 or sim-match-Ludo-12345
-        // Index 0: bot/sim/local, Index 1: match, Index 2: gameType
-        const gameType = parts.length > 2 ? parts[2] : 'Dice';
-        const difficulty = parts.find(p => ['easy', 'medium', 'hard'].includes(p)) || 'medium';
-        return {
-            id: gameId,
-            status: 'active',
-            gameType: gameType,
-            stake: 0,
-            host: { id: 'local-me', name: 'You', avatar: 'https://i.pravatar.cc/150' },
-            guest: { id: 'bot', name: 'Vantage AI', avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=bot' },
-            turn: 'local-me',
-            gameState: { difficulty }
-        };
+    const docSnap = await getDoc(doc(db, "games", gameId));
+    if (docSnap.exists()) {
+        return { id: docSnap.id, ...docSnap.data() };
     }
-
-    try {
-        const docSnap = await getDoc(doc(db, "games", gameId));
-        if (docSnap.exists()) {
-            return { id: docSnap.id, ...docSnap.data() };
-        }
-        return null;
-    } catch (e) {
-        return null;
-    }
+    return null;
 };
 
 export const updateGameState = async (gameId: string, newState: any) => {
-    if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) return;
-    try {
-        const gameRef = doc(db, "games", gameId);
-        await updateDoc(gameRef, {
-            gameState: newState,
-            updatedAt: serverTimestamp()
-        });
-    } catch (e) { console.warn("Game update failed", e); }
+    const gameRef = doc(db, "games", gameId);
+    await updateDoc(gameRef, {
+        gameState: newState,
+        updatedAt: serverTimestamp()
+    });
 };
 
 export const updateTurn = async (gameId: string, nextPlayerId: string) => {
-    if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) return;
-    try {
-        const gameRef = doc(db, "games", gameId);
-        await updateDoc(gameRef, {
-            turn: nextPlayerId
-        });
-    } catch (e) { console.warn("Turn update failed", e); }
+    const gameRef = doc(db, "games", gameId);
+    await updateDoc(gameRef, {
+        turn: nextPlayerId
+    });
 };
 
 export const setGameResult = async (gameId: string, winnerId: string | null) => {
-    if (gameId.startsWith('sim-match') || gameId.startsWith('bot-match') || gameId.startsWith('local-match')) return;
-    try {
-        const gameRef = doc(db, "games", gameId);
-        await updateDoc(gameRef, {
-            status: "completed",
-            winner: winnerId
-        });
-    } catch (e) { console.warn("Result update failed", e); }
+    const gameRef = doc(db, "games", gameId);
+    await updateDoc(gameRef, {
+        status: "completed",
+        winner: winnerId
+    });
 };
 
 export const loginAsGuest = async (): Promise<User> => {
-    try {
-        const { signInAnonymously } = await import("firebase/auth");
-        const cred = await signInAnonymously(auth);
-        return syncUserProfile(cred.user);
-    } catch (e) {
-        // Fallback for purely offline guest
-        const fakeUid = `guest-${Date.now()}`;
-        return {
-            id: fakeUid,
-            name: "Guest Player",
-            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${fakeUid}`,
-            balance: 2000,
-            elo: 1000,
-            rankTier: 'Bronze',
-            isAdmin: false,
-            isBanned: false
-        };
-    }
+    const cred = await signInAnonymously(auth);
+    return syncUserProfile(cred.user);
 };
 
 // --- CHALLENGES ---
 
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
-    if (sender.id.startsWith('google-user-') || sender.id.startsWith('guest-') || sender.id.startsWith('email-user-')) return "local-challenge-id";
-
     const challengeData = {
         sender: {
             id: sender.id,
@@ -586,7 +379,7 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
 };
 
 export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
-    if (userId.startsWith('google-user-') || userId.startsWith('guest-') || userId.startsWith('email-user-')) return () => {};
+    if (!userId) return () => {};
 
     const q = query(
         collection(db, "challenges"),
@@ -611,8 +404,6 @@ export const subscribeToIncomingChallenges = (userId: string, callback: (challen
 };
 
 export const subscribeToChallengeStatus = (challengeId: string, callback: (data: Challenge) => void) => {
-    if (challengeId === 'local-challenge-id') return () => {};
-
     return onSnapshot(doc(db, "challenges", challengeId), (docSnap) => {
         if (docSnap.exists()) {
             callback({ id: docSnap.id, ...docSnap.data() } as Challenge);
@@ -621,7 +412,6 @@ export const subscribeToChallengeStatus = (challengeId: string, callback: (data:
 };
 
 export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined', gameId?: string) => {
-    if (challengeId === 'local-challenge-id') return;
     await updateDoc(doc(db, "challenges", challengeId), {
         status: status,
         gameId: gameId || null
@@ -629,8 +419,6 @@ export const respondToChallenge = async (challengeId: string, status: 'accepted'
 };
 
 export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
-    if (receiver.id.startsWith('google-user-') || receiver.id.startsWith('guest-') || receiver.id.startsWith('email-user-')) return `sim-challenge-game-${Date.now()}`;
-
     const newGame = {
         gameType: challenge.gameType,
         stake: challenge.stake,
@@ -680,14 +468,12 @@ export const getGameActivityStats = async (): Promise<number[]> => {
         const snapshot = await getDocs(q);
         
         // Initialize buckets for 24 hours
-        // Bucket 0 = 24 hours ago, Bucket 23 = Now
         const buckets = new Array(24).fill(0);
         const now = new Date().getTime();
         
         snapshot.forEach(doc => {
             const data = doc.data();
             if (data.createdAt) {
-                // If using serverTimestamp, toDate() might not be available immediately on write, but for admin read it should be fine
                 const date = data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt);
                 
                 const diffMs = now - date.getTime();
@@ -701,8 +487,7 @@ export const getGameActivityStats = async (): Promise<number[]> => {
         
         return buckets;
     } catch (e) {
-        console.error("Failed to fetch activity stats", e);
-        return new Array(24).fill(0); // Fallback empty chart
+        return new Array(24).fill(0); 
     }
 };
 
@@ -732,19 +517,12 @@ export const getSystemLogs = async () => {
 // --- BUG REPORTS ---
 
 export const submitBugReport = async (report: Omit<BugReport, 'id' | 'timestamp' | 'status'>) => {
-    try {
-        // If guest/simulated, don't try to save to firestore as it might fail rules if auth is weird
-        // But for ReportBug flow, we want to try.
-        await addDoc(collection(db, "bug_reports"), {
-            ...report,
-            status: 'open',
-            timestamp: serverTimestamp()
-        });
-        return true;
-    } catch (e) {
-        console.error("Bug report submission failed", e);
-        return false;
-    }
+    await addDoc(collection(db, "bug_reports"), {
+        ...report,
+        status: 'open',
+        timestamp: serverTimestamp()
+    });
+    return true;
 };
 
 export const getBugReports = async (): Promise<BugReport[]> => {
@@ -756,19 +534,14 @@ export const getBugReports = async (): Promise<BugReport[]> => {
             ...doc.data()
         } as BugReport));
     } catch (e) {
-        console.error("Failed to fetch bugs", e);
         return [];
     }
 };
 
 export const resolveBugReport = async (id: string) => {
-    try {
-        await updateDoc(doc(db, "bug_reports", id), {
-            status: 'resolved'
-        });
-    } catch (e) {
-        console.error("Failed to resolve bug", e);
-    }
+    await updateDoc(doc(db, "bug_reports", id), {
+        status: 'resolved'
+    });
 };
 
 // --- FORUM ---
@@ -786,17 +559,10 @@ export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
             ...doc.data()
         } as ForumPost)).reverse(); 
         callback(posts);
-    }, (error) => {
-        console.warn("Forum sync failed", error);
-        // Fallback for forum
-        callback([
-            { id: '1', userId: 'bot', userName: 'Vantage Bot', userAvatar: '', userRank: 'Diamond', content: 'Welcome to the forum! (Offline Mode)', timestamp: null, likes: 0 }
-        ] as any);
     });
 };
 
 export const sendForumMessage = async (user: User, content: string) => {
-    if (user.id.startsWith('google-user-') || user.id.startsWith('guest-') || user.id.startsWith('email-user-')) return;
     await addDoc(collection(db, "forum_posts"), {
         userId: user.id,
         userName: user.name,
@@ -810,4 +576,53 @@ export const sendForumMessage = async (user: User, content: string) => {
 
 export const deleteForumMessage = async (postId: string) => {
     await deleteDoc(doc(db, "forum_posts", postId));
+};
+
+// --- LIVE WINNERS ---
+
+export const subscribeToGlobalWinners = (callback: (winners: any[]) => void) => {
+    // Attempt to query recently completed high-stake games
+    try {
+        const q = query(
+            collection(db, "games"), 
+            where("status", "==", "completed"),
+            orderBy("updatedAt", "desc"),
+            limit(10)
+        );
+
+        return onSnapshot(q, (snapshot) => {
+            const winners: any[] = [];
+            snapshot.forEach(doc => {
+                const d = doc.data();
+                if (d.winner && d.gameState?.scores) { // Very rough extraction
+                    // Find winner name
+                    const winnerId = d.winner;
+                    const winnerProfile = d.host.id === winnerId ? d.host : d.guest;
+                    if (winnerProfile) {
+                        winners.push({
+                            name: winnerProfile.name,
+                            avatar: winnerProfile.avatar,
+                            amount: (d.stake * 2 * 0.9).toLocaleString(), // Net win
+                            game: d.gameType
+                        });
+                    }
+                } else if (d.winner) {
+                     // Simplified fallback
+                     winners.push({
+                        name: "Player", 
+                        avatar: "https://i.pravatar.cc/150",
+                        amount: (d.stake * 1.8).toLocaleString(),
+                        game: d.gameType
+                     });
+                }
+            });
+            callback(winners);
+        }, (error) => {
+            // Likely missing index error, fallback to empty to avoid crash
+            console.warn("Live Winners Sync skipped (Index missing?)", error);
+            callback([]);
+        });
+    } catch(e) {
+        return () => {};
+    }
 };

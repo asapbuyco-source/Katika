@@ -2,7 +2,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X, Star, Swords, Search, UserPlus, ArrowLeft, Shield, CircleDot, AlertTriangle, Loader2, Bot, Layers, Grid3x3, Disc, Zap } from 'lucide-react';
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
-import { GAME_TIERS } from '../services/mockData';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
 import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs } from '../services/firebase';
@@ -16,6 +15,14 @@ interface LobbyProps {
   initialGameId?: string | null;
   onClearInitialGame?: () => void;
 }
+
+// Defined locally to remove reliance on mockData file
+const GAME_TIERS: GameTier[] = [
+  { id: 'tier-1', name: 'Starter', stake: 100, potentialWin: 180, playersOnline: 0, speed: 'Instant', minElo: 0 },
+  { id: 'tier-2', name: 'Casual', stake: 500, potentialWin: 900, playersOnline: 0, speed: 'Instant', minElo: 0 },
+  { id: 'tier-3', name: 'Pro', stake: 2000, potentialWin: 3600, playersOnline: 0, speed: 'Fast', minElo: 1000 },
+  { id: 'tier-4', name: 'High Roller', stake: 5000, potentialWin: 9000, playersOnline: 0, speed: 'Normal', minElo: 1500 },
+];
 
 const STATIC_GAME_LIST = [
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', defaultStatus: 'active' },
@@ -179,7 +186,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
           setShowDepositModal(false);
           alert("Payment page opened! Please complete transaction to update balance.");
       } else {
-          alert("Payment initiation failed.");
+          // Alert handled in fapshi service or here
       }
   };
 
