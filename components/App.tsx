@@ -46,7 +46,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -450,6 +450,7 @@ const AppContent = () => {
               setView('dashboard');
           }
       } else {
+          // Explicitly list all public views to prevent auto-redirect to landing
           const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
           if (!publicViews.includes(currentView)) {
               setView('landing');
@@ -646,8 +647,8 @@ const AppContent = () => {
             {currentView === 'finance' && user && <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Finance user={user} onTopUp={() => {}} /></motion.div>}
             {currentView === 'how-it-works' && <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></motion.div>}
             {currentView === 'admin' && user?.isAdmin && <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AdminDashboard user={user} /></motion.div>}
-            {currentView === 'help-center' && <motion.div key="help" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
-            {currentView === 'report-bug' && <motion.div key="report" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><ReportBug onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'help-center' && <motion.div key="help-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
+            {currentView === 'report-bug' && <motion.div key="report-bug" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><ReportBug onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
             {currentView === 'terms' && <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
             {currentView === 'privacy' && <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
             {currentView === 'forum' && user && <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Forum user={user} /></motion.div>}
