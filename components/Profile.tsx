@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
@@ -64,6 +65,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
   // Tabs Configuration - strictly typed
   const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
+
+  // Reload Logic: When leaving settings tab or unmounting while on settings
+  useEffect(() => {
+    return () => {
+      if (activeTab === 'settings') {
+        window.location.reload();
+      }
+    };
+  }, [activeTab]);
 
   // Load Preferences from LocalStorage on Mount
   useEffect(() => {
