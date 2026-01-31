@@ -1,5 +1,5 @@
 
-export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings';
+export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings' | 'tournaments';
 
 export type ProfileTab = 'overview' | 'history' | 'settings';
 
@@ -35,7 +35,7 @@ export interface Challenge {
 
 export interface Transaction {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake';
+  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'tournament_entry';
   amount: number;
   date: string;
   status: 'completed' | 'pending' | 'failed';
@@ -61,6 +61,7 @@ export interface Table {
   host?: PlayerProfile; // The player waiting at the table
   minElo?: number;      // Minimum ELO required to join
   guest?: PlayerProfile; // The second player
+  tournamentMatchId?: string; // Links to tournament logic
 }
 
 export interface GameEvent {
@@ -98,4 +99,29 @@ export interface BugReport {
   reproduceSteps?: string;
   status: 'open' | 'resolved';
   timestamp: any;
+}
+
+export interface Tournament {
+  id: string;
+  name: string;
+  gameType: string;
+  entryFee: number;
+  prizePool: number;
+  startTime: string; // ISO String
+  maxPlayers: number;
+  participants: string[]; // User IDs
+  status: 'registration' | 'active' | 'completed';
+  winnerId?: string;
+}
+
+export interface TournamentMatch {
+  id: string;
+  tournamentId: string;
+  round: number; // 1 = Round of 16, 2 = QF, etc.
+  matchIndex: number; // Position in the bracket (vertical)
+  player1?: PlayerProfile;
+  player2?: PlayerProfile;
+  winnerId?: string;
+  status: 'scheduled' | 'active' | 'completed';
+  startTime: string; 
 }

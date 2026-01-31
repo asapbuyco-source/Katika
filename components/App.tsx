@@ -1,4 +1,4 @@
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -22,6 +22,7 @@ import { ReportBug } from './ReportBug';
 import { TermsOfService } from './TermsOfService';
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { Forum } from './Forum';
+import { Tournaments } from './Tournaments';
 import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
@@ -46,7 +47,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   state: ErrorBoundaryState = { hasError: false };
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
@@ -579,6 +580,18 @@ const AppContent = () => {
       };
   };
 
+  // Tournament Logic Integration
+  const handleTournamentMatchJoin = (gameType: string, tournamentMatchId: string) => {
+      // 1. Find existing game or create logic if necessary
+      // For now, we simulate joining a specific private room which the server associates
+      // with the tournament match ID.
+      if (!user || !socket) return;
+      
+      // We start matchmaking but pass the tournament match ID as a private room ID
+      // The server (in a real implementation) would look up the specific players scheduled for this match
+      startMatchmaking(0, gameType, tournamentMatchId); 
+  };
+
   if (authLoading) {
       return (
           <div className="min-h-screen bg-royal-950 flex items-center justify-center">
@@ -629,6 +642,7 @@ const AppContent = () => {
             {currentView === 'dashboard' && user && <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></motion.div>}
             {currentView === 'lobby' && user && <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} /></motion.div>}
             {currentView === 'matchmaking' && matchmakingConfig && user && <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} /></motion.div>}
+            {currentView === 'tournaments' && user && <motion.div key="tournaments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} /></motion.div>}
 
             {currentView === 'game' && user && activeGameTable && (
                 <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">

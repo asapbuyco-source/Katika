@@ -1,5 +1,6 @@
+
 import React from 'react';
-import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare } from 'lucide-react';
+import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare, Trophy } from 'lucide-react';
 import { ViewState, User as AppUser } from '../types';
 import { useLanguage } from '../services/i18n';
 
@@ -16,6 +17,7 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
   const navItems = [
     { id: 'dashboard', icon: Home, label: t('nav_home') },
     { id: 'lobby', icon: LayoutGrid, label: t('nav_lobby') },
+    { id: 'tournaments', icon: Trophy, label: 'Tourney' },
     { id: 'forum', icon: MessageSquare, label: t('nav_forum'), hasBadge: hasUnreadMessages },
     { id: 'finance', icon: Wallet, label: t('nav_wallet') },
   ];

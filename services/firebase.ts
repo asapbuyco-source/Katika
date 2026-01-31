@@ -31,7 +31,7 @@ import {
   runTransaction,
   deleteDoc
 } from "firebase/firestore";
-import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport } from "../types";
+import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport, Tournament, TournamentMatch } from "../types";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
@@ -439,6 +439,113 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
     
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
+};
+
+// --- TOURNAMENTS ---
+
+export const getTournaments = async (): Promise<Tournament[]> => {
+    // For admin purposes, fetch all
+    const q = query(collection(db, "tournaments"));
+    const snapshot = await getDocs(q);
+    return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tournament));
+};
+
+export const createTournament = async (data: Omit<Tournament, 'id'>) => {
+    await addDoc(collection(db, "tournaments"), data);
+};
+
+export const deleteTournament = async (tournamentId: string) => {
+    await deleteDoc(doc(db, "tournaments", tournamentId));
+};
+
+export const updateTournamentStatus = async (tournamentId: string, status: 'active' | 'completed' | 'registration') => {
+    await updateDoc(doc(db, "tournaments", tournamentId), { status });
+};
+
+export const registerForTournament = async (tournamentId: string, user: User) => {
+    const tRef = doc(db, "tournaments", tournamentId);
+    
+    try {
+        await runTransaction(db, async (transaction) => {
+            const tDoc = await transaction.get(tRef);
+            if (!tDoc.exists()) throw "Tournament does not exist";
+            
+            const tData = tDoc.data() as Tournament;
+            if (tData.participants.length >= tData.maxPlayers) throw "Tournament full";
+            if (tData.participants.includes(user.id)) throw "Already registered";
+
+            const userRef = doc(db, "users", user.id);
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists()) throw "User not found";
+            
+            const userData = userDoc.data() as User;
+            if (userData.balance < tData.entryFee) throw "Insufficient funds";
+
+            // Deduct funds
+            transaction.update(userRef, { balance: userData.balance - tData.entryFee });
+            
+            // Add to transaction history
+            const newTxRef = doc(collection(db, "users", user.id, "transactions"));
+            transaction.set(newTxRef, {
+                type: 'tournament_entry',
+                amount: -tData.entryFee,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: serverTimestamp()
+            });
+
+            // Update Tournament
+            transaction.update(tRef, {
+                participants: [...tData.participants, user.id],
+                prizePool: tData.prizePool + tData.entryFee
+            });
+        });
+        return true;
+    } catch (e) {
+        console.error("Tournament registration failed:", e);
+        return false;
+    }
+};
+
+export const getTournamentMatches = async (tournamentId: string): Promise<TournamentMatch[]> => {
+    // In a real backend, this would query a subcollection. Here we simulate structure for demo.
+    // Simulating bracket creation based on tournament state
+    const tRef = doc(db, "tournaments", tournamentId);
+    const tDoc = await getDoc(tRef);
+    if (!tDoc.exists()) return [];
+    
+    const tData = tDoc.data() as Tournament;
+    
+    // Simulate matches if active
+    if (tData.status === 'active' || tData.status === 'registration') {
+        // Mock matches based on maxPlayers
+        const matches: TournamentMatch[] = [];
+        let round = 1;
+        
+        // Round 1 (e.g. 8 matches for 16 players)
+        for(let i=0; i < tData.maxPlayers / 2; i++) {
+            // Check if we have participants to fill these slots
+            const p1Id = tData.participants[i*2];
+            const p2Id = tData.participants[i*2+1];
+            
+            // In a real app we'd fetch player profiles. Mocking for display:
+            const p1 = p1Id ? { id: p1Id, name: `Player ${i*2+1}`, avatar: '', rankTier: 'Silver', elo: 1000 } : undefined;
+            const p2 = p2Id ? { id: p2Id, name: `Player ${i*2+2}`, avatar: '', rankTier: 'Silver', elo: 1000 } : undefined;
+
+            matches.push({
+                id: `m-${tournamentId}-${round}-${i}`,
+                tournamentId: tournamentId,
+                round: round,
+                matchIndex: i,
+                player1: p1 as PlayerProfile,
+                player2: p2 as PlayerProfile,
+                status: 'scheduled',
+                startTime: tData.startTime
+            });
+        }
+        return matches;
+    }
+    return [];
 };
 
 // --- ADMIN & STATS ---
