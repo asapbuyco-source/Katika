@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
 import { getTournaments, registerForTournament, getTournamentMatches } from '../services/firebase';
 import { playSFX } from '../services/sound';
@@ -18,6 +18,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   const [matches, setMatches] = useState<TournamentMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'bracket' | 'rules'>('bracket');
+
+  // Registration Modal State
+  const [showRegModal, setShowRegModal] = useState(false);
+  const [regTarget, setRegTarget] = useState<Tournament | null>(null);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   useEffect(() => {
     fetchTournaments();
@@ -39,24 +44,36 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
     setLoading(false);
   };
 
-  const handleRegister = async (t: Tournament) => {
-    if (user.balance < t.entryFee) {
-      alert("Insufficient funds. Please deposit.");
-      return;
-    }
-    if (!window.confirm(`Join ${t.name} for ${t.entryFee} FCFA?`)) return;
-
-    playSFX('click');
-    const success = await registerForTournament(t.id, user);
-    if (success) {
-      playSFX('win'); // Success sound
-      fetchTournaments(); // Refresh list
-      // Update selected if open
-      if (selectedTournament?.id === t.id) {
-          setSelectedTournament({ ...t, participants: [...t.participants, user.id] });
+  const initiateRegistration = (t: Tournament) => {
+      if (user.balance < t.entryFee) {
+          alert("Insufficient funds. Please deposit to your wallet first.");
+          return;
       }
+      setRegTarget(t);
+      setShowRegModal(true);
+      playSFX('click');
+  };
+
+  const confirmRegistration = async () => {
+    if (!regTarget) return;
+    
+    setIsRegistering(true);
+    const success = await registerForTournament(regTarget.id, user);
+    setIsRegistering(false);
+
+    if (success) {
+      playSFX('win'); 
+      setShowRegModal(false);
+      fetchTournaments(); // Refresh list to show updated participant count
+      
+      // If we are currently viewing the tournament we just joined, update it locally
+      if (selectedTournament?.id === regTarget.id) {
+          setSelectedTournament({ ...regTarget, participants: [...regTarget.participants, user.id] });
+      }
+      setRegTarget(null);
     } else {
-      alert("Registration failed. Tournament full or error.");
+      playSFX('error');
+      alert("Registration failed. The tournament might be full or an error occurred.");
     }
   };
 
@@ -89,6 +106,80 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative overflow-hidden">
       
+      {/* REGISTRATION MODAL */}
+      <AnimatePresence>
+          {showRegModal && regTarget && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                  <motion.div 
+                      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                      onClick={() => setShowRegModal(false)}
+                      className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                  />
+                  <motion.div 
+                      initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                      className="relative bg-royal-900 border border-gold-500 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[85vh]"
+                  >
+                      <div className="flex justify-between items-center mb-6 pb-4 border-b border-white/10">
+                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                              <Trophy size={20} className="text-gold-400"/> Registration
+                          </h2>
+                          <button onClick={() => setShowRegModal(false)} className="text-slate-400 hover:text-white"><X size={20}/></button>
+                      </div>
+
+                      <div className="overflow-y-auto space-y-6 custom-scrollbar pr-2 mb-6">
+                          <div className="text-center">
+                              <h3 className="text-lg font-bold text-white">{regTarget.name}</h3>
+                              <div className="text-gold-400 text-2xl font-mono font-bold my-2">{regTarget.entryFee.toLocaleString()} FCFA</div>
+                              <p className="text-xs text-slate-400">will be deducted from your wallet immediately.</p>
+                          </div>
+
+                          <div className="bg-white/5 rounded-xl p-4 border border-white/5 space-y-3 text-sm">
+                              <h4 className="text-slate-300 font-bold uppercase text-xs tracking-wider mb-2">Rules & Conditions</h4>
+                              
+                              <div className="flex gap-3">
+                                  <Clock className="text-blue-400 shrink-0" size={16} />
+                                  <p className="text-slate-400 leading-snug">
+                                      Start Time: <span className="text-white font-bold">{new Date(regTarget.startTime).toLocaleString()}</span>. 
+                                      <br/>Be online 5 minutes early.
+                                  </p>
+                              </div>
+
+                              <div className="flex gap-3">
+                                  <AlertTriangle className="text-red-400 shrink-0" size={16} />
+                                  <p className="text-slate-400 leading-snug">
+                                      <span className="text-white font-bold">Auto-Forfeit:</span> Missing the 5-minute start window results in disqualification without refund.
+                                  </p>
+                              </div>
+
+                              <div className="flex gap-3">
+                                  <Wallet className="text-green-400 shrink-0" size={16} />
+                                  <p className="text-slate-400 leading-snug">
+                                      Entry fees contribute to the prize pool. Fees are non-refundable once the bracket is generated.
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="space-y-3">
+                          <div className="flex items-center gap-3 p-3 bg-gold-500/10 border border-gold-500/20 rounded-lg">
+                              <CheckCircle2 size={16} className="text-gold-400 shrink-0" />
+                              <p className="text-[10px] text-gold-200">
+                                  By joining, I accept the rules above and authorize the fee deduction.
+                              </p>
+                          </div>
+                          <button 
+                              onClick={confirmRegistration} 
+                              disabled={isRegistering}
+                              className="w-full py-4 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                          >
+                              {isRegistering ? "Processing..." : `PAY ${regTarget.entryFee.toLocaleString()} FCFA & JOIN`}
+                          </button>
+                      </div>
+                  </motion.div>
+              </div>
+          )}
+      </AnimatePresence>
+
       {/* List View */}
       {activeTab === 'list' && (
         <div className="space-y-6">
@@ -150,7 +241,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                   <div className="mt-6 relative z-10">
                     {t.status === 'registration' && !isRegistered && !isFull && (
                       <button 
-                        onClick={(e) => { e.stopPropagation(); handleRegister(t); }}
+                        onClick={(e) => { e.stopPropagation(); initiateRegistration(t); }}
                         className="w-full py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-bold rounded-xl transition-colors shadow-lg shadow-gold-500/20"
                       >
                         Join Tournament
@@ -209,6 +300,16 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                     <Play size={20} fill="currentColor" /> ENTER MATCH
                 </motion.button>
             )}
+            
+            {/* Join Action in Detail View (if applicable) */}
+            {selectedTournament.status === 'registration' && !selectedTournament.participants.includes(user.id) && selectedTournament.participants.length < selectedTournament.maxPlayers && (
+                <button 
+                    onClick={() => initiateRegistration(selectedTournament)}
+                    className="px-6 py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-bold rounded-xl shadow-lg"
+                >
+                    Join Now
+                </button>
+            )}
           </header>
 
           <div className="flex gap-4 mb-6 border-b border-white/10">
@@ -228,25 +329,46 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
           {viewMode === 'rules' && (
               <div className="glass-panel p-6 rounded-2xl border border-white/10 max-w-2xl">
-                  <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
-                      <Info size={18} className="text-blue-400" /> Tournament Rules
+                  <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
+                      <Info size={18} className="text-blue-400" /> Tournament Rules: <span className="text-gold-400">{selectedTournament.name}</span>
                   </h3>
-                  <ul className="space-y-4 text-slate-300 text-sm">
-                      <li className="flex gap-3">
-                          <span className="font-bold text-white">1. Start Time:</span>
-                          Matches begin automatically at the scheduled time. Players have a 5-minute grace period to join the lobby.
+                  <ul className="space-y-6 text-slate-300 text-sm">
+                      <li className="flex flex-col md:flex-row gap-2 md:gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="font-bold text-white min-w-[140px] flex items-center gap-2">
+                              <Calendar size={16} className="text-gold-400" /> Match Schedule
+                          </div>
+                          <div>
+                              Matches begin strictly at <span className="text-white font-bold">{new Date(selectedTournament.startTime).toLocaleString() || "TBD"}</span>. 
+                              Please be online 5 minutes before.
+                          </div>
                       </li>
-                      <li className="flex gap-3">
-                          <span className="font-bold text-white">2. Auto-Forfeit:</span>
-                          If a player does not join within 5 minutes, they automatically forfeit. If neither joins, a coin toss decides the winner.
+                      
+                      <li className="flex flex-col md:flex-row gap-2 md:gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="font-bold text-white min-w-[140px] flex items-center gap-2">
+                              <AlertTriangle size={16} className="text-red-400" /> Auto-Forfeit
+                          </div>
+                          <div>
+                              Players have a <span className="text-red-400 font-bold">5-minute grace period</span> to join the lobby. 
+                              If you do not click "Start Match" within 5 minutes of the start time, you will automatically forfeit.
+                          </div>
                       </li>
-                      <li className="flex gap-3">
-                          <span className="font-bold text-white">3. Payouts:</span>
-                          The winner of the final match receives the prize pool instantly to their Vantage Wallet.
+
+                      <li className="flex flex-col md:flex-row gap-2 md:gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="font-bold text-white min-w-[140px] flex items-center gap-2">
+                              <Lock size={16} className="text-green-400" /> Entry Fee
+                          </div>
+                          <div>
+                              A non-refundable entry fee of <span className="text-white font-bold">{selectedTournament.entryFee.toLocaleString()} FCFA</span> is deducted upon registration.
+                          </div>
                       </li>
-                      <li className="flex gap-3">
-                          <span className="font-bold text-white">4. Disconnects:</span>
-                          Disconnections during a match follow standard ranked rules. You have 60 seconds to reconnect.
+
+                      <li className="flex flex-col md:flex-row gap-2 md:gap-4 p-4 bg-white/5 rounded-xl border border-white/5">
+                          <div className="font-bold text-white min-w-[140px] flex items-center gap-2">
+                              <Trophy size={16} className="text-yellow-400" /> Payouts
+                          </div>
+                          <div>
+                              The winner of the Grand Final receives the total Prize Pool instantly to their Vantage Wallet.
+                          </div>
                       </li>
                   </ul>
               </div>
