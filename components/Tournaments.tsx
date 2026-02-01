@@ -154,7 +154,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                               <div className="flex gap-3">
                                   <Wallet className="text-green-400 shrink-0" size={16} />
                                   <p className="text-slate-400 leading-snug">
-                                      Entry fees contribute to the prize pool. Fees are non-refundable once the bracket is generated.
+                                      Entry fees contribute to the prize pool (10% platform fee applies). Fees are non-refundable once the bracket is generated.
                                   </p>
                               </div>
                           </div>
@@ -230,7 +230,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                   <div className="space-y-3 relative z-10">
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">Prize Pool</span>
-                      <span className="font-bold text-gold-400 text-lg">{(t.entryFee * t.maxPlayers).toLocaleString()} FCFA</span>
+                      <span className="font-bold text-gold-400 text-lg">{(t.entryFee * t.maxPlayers * 0.9).toLocaleString()} FCFA</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">Entry Fee</span>
@@ -367,7 +367,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                               <Trophy size={16} className="text-yellow-400" /> Payouts
                           </div>
                           <div>
-                              The winner of the Grand Final receives the total Prize Pool instantly to their Vantage Wallet.
+                              The winner of the Grand Final receives the total Prize Pool (after 10% fee) instantly to their Vantage Wallet.
                           </div>
                       </li>
                   </ul>

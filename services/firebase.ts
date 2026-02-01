@@ -494,10 +494,13 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
                 timestamp: serverTimestamp()
             });
 
-            // Update Tournament
+            // Update Tournament: Collect 10% platform fee
+            const platformFee = tData.entryFee * 0.10;
+            const netContribution = tData.entryFee - platformFee;
+
             transaction.update(tRef, {
                 participants: [...tData.participants, user.id],
-                prizePool: tData.prizePool + tData.entryFee
+                prizePool: tData.prizePool + netContribution
             });
         });
         return true;
