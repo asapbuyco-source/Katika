@@ -1,5 +1,5 @@
 
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -28,13 +28,13 @@ import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
     auth, syncUserProfile, logout, subscribeToUser, createBotMatch, 
-    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum
+    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
-import { Loader2, AlertTriangle, RefreshCw, WifiOff, Clock } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
 import { ThemeProvider, useTheme } from '../services/theme';
 
@@ -48,7 +48,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -531,6 +531,12 @@ const AppContent = () => {
   };
 
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
+      // Check if this was a tournament game and we won
+      if (activeTable && activeTable.tournamentMatchId && result === 'win' && user) {
+          // Report win to backend to advance bracket
+          await reportTournamentMatchResult(activeTable.tournamentMatchId, user.id);
+      }
+      
       setGameResult({ result, amount: 0 }); 
   };
 
@@ -539,6 +545,15 @@ const AppContent = () => {
         socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
     }
     
+    // If tournament, redirect to tournaments view instead of generic dashboard
+    if (activeTable?.tournamentMatchId) {
+        setView('tournaments');
+        setActiveTable(null);
+        setGameResult(null);
+        setSocketGame(null);
+        return;
+    }
+
     // Safety Reload
     window.location.reload();
   };
@@ -580,19 +595,17 @@ const AppContent = () => {
           players: 2,
           maxPlayers: 2,
           status: 'active',
-          host: hostProfile
+          host: hostProfile,
+          tournamentMatchId: game.privateRoomId // Map privateRoomId to tournamentMatchId if applicable
       };
   };
 
   // Tournament Logic Integration
   const handleTournamentMatchJoin = (gameType: string, tournamentMatchId: string) => {
-      // 1. Find existing game or create logic if necessary
-      // For now, we simulate joining a specific private room which the server associates
-      // with the tournament match ID.
       if (!user || !socket) return;
       
       // We start matchmaking but pass the tournament match ID as a private room ID
-      // The server (in a real implementation) would look up the specific players scheduled for this match
+      // The server will use this ID to match players specifically for this bracket slot
       startMatchmaking(0, gameType, tournamentMatchId); 
   };
 
@@ -681,7 +694,19 @@ const AppContent = () => {
           {/* Show when I am the one disconnected (Local Failure) */}
           {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { setConnectionError(null); socket?.connect(); }} />}
 
-          {gameResult && <GameResultOverlay result={gameResult.result} amount={gameResult.amount} financials={gameResult.financials} onContinue={finalizeGameEnd} onRematch={socketGame && isConnected ? handleRematchRequest : undefined} rematchStatus={rematchStatus} stake={socketGame?.stake} userBalance={user?.balance} />}
+          {/* Tournament-aware Result Overlay */}
+          {gameResult && <GameResultOverlay 
+              result={gameResult.result} 
+              amount={gameResult.amount} 
+              financials={gameResult.financials} 
+              onContinue={finalizeGameEnd} 
+              onRematch={socketGame && isConnected ? handleRematchRequest : undefined} 
+              rematchStatus={rematchStatus} 
+              stake={socketGame?.stake} 
+              userBalance={user?.balance} 
+              isTournament={!!activeTable?.tournamentMatchId}
+          />}
+          
           {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}
       </AnimatePresence>
     </div>

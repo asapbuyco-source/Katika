@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts } from '../services/firebase';
+import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts, subscribeToUser } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
@@ -18,6 +18,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   const [matches, setMatches] = useState<TournamentMatch[]>([]);
   const [loading, setLoading] = useState(false);
   const [viewMode, setViewMode] = useState<'bracket' | 'rules'>('bracket');
+  const [championProfile, setChampionProfile] = useState<User | null>(null);
 
   // Registration Modal State
   const [showRegModal, setShowRegModal] = useState(false);
@@ -35,6 +36,17 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
           }, 30000); // Check every 30s
       }
       return () => clearInterval(interval);
+  }, [selectedTournament]);
+
+  // Fetch Champion Logic
+  useEffect(() => {
+      if (selectedTournament?.status === 'completed' && selectedTournament.winnerId) {
+          // Subscribe to winner to get latest details
+          const unsub = subscribeToUser(selectedTournament.winnerId, (u) => setChampionProfile(u));
+          return () => unsub();
+      } else {
+          setChampionProfile(null);
+      }
   }, [selectedTournament]);
 
   useEffect(() => {
@@ -299,6 +311,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                             View Live Bracket
                         </button>
                     )}
+                    {t.status === 'completed' && (
+                        <div className="w-full py-3 bg-gold-500/20 text-gold-400 font-bold rounded-xl text-center border border-gold-500/30 flex items-center justify-center gap-2">
+                            <Crown size={16} /> Winner Declared
+                        </div>
+                    )}
                     {isFull && !isRegistered && t.status === 'registration' && (
                         <div className="w-full py-3 bg-red-500/10 text-red-400 font-bold rounded-xl text-center border border-red-500/20">
                             Full
@@ -341,6 +358,40 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                 </button>
             )}
           </header>
+
+          {/* --- COMPLETED TOURNAMENT CHAMPION DISPLAY --- */}
+          {selectedTournament.status === 'completed' && championProfile && (
+              <motion.div 
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mb-8 p-8 rounded-3xl bg-gradient-to-br from-gold-500/20 to-royal-900 border border-gold-500/50 relative overflow-hidden flex flex-col items-center text-center shadow-[0_0_50px_rgba(251,191,36,0.2)]"
+              >
+                  {/* Background FX */}
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+                  <div className="absolute top-0 right-0 p-20 bg-gold-500/10 blur-[100px] rounded-full"></div>
+
+                  <div className="relative z-10 flex flex-col items-center">
+                      <div className="mb-4 relative">
+                          <div className="absolute inset-0 bg-gold-500 blur-xl opacity-50 rounded-full"></div>
+                          <img src={championProfile.avatar} alt={championProfile.name} className="w-32 h-32 rounded-full border-4 border-gold-400 shadow-2xl relative z-10 object-cover" />
+                          <div className="absolute -top-6 -right-6 text-gold-400 animate-bounce">
+                              <Crown size={48} fill="currentColor" />
+                          </div>
+                      </div>
+                      
+                      <h2 className="text-gold-400 font-bold text-sm uppercase tracking-[0.2em] mb-2">Tournament Champion</h2>
+                      <h1 className="text-4xl md:text-6xl font-display font-black text-white mb-4 drop-shadow-md">
+                          {championProfile.name}
+                      </h1>
+                      
+                      <div className="flex items-center gap-2 bg-black/40 px-6 py-3 rounded-full border border-gold-500/30">
+                          <Trophy size={20} className="text-gold-400" />
+                          <span className="text-slate-300 text-sm">Prize Won:</span>
+                          <span className="text-xl font-mono font-bold text-white">{(selectedTournament.prizePool).toLocaleString()} FCFA</span>
+                      </div>
+                  </div>
+              </motion.div>
+          )}
 
           {/* --- DASHBOARD FOR ACTIVE TOURNAMENTS --- */}
           {selectedTournament.status === 'active' && (

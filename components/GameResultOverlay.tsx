@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, XCircle, Home, RotateCcw, Coins, ShieldAlert, ArrowRight, Wallet, Percent, Users, Loader2 } from 'lucide-react';
@@ -16,6 +17,7 @@ interface GameResultOverlayProps {
   rematchStatus?: 'idle' | 'requested' | 'opponent_requested' | 'declined';
   stake?: number;
   userBalance?: number;
+  isTournament?: boolean; // New Prop
 }
 
 export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ 
@@ -26,7 +28,8 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
     onRematch,
     rematchStatus = 'idle',
     stake = 0,
-    userBalance = 0
+    userBalance = 0,
+    isTournament = false
 }) => {
   const [displayAmount, setDisplayAmount] = useState(0);
 
@@ -177,8 +180,8 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
 
                 {/* Actions */}
                 <div className="w-full space-y-3">
-                    {/* REMATCH BUTTON */}
-                    {onRematch && (
+                    {/* REMATCH BUTTON (Hidden if Tournament) */}
+                    {onRematch && !isTournament && (
                         <div className="w-full">
                             {rematchStatus === 'declined' ? (
                                 <div className="text-red-400 text-xs font-bold bg-red-500/10 p-2 rounded-lg mb-2 border border-red-500/20">
@@ -223,7 +226,7 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                             ${result === 'win' ? 'bg-gold-500 text-royal-950 hover:bg-gold-400 shadow-gold-500/20' : 'bg-white/10 text-white hover:bg-white/20'}
                         `}
                     >
-                        {result === 'win' ? 'Claim Winnings' : 'Return to Lobby'} <ArrowRight size={20} />
+                        {isTournament ? 'Return to Bracket' : (result === 'win' ? 'Claim Winnings' : 'Return to Lobby')} <ArrowRight size={20} />
                     </button>
                 </div>
              </div>

@@ -541,21 +541,104 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
         const start = new Date(m.startTime);
         const diffMins = (now.getTime() - start.getTime()) / 60000;
 
-        if (diffMins > 5) {
-            // Forfeit Logic: If nobody joined, random or cancel? 
-            // Simplified: If waiting for 5 mins and no game started, forfeit both?
-            // Actually, usually this is checked when a player joins. 
-            // For "Audit", we'll mark as forfeited/cancelled if totally stale.
-            // Or if P1 is present in a 'waiting' room and P2 isn't... 
-            // This requires linking to actual game rooms. 
-            // For this implementation, we assume if status is still 'scheduled' 5 mins after start, it's a double forfeit or manual admin resolution required. 
-            // We will flag it.
-            // batch.update(doc.ref, { status: 'forfeited' }); 
-            // updates++;
+        if (diffMins > 10) { // Extended to 10 mins before auto-forfeit checks
+             // In a real app, logic to forfeit absent players goes here.
         }
     });
     
     if (updates > 0) await batch.commit();
+};
+
+// New function to report match result and advance bracket
+export const reportTournamentMatchResult = async (matchId: string, winnerId: string) => {
+    // 1. Update Match
+    await updateDoc(doc(db, "tournament_matches", matchId), {
+        winnerId,
+        status: 'completed'
+    });
+
+    // 2. Fetch Match to get Tournament ID and Round
+    const mSnap = await getDoc(doc(db, "tournament_matches", matchId));
+    if (!mSnap.exists()) return;
+    const mData = mSnap.data() as TournamentMatch;
+
+    // 3. Trigger Advancement Check
+    await checkAndAdvanceTournament(mData.tournamentId, mData.round);
+}
+
+const checkAndAdvanceTournament = async (tournamentId: string, round: number) => {
+    // Check if ALL matches in this round are completed
+    const q = query(
+        collection(db, "tournament_matches"),
+        where("tournamentId", "==", tournamentId),
+        where("round", "==", round)
+    );
+    const snapshot = await getDocs(q);
+    const matches = snapshot.docs.map(d => d.data() as TournamentMatch);
+
+    const allComplete = matches.every(m => m.status === 'completed');
+    if (!allComplete || matches.length === 0) return; // Wait for others
+
+    // Generate Next Round
+    // Sort by matchIndex to preserve bracket structure
+    matches.sort((a,b) => a.matchIndex - b.matchIndex);
+    const winners = matches.map(m => m.winnerId).filter(Boolean) as string[];
+
+    if (winners.length === 1) {
+        // Tournament Over
+        await updateDoc(doc(db, "tournaments", tournamentId), {
+            status: 'completed',
+            winnerId: winners[0]
+        });
+        return;
+    }
+
+    // Create Next Round Matches
+    const batch = writeBatch(db);
+    const matchesRef = collection(db, "tournament_matches");
+    let nextRoundMatchCount = 0;
+
+    for (let i = 0; i < winners.length; i += 2) {
+        const p1Id = winners[i];
+        const p2Id = winners[i+1]; // might be undefined if odd number
+
+        // Fetch minimal player data for display
+        const p1Doc = await getDoc(doc(db, "users", p1Id));
+        const p1Data = p1Doc.exists() ? p1Doc.data() : { id: p1Id, name: 'Unknown', avatar: '' };
+        
+        let p2Data = null;
+        if (p2Id) {
+            const p2Doc = await getDoc(doc(db, "users", p2Id));
+            p2Data = p2Doc.exists() ? p2Doc.data() : { id: p2Id, name: 'Unknown', avatar: '' };
+        }
+
+        const newMatchId = `m-${tournamentId}-r${round+1}-${nextRoundMatchCount}`;
+        
+        const matchData: any = {
+            id: newMatchId,
+            tournamentId,
+            round: round + 1,
+            matchIndex: nextRoundMatchCount,
+            player1: { id: p1Data.id, name: p1Data.name, avatar: p1Data.avatar, rankTier: p1Data.rankTier },
+            player2: p2Data ? { id: p2Data.id, name: p2Data.name, avatar: p2Data.avatar, rankTier: p2Data.rankTier } : null,
+            winnerId: p2Id ? null : p1Id, // Auto advance if bye
+            status: p2Id ? 'scheduled' : 'completed', // Auto complete if bye
+            startTime: new Date(Date.now() + 60000).toISOString() // Starts in 1 min
+        };
+
+        batch.set(doc(matchesRef, newMatchId), matchData);
+        nextRoundMatchCount++;
+    }
+    
+    await batch.commit();
+    
+    // If the newly generated round has only 1 match and it was a BYE (odd number case where only 1 person advanced to final unintentionally via bye in prev round? No, byes just push to next round)
+    // If the *next* round consists of only auto-completed matches (e.g. 1 player left getting a bye), we need to recurse or check completion.
+    // However, the 'winners.length === 1' check at top handles the final winner.
+    // If we have 3 players: 
+    // R1: 1v2, 3vBye. Winners: [W1, 3]
+    // R2: W1 v 3. 
+    // This logic handles it correctly.
 };
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
