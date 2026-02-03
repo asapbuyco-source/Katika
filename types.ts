@@ -107,6 +107,7 @@ export interface Tournament {
   gameType: string;
   entryFee: number;
   prizePool: number;
+  type: 'fixed' | 'dynamic'; // New field: Fixed = House Funded, Dynamic = User Funded
   startTime: string; // ISO String
   maxPlayers: number;
   participants: string[]; // User IDs

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye } from 'lucide-react';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, ChartBar, Coins } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament } from '../services/firebase';
 
@@ -46,7 +46,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       entryFee: 1000,
       maxPlayers: 16,
       startTime: '',
-      prizePool: 0
+      prizePool: 0,
+      type: 'dynamic' as 'fixed' | 'dynamic'
   });
 
   // Load Real Data
@@ -137,7 +138,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               startTime: newTourney.startTime,
               participants: [],
               status: 'registration',
-              prizePool: Number(newTourney.prizePool)
+              // If dynamic, calculated from users. If fixed, use admin input.
+              prizePool: newTourney.type === 'fixed' ? Number(newTourney.prizePool) : 0,
+              type: newTourney.type
           });
           alert("Tournament Created!");
           addLog("Tournament Created", newTourney.name, "info");
@@ -262,6 +265,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                         <div className="glass-panel p-4 rounded-xl border border-gold-500/30 mb-4 animate-in fade-in slide-in-from-top-4">
                             <h4 className="font-bold text-white mb-4 text-sm">Configure Event</h4>
                             <form onSubmit={handleCreateTournament} className="space-y-3">
+                                {/* Type Toggle */}
+                                <div className="flex bg-black/40 p-1 rounded-lg border border-white/10 mb-2">
+                                    <button 
+                                        type="button"
+                                        onClick={() => setNewTourney({...newTourney, type: 'fixed'})}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${newTourney.type === 'fixed' ? 'bg-royal-800 text-gold-400 shadow-sm' : 'text-slate-500 hover:text-white'}`}
+                                    >
+                                        House Funded (Fixed)
+                                    </button>
+                                    <button 
+                                        type="button"
+                                        onClick={() => setNewTourney({...newTourney, type: 'dynamic'})}
+                                        className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-colors ${newTourney.type === 'dynamic' ? 'bg-royal-800 text-gold-400 shadow-sm' : 'text-slate-500 hover:text-white'}`}
+                                    >
+                                        User Funded (Dynamic)
+                                    </button>
+                                </div>
+
                                 <input className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Name" value={newTourney.name} onChange={e=>setNewTourney({...newTourney, name: e.target.value})} required/>
                                 <div className="flex gap-2">
                                     <select className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.gameType} onChange={e=>setNewTourney({...newTourney, gameType: e.target.value})}>
@@ -270,8 +291,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                     <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Max Players" value={newTourney.maxPlayers} onChange={e=>setNewTourney({...newTourney, maxPlayers: Number(e.target.value)})}/>
                                 </div>
                                 <div className="flex gap-2">
-                                    <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Fee (FCFA)" value={newTourney.entryFee} onChange={e=>setNewTourney({...newTourney, entryFee: Number(e.target.value)})}/>
-                                    <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Start Pot (FCFA)" value={newTourney.prizePool} onChange={e=>setNewTourney({...newTourney, prizePool: Number(e.target.value)})}/>
+                                    <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Entry Fee (FCFA)" value={newTourney.entryFee} onChange={e=>setNewTourney({...newTourney, entryFee: Number(e.target.value)})}/>
+                                    {newTourney.type === 'fixed' ? (
+                                        <input type="number" className="flex-1 bg-black/30 border border-gold-500/50 rounded-lg p-2 text-xs text-gold-400 font-bold" placeholder="Guaranteed Pot (FCFA)" value={newTourney.prizePool} onChange={e=>setNewTourney({...newTourney, prizePool: Number(e.target.value)})} required/>
+                                    ) : (
+                                        <div className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-[10px] text-slate-400 flex items-center justify-center">
+                                            Calculated from entries
+                                        </div>
+                                    )}
                                 </div>
                                 <input type="datetime-local" className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.startTime} onChange={e=>setNewTourney({...newTourney, startTime: e.target.value})} required/>
                                 <button type="submit" className="w-full py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-xs">Create Event</button>
@@ -290,16 +317,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             >
                                 <div className="flex justify-between items-start mb-2">
                                     <h4 className="font-bold text-white text-sm">{t.name}</h4>
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                        t.status === 'active' ? 'bg-green-500/20 text-green-400' : 
-                                        t.status === 'completed' ? 'bg-white/10 text-slate-400' : 'bg-yellow-500/20 text-yellow-400'
-                                    }`}>
-                                        {t.status}
-                                    </span>
+                                    <div className="flex gap-1">
+                                        {t.type === 'fixed' && <span className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase bg-purple-500/20 text-purple-400 border border-purple-500/30">Fixed</span>}
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                            t.status === 'active' ? 'bg-green-500/20 text-green-400' : 
+                                            t.status === 'completed' ? 'bg-white/10 text-slate-400' : 'bg-yellow-500/20 text-yellow-400'
+                                        }`}>
+                                            {t.status}
+                                        </span>
+                                    </div>
                                 </div>
                                 <div className="flex justify-between text-xs text-slate-400 mb-3">
                                     <span>{t.participants.length}/{t.maxPlayers} Players</span>
-                                    <span>Pool: {((t.prizePool || 0) + (t.entryFee * t.participants.length * 0.9)).toLocaleString()}</span>
+                                    <span>Pool: {t.type === 'fixed' ? t.prizePool.toLocaleString() : ((t.prizePool || 0) + (t.entryFee * t.participants.length * 0.9)).toLocaleString()}</span>
                                 </div>
                                 <div className="flex gap-2">
                                     {t.status === 'registration' && (

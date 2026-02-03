@@ -1,4 +1,3 @@
-
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -705,14 +704,25 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
                 timestamp: serverTimestamp()
             });
 
-            // Update Tournament: Collect 10% platform fee
-            const platformFee = tData.entryFee * 0.10;
-            const netContribution = tData.entryFee - platformFee;
+            // Update Tournament: 
+            // Logic Fork based on Type
+            const isFixed = tData.type === 'fixed';
+            
+            if (isFixed) {
+                // Fixed Pool: Just add participant, do not increase pool
+                transaction.update(tRef, {
+                    participants: [...tData.participants, user.id]
+                });
+            } else {
+                // Dynamic Pool (Default): Collect 10% platform fee, add rest to pool
+                const platformFee = tData.entryFee * 0.10;
+                const netContribution = tData.entryFee - platformFee;
 
-            transaction.update(tRef, {
-                participants: [...tData.participants, user.id],
-                prizePool: tData.prizePool + netContribution
-            });
+                transaction.update(tRef, {
+                    participants: [...tData.participants, user.id],
+                    prizePool: tData.prizePool + netContribution
+                });
+            }
         });
         return true;
     } catch (e) {

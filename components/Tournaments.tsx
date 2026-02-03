@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
 import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts, subscribeToUser } from '../services/firebase';
 import { playSFX } from '../services/sound';
@@ -93,7 +93,12 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
       
       // If we are currently viewing the tournament we just joined, update it locally
       if (selectedTournament?.id === regTarget.id) {
-          setSelectedTournament({ ...regTarget, participants: [...regTarget.participants, user.id] });
+          const updatedT = { ...regTarget, participants: [...regTarget.participants, user.id] };
+          // If dynamic, speculatively update prize pool for UI instant feedback
+          if (regTarget.type !== 'fixed') {
+              updatedT.prizePool = (updatedT.prizePool || 0) + (regTarget.entryFee * 0.9);
+          }
+          setSelectedTournament(updatedT);
       }
       setRegTarget(null);
     } else {
@@ -184,12 +189,43 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                           <div className="text-center">
                               <h3 className="text-lg font-bold text-white">{regTarget.name}</h3>
                               <div className="text-gold-400 text-2xl font-mono font-bold my-2">{regTarget.entryFee.toLocaleString()} FCFA</div>
-                              <p className="text-xs text-slate-400">will be deducted from your wallet immediately.</p>
+                              <p className="text-xs text-slate-400">Entry Fee</p>
+                          </div>
+
+                          {/* TRANSPARENCY BLOCK */}
+                          <div className="bg-black/40 rounded-xl p-4 border border-white/10">
+                              <h4 className="text-slate-300 font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
+                                  <Info size={12} /> Fee Breakdown
+                              </h4>
+                              {regTarget.type === 'fixed' ? (
+                                  <div className="text-sm text-slate-400 leading-relaxed">
+                                      This is a <strong className="text-white">Fixed Prize</strong> tournament. 
+                                      The prize pool is guaranteed by the house regardless of player count.
+                                      <div className="mt-2 text-green-400 font-bold">Guaranteed Prize: {regTarget.prizePool.toLocaleString()} FCFA</div>
+                                  </div>
+                              ) : (
+                                  <div className="space-y-2 text-sm">
+                                      <div className="flex justify-between">
+                                          <span className="text-slate-400">Entry Fee</span>
+                                          <span className="text-white font-mono">{regTarget.entryFee.toLocaleString()}</span>
+                                      </div>
+                                      <div className="flex justify-between text-red-400">
+                                          <span>Platform Fee (10%)</span>
+                                          <span className="font-mono">-{Math.floor(regTarget.entryFee * 0.1).toLocaleString()}</span>
+                                      </div>
+                                      <div className="border-t border-white/10 my-1"></div>
+                                      <div className="flex justify-between text-green-400 font-bold">
+                                          <span>Added to Pot</span>
+                                          <span className="font-mono">+{Math.floor(regTarget.entryFee * 0.9).toLocaleString()}</span>
+                                      </div>
+                                      <p className="text-[10px] text-slate-500 mt-2 italic">
+                                          Prize pool grows with every participant.
+                                      </p>
+                                  </div>
+                              )}
                           </div>
 
                           <div className="bg-white/5 rounded-xl p-4 border border-white/5 space-y-3 text-sm">
-                              <h4 className="text-slate-300 font-bold uppercase text-xs tracking-wider mb-2">Rules & Conditions</h4>
-                              
                               <div className="flex gap-3">
                                   <Clock className="text-blue-400 shrink-0" size={16} />
                                   <p className="text-slate-400 leading-snug">
@@ -197,36 +233,22 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                                       <br/>Be online 5 minutes early.
                                   </p>
                               </div>
-
                               <div className="flex gap-3">
                                   <AlertTriangle className="text-red-400 shrink-0" size={16} />
                                   <p className="text-slate-400 leading-snug">
-                                      <span className="text-white font-bold">Auto-Forfeit:</span> Missing the 5-minute start window results in disqualification without refund.
-                                  </p>
-                              </div>
-
-                              <div className="flex gap-3">
-                                  <Wallet className="text-green-400 shrink-0" size={16} />
-                                  <p className="text-slate-400 leading-snug">
-                                      Entry fees contribute to the prize pool (10% platform fee applies). Fees are non-refundable once the bracket is generated.
+                                      <span className="text-white font-bold">Auto-Forfeit:</span> Missing the start window results in disqualification without refund.
                                   </p>
                               </div>
                           </div>
                       </div>
 
                       <div className="space-y-3">
-                          <div className="flex items-center gap-3 p-3 bg-gold-500/10 border border-gold-500/20 rounded-lg">
-                              <CheckCircle2 size={16} className="text-gold-400 shrink-0" />
-                              <p className="text-[10px] text-gold-200">
-                                  By joining, I accept the rules above and authorize the fee deduction.
-                              </p>
-                          </div>
                           <button 
                               onClick={confirmRegistration} 
                               disabled={isRegistering}
                               className="w-full py-4 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                           >
-                              {isRegistering ? "Processing..." : `PAY ${regTarget.entryFee.toLocaleString()} FCFA & JOIN`}
+                              {isRegistering ? "Processing..." : `PAY & JOIN`}
                           </button>
                       </div>
                   </motion.div>
@@ -253,7 +275,13 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
             {tournaments.map((t) => {
               const isRegistered = t.participants.includes(user.id);
               const isFull = t.participants.length >= t.maxPlayers;
+              const isFixed = t.type === 'fixed';
               
+              // Calculate pool if dynamic
+              const currentPool = isFixed 
+                  ? t.prizePool 
+                  : (t.prizePool || 0) + (t.entryFee * t.participants.length * 0.9);
+
               return (
                 <motion.div 
                   key={t.id}
@@ -267,32 +295,43 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                     <div className="p-3 bg-white/5 rounded-xl border border-white/10 text-gold-400">
                       <Trophy size={24} />
                     </div>
-                    {isRegistered ? (
-                      <div className="px-3 py-1 bg-green-500/20 text-green-400 text-xs font-bold rounded-full border border-green-500/30 flex items-center gap-1">
-                        <Users size={12} /> Registered
-                      </div>
-                    ) : (
-                      <div className="px-3 py-1 bg-royal-800 text-slate-400 text-xs font-bold rounded-full border border-white/10">
-                        {t.participants.length}/{t.maxPlayers} Players
-                      </div>
-                    )}
+                    <div className="flex gap-2">
+                        {isFixed ? (
+                            <div className="px-2 py-1 bg-purple-500/20 text-purple-300 text-[10px] font-bold rounded-full border border-purple-500/30 flex items-center gap-1">
+                                <Crown size={10} /> Fixed
+                            </div>
+                        ) : (
+                            <div className="px-2 py-1 bg-blue-500/20 text-blue-300 text-[10px] font-bold rounded-full border border-blue-500/30 flex items-center gap-1">
+                                <TrendingUp size={10} /> Dynamic
+                            </div>
+                        )}
+                        {isRegistered && (
+                          <div className="px-2 py-1 bg-green-500/20 text-green-400 text-[10px] font-bold rounded-full border border-green-500/30 flex items-center gap-1">
+                            <CheckCircle2 size={10} /> Joined
+                          </div>
+                        )}
+                    </div>
                   </div>
 
                   <h3 className="text-xl font-bold text-white mb-1 relative z-10">{t.name}</h3>
-                  <p className="text-slate-400 text-xs mb-6 relative z-10 font-mono">Starts: {new Date(t.startTime).toLocaleString()}</p>
+                  <div className="flex items-center gap-2 mb-6">
+                      <span className="text-[10px] px-2 py-0.5 bg-white/10 rounded text-slate-300 font-mono">{t.participants.length}/{t.maxPlayers} Players</span>
+                      <span className="text-slate-500 text-[10px]">|</span>
+                      <span className="text-slate-400 text-[10px] font-mono">{new Date(t.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                  </div>
 
-                  <div className="space-y-3 relative z-10">
+                  <div className="space-y-3 relative z-10 bg-black/20 p-3 rounded-xl border border-white/5">
                     <div className="flex justify-between items-center text-sm">
-                      <span className="text-slate-500">Prize Pool</span>
-                      <span className="font-bold text-gold-400 text-lg">{(t.entryFee * t.maxPlayers * 0.9).toLocaleString()} FCFA</span>
+                      <span className="text-slate-500 flex items-center gap-1"><Coins size={12}/> {isFixed ? 'Guaranteed Prize' : 'Current Pool'}</span>
+                      <span className="font-bold text-gold-400 text-lg">{currentPool.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between items-center text-sm">
                       <span className="text-slate-500">Entry Fee</span>
-                      <span className="font-bold text-white">{t.entryFee.toLocaleString()} FCFA</span>
+                      <span className="font-bold text-white">{t.entryFee.toLocaleString()}</span>
                     </div>
                   </div>
 
-                  <div className="mt-6 relative z-10">
+                  <div className="mt-4 relative z-10">
                     {t.status === 'registration' && !isRegistered && !isFull && (
                       <button 
                         onClick={(e) => { e.stopPropagation(); initiateRegistration(t); }}
@@ -341,14 +380,17 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                 <ChevronRight size={20} className="rotate-180" />
               </button>
               <div>
-                <h1 className="text-2xl font-bold text-white">{selectedTournament.name}</h1>
+                <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                    {selectedTournament.name}
+                    {selectedTournament.type === 'fixed' && <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30 uppercase">Fixed Pool</span>}
+                </h1>
                 <div className="flex items-center gap-2 text-slate-400 text-xs mt-1">
                    <Clock size={12} /> Starts {new Date(selectedTournament.startTime).toLocaleString()}
                 </div>
               </div>
             </div>
             
-            {/* Join Action in Detail View (if applicable) */}
+            {/* Join Action in Detail View */}
             {selectedTournament.status === 'registration' && !selectedTournament.participants.includes(user.id) && selectedTournament.participants.length < selectedTournament.maxPlayers && (
                 <button 
                     onClick={() => initiateRegistration(selectedTournament)}
@@ -387,7 +429,12 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                       <div className="flex items-center gap-2 bg-black/40 px-6 py-3 rounded-full border border-gold-500/30">
                           <Trophy size={20} className="text-gold-400" />
                           <span className="text-slate-300 text-sm">Prize Won:</span>
-                          <span className="text-xl font-mono font-bold text-white">{(selectedTournament.prizePool).toLocaleString()} FCFA</span>
+                          <span className="text-xl font-mono font-bold text-white">
+                              {(selectedTournament.type === 'fixed' 
+                                  ? selectedTournament.prizePool 
+                                  : (selectedTournament.prizePool || 0) + (selectedTournament.entryFee * selectedTournament.participants.length * 0.9)
+                              ).toLocaleString()} FCFA
+                          </span>
                       </div>
                   </div>
               </motion.div>
@@ -521,7 +568,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                               <Trophy size={16} className="text-yellow-400" /> Payouts
                           </div>
                           <div>
-                              The winner of the Grand Final receives the total Prize Pool (after 10% fee) instantly to their Vantage Wallet.
+                              The winner of the Grand Final receives the total Prize Pool (after 10% fee if applicable) instantly to their Vantage Wallet.
                           </div>
                       </li>
                   </ul>
