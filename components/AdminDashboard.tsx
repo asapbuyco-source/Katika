@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament } from '../services/firebase';
 
 interface AdminDashboardProps {
   user: User;
@@ -156,8 +156,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
   };
 
   const handleStartTournament = async (id: string) => {
-      if(!window.confirm("Start tournament now? Registration will close.")) return;
-      await updateTournamentStatus(id, 'active');
+      if(!window.confirm("Start tournament now? Registration will close, participants will be shuffled.")) return;
+      await startTournament(id);
       fetchAdminTournaments();
       addLog("Tournament Started", id, "info");
   };
@@ -339,11 +339,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                             <div className="flex flex-col gap-1 w-1/3">
                                                 <div className={`flex items-center gap-2 text-sm ${match.winnerId === match.player1?.id ? 'text-green-400 font-bold' : 'text-slate-300'}`}>
                                                     <span className="w-4 text-center text-xs text-slate-600">1</span>
-                                                    {match.player1?.name || "TBD"}
+                                                    {match.player1?.name || "Bye/Empty"}
                                                 </div>
                                                 <div className={`flex items-center gap-2 text-sm ${match.winnerId === match.player2?.id ? 'text-green-400 font-bold' : 'text-slate-300'}`}>
                                                     <span className="w-4 text-center text-xs text-slate-600">2</span>
-                                                    {match.player2?.name || "TBD"}
+                                                    {match.player2?.name || "Bye/Empty"}
                                                 </div>
                                             </div>
 

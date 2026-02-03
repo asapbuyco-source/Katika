@@ -29,7 +29,8 @@ import {
   onSnapshot, 
   serverTimestamp,
   runTransaction,
-  deleteDoc
+  deleteDoc,
+  writeBatch
 } from "firebase/firestore";
 import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport, Tournament, TournamentMatch } from "../types";
 
@@ -456,10 +457,105 @@ export const createTournament = async (data: Omit<Tournament, 'id'>) => {
 
 export const deleteTournament = async (tournamentId: string) => {
     await deleteDoc(doc(db, "tournaments", tournamentId));
+    // Also delete matches
+    const q = query(collection(db, "tournament_matches"), where("tournamentId", "==", tournamentId));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    snapshot.docs.forEach(d => batch.delete(d.ref));
+    await batch.commit();
 };
 
 export const updateTournamentStatus = async (tournamentId: string, status: 'active' | 'completed' | 'registration') => {
     await updateDoc(doc(db, "tournaments", tournamentId), { status });
+};
+
+export const startTournament = async (tournamentId: string) => {
+    const tRef = doc(db, "tournaments", tournamentId);
+    const tSnap = await getDoc(tRef);
+    if (!tSnap.exists()) return;
+    const tData = tSnap.data() as Tournament;
+
+    // Shuffle Participants
+    const participants = [...tData.participants];
+    for (let i = participants.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [participants[i], participants[j]] = [participants[j], participants[i]];
+    }
+
+    const batch = writeBatch(db);
+    const matchesRef = collection(db, "tournament_matches");
+
+    let matchCount = 0;
+    const round = 1;
+
+    // Create Round 1 Matches
+    const playerProfiles = await Promise.all(participants.map(async (uid) => {
+        const uSnap = await getDoc(doc(db, 'users', uid));
+        return uSnap.exists() ? uSnap.data() as User : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
+    }));
+
+    // Pair up
+    while (playerProfiles.length > 0) {
+        const p1 = playerProfiles.pop();
+        const p2 = playerProfiles.pop(); // Undefined if odd
+
+        const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
+        const matchRef = doc(matchesRef, matchId); 
+
+        const matchData: any = {
+            id: matchId,
+            tournamentId,
+            round,
+            matchIndex: matchCount,
+            player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
+            player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
+            winnerId: p2 ? null : p1?.id, // Automatic Bye if no P2
+            status: p2 ? 'scheduled' : 'completed',
+            startTime: tData.startTime, // Should be an ISO string
+            nextMatchId: null 
+        };
+
+        batch.set(matchRef, matchData);
+        matchCount++;
+    }
+
+    // Update Tournament Status & Shuffled List (optional to save list but good for reference)
+    batch.update(tRef, { status: 'active', participants: participants }); // Update with shuffled
+
+    await batch.commit();
+};
+
+export const checkTournamentTimeouts = async (tournamentId: string) => {
+    const q = query(
+        collection(db, "tournament_matches"), 
+        where("tournamentId", "==", tournamentId),
+        where("status", "==", "scheduled")
+    );
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    const now = new Date();
+
+    let updates = 0;
+    snapshot.forEach(doc => {
+        const m = doc.data() as TournamentMatch;
+        const start = new Date(m.startTime);
+        const diffMins = (now.getTime() - start.getTime()) / 60000;
+
+        if (diffMins > 5) {
+            // Forfeit Logic: If nobody joined, random or cancel? 
+            // Simplified: If waiting for 5 mins and no game started, forfeit both?
+            // Actually, usually this is checked when a player joins. 
+            // For "Audit", we'll mark as forfeited/cancelled if totally stale.
+            // Or if P1 is present in a 'waiting' room and P2 isn't... 
+            // This requires linking to actual game rooms. 
+            // For this implementation, we assume if status is still 'scheduled' 5 mins after start, it's a double forfeit or manual admin resolution required. 
+            // We will flag it.
+            // batch.update(doc.ref, { status: 'forfeited' }); 
+            // updates++;
+        }
+    });
+    
+    if (updates > 0) await batch.commit();
 };
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
@@ -511,44 +607,22 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
 };
 
 export const getTournamentMatches = async (tournamentId: string): Promise<TournamentMatch[]> => {
-    // In a real backend, this would query a subcollection. Here we simulate structure for demo.
-    // Simulating bracket creation based on tournament state
-    const tRef = doc(db, "tournaments", tournamentId);
-    const tDoc = await getDoc(tRef);
-    if (!tDoc.exists()) return [];
-    
-    const tData = tDoc.data() as Tournament;
-    
-    // Simulate matches if active
-    if (tData.status === 'active' || tData.status === 'registration') {
-        // Mock matches based on maxPlayers
-        const matches: TournamentMatch[] = [];
-        let round = 1;
-        
-        // Round 1 (e.g. 8 matches for 16 players)
-        for(let i=0; i < tData.maxPlayers / 2; i++) {
-            // Check if we have participants to fill these slots
-            const p1Id = tData.participants[i*2];
-            const p2Id = tData.participants[i*2+1];
-            
-            // In a real app we'd fetch player profiles. Mocking for display:
-            const p1 = p1Id ? { id: p1Id, name: `Player ${i*2+1}`, avatar: '', rankTier: 'Silver', elo: 1000 } : undefined;
-            const p2 = p2Id ? { id: p2Id, name: `Player ${i*2+2}`, avatar: '', rankTier: 'Silver', elo: 1000 } : undefined;
-
-            matches.push({
-                id: `m-${tournamentId}-${round}-${i}`,
-                tournamentId: tournamentId,
-                round: round,
-                matchIndex: i,
-                player1: p1 as PlayerProfile,
-                player2: p2 as PlayerProfile,
-                status: 'scheduled',
-                startTime: tData.startTime
-            });
-        }
-        return matches;
+    try {
+        const q = query(
+            collection(db, "tournament_matches"), 
+            where("tournamentId", "==", tournamentId)
+        );
+        const snapshot = await getDocs(q);
+        const matches = snapshot.docs.map(doc => doc.data() as TournamentMatch);
+        // Sort by round then index
+        return matches.sort((a, b) => {
+            if (a.round === b.round) return a.matchIndex - b.matchIndex;
+            return a.round - b.round;
+        });
+    } catch (e) {
+        console.error("Fetch Matches Error", e);
+        return [];
     }
-    return [];
 };
 
 // --- ADMIN & STATS ---

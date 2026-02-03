@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, getTournamentMatches } from '../services/firebase';
+import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
@@ -23,6 +23,19 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   const [showRegModal, setShowRegModal] = useState(false);
   const [regTarget, setRegTarget] = useState<Tournament | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
+
+  // Time Elimination Loop
+  useEffect(() => {
+      let interval: any;
+      if (selectedTournament && selectedTournament.status === 'active') {
+          interval = setInterval(() => {
+              checkTournamentTimeouts(selectedTournament.id);
+              // Optimistic refresh
+              getTournamentMatches(selectedTournament.id).then(setMatches);
+          }, 30000); // Check every 30s
+      }
+      return () => clearInterval(interval);
+  }, [selectedTournament]);
 
   useEffect(() => {
     fetchTournaments();
@@ -102,6 +115,35 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   };
 
   const bracketData = getBracketRounds();
+
+  // Next Match Timer
+  const MatchTimer = ({ startTime }: { startTime: string }) => {
+      const [timeLeft, setTimeLeft] = useState("");
+      
+      useEffect(() => {
+          const timer = setInterval(() => {
+              const start = new Date(startTime).getTime();
+              const now = Date.now();
+              const diff = start - now;
+              
+              if (diff <= 0) {
+                  // Check grace period (5 mins)
+                  if (now - start > 5 * 60 * 1000) {
+                      setTimeLeft("FORFEIT CHECK");
+                  } else {
+                      setTimeLeft("LIVE");
+                  }
+              } else {
+                  const m = Math.floor(diff / 60000);
+                  const s = Math.floor((diff % 60000) / 1000);
+                  setTimeLeft(`${m}:${s.toString().padStart(2, '0')}`);
+              }
+          }, 1000);
+          return () => clearInterval(timer);
+      }, [startTime]);
+
+      return <span className="font-mono font-bold text-gold-400">{timeLeft}</span>;
+  };
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative overflow-hidden">
@@ -288,18 +330,6 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                 </div>
               </div>
             </div>
-
-            {/* My Match Action */}
-            {selectedTournament.status === 'active' && myNextMatch && (
-                <motion.button 
-                    initial={{ scale: 0.9 }} animate={{ scale: 1 }}
-                    whileHover={{ scale: 1.05 }}
-                    onClick={() => onJoinMatch(selectedTournament.gameType, myNextMatch.id)}
-                    className="px-6 py-3 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl shadow-lg shadow-green-500/20 flex items-center gap-2 animate-pulse"
-                >
-                    <Play size={20} fill="currentColor" /> ENTER MATCH
-                </motion.button>
-            )}
             
             {/* Join Action in Detail View (if applicable) */}
             {selectedTournament.status === 'registration' && !selectedTournament.participants.includes(user.id) && selectedTournament.participants.length < selectedTournament.maxPlayers && (
@@ -311,6 +341,79 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                 </button>
             )}
           </header>
+
+          {/* --- DASHBOARD FOR ACTIVE TOURNAMENTS --- */}
+          {selectedTournament.status === 'active' && (
+              <div className="mb-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* My Next Match Card */}
+                  <div className="glass-panel p-6 rounded-2xl border border-gold-500/30 bg-gradient-to-br from-royal-900 to-black relative overflow-hidden">
+                      <div className="absolute top-0 right-0 p-4 opacity-10"><Trophy size={80}/></div>
+                      <h3 className="text-gold-400 font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <Shield size={16} /> Your Status
+                      </h3>
+                      {myNextMatch ? (
+                          myNextMatch.winnerId ? (
+                              <div className="text-center py-4">
+                                  <div className="text-green-400 text-xl font-black mb-2 flex items-center justify-center gap-2"><CheckCircle2/> ADVANCED</div>
+                                  <p className="text-slate-400 text-sm">You won this round! Waiting for next opponent.</p>
+                              </div>
+                          ) : (
+                              <div>
+                                  <div className="flex justify-between items-end mb-4">
+                                      <div>
+                                          <div className="text-xs text-slate-500 font-bold mb-1">VS</div>
+                                          <div className="text-lg font-bold text-white">{myNextMatch.player1?.id === user.id ? myNextMatch.player2?.name || "BYE (Auto Win)" : myNextMatch.player1?.name}</div>
+                                      </div>
+                                      <div className="text-right">
+                                          <div className="text-xs text-slate-500 font-bold mb-1">STARTS IN</div>
+                                          <MatchTimer startTime={myNextMatch.startTime} />
+                                      </div>
+                                  </div>
+                                  {myNextMatch.player2 ? (
+                                      <button 
+                                          onClick={() => onJoinMatch(selectedTournament.gameType, myNextMatch.id)}
+                                          className="w-full py-3 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl shadow-lg animate-pulse"
+                                      >
+                                          ENTER MATCH LOBBY
+                                      </button>
+                                  ) : (
+                                      <div className="w-full py-3 bg-white/5 border border-white/10 text-slate-300 font-bold rounded-xl text-center">
+                                          Automatic Bye (Wait for Next Round)
+                                      </div>
+                                  )}
+                              </div>
+                          )
+                      ) : (
+                          <div className="text-center py-4 text-slate-500">
+                              <p>No active match. You may be waiting for the next round or have been eliminated.</p>
+                          </div>
+                      )}
+                  </div>
+
+                  {/* Winners Feed */}
+                  <div className="glass-panel p-6 rounded-2xl border border-white/5">
+                      <h3 className="text-white font-bold text-sm uppercase tracking-wider mb-4 flex items-center gap-2">
+                          <Crown size={16} className="text-yellow-400" /> Recent Winners
+                      </h3>
+                      <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-hide">
+                          {matches.filter(m => m.winnerId).slice(0, 5).map(m => {
+                              const winner = m.winnerId === m.player1?.id ? m.player1 : m.player2;
+                              return (
+                                  <div key={m.id} className="flex flex-col items-center gap-2 min-w-[80px]">
+                                      <div className="w-10 h-10 rounded-full border-2 border-yellow-400 p-0.5">
+                                          <img src={winner?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full object-cover"/>
+                                      </div>
+                                      <span className="text-[10px] font-bold text-white truncate max-w-full">{winner?.name}</span>
+                                  </div>
+                              )
+                          })}
+                          {matches.filter(m => m.winnerId).length === 0 && (
+                              <div className="text-xs text-slate-500 italic">No matches completed yet.</div>
+                          )}
+                      </div>
+                  </div>
+              </div>
+          )}
 
           <div className="flex gap-4 mb-6 border-b border-white/10">
               <button 
@@ -403,7 +506,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                                                           {match.player1 ? <img src={match.player1.avatar} className="w-full h-full object-cover"/> : null}
                                                       </div>
                                                       <span className={`text-xs font-bold ${match.winnerId === match.player1?.id ? 'text-green-400' : 'text-slate-300'}`}>
-                                                          {match.player1?.name || "TBD"}
+                                                          {match.player1?.name || (match.player2 ? "TBD" : "Bye")}
                                                       </span>
                                                   </div>
                                                   {match.winnerId === match.player1?.id && <Crown size={12} className="text-gold-400" fill="currentColor" />}
@@ -416,7 +519,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                                                           {match.player2 ? <img src={match.player2.avatar} className="w-full h-full object-cover"/> : null}
                                                       </div>
                                                       <span className={`text-xs font-bold ${match.winnerId === match.player2?.id ? 'text-green-400' : 'text-slate-300'}`}>
-                                                          {match.player2?.name || "TBD"}
+                                                          {match.player2?.name || (match.player1 ? "TBD" : "Bye")}
                                                       </span>
                                                   </div>
                                                   {match.winnerId === match.player2?.id && <Crown size={12} className="text-gold-400" fill="currentColor" />}
