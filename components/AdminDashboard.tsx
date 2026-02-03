@@ -45,7 +45,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
       gameType: 'Ludo',
       entryFee: 1000,
       maxPlayers: 16,
-      startTime: ''
+      startTime: '',
+      prizePool: 0
   });
 
   // Load Real Data
@@ -136,7 +137,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
               startTime: newTourney.startTime,
               participants: [],
               status: 'registration',
-              prizePool: 0
+              prizePool: Number(newTourney.prizePool)
           });
           alert("Tournament Created!");
           addLog("Tournament Created", newTourney.name, "info");
@@ -266,14 +267,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                     <select className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.gameType} onChange={e=>setNewTourney({...newTourney, gameType: e.target.value})}>
                                         {manageableGames.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
                                     </select>
-                                    <select className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.maxPlayers} onChange={e=>setNewTourney({...newTourney, maxPlayers: Number(e.target.value)})}>
-                                        {[4,8,16,32].map(n => <option key={n} value={n}>{n} Players</option>)}
-                                    </select>
+                                    <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Max Players" value={newTourney.maxPlayers} onChange={e=>setNewTourney({...newTourney, maxPlayers: Number(e.target.value)})}/>
                                 </div>
                                 <div className="flex gap-2">
                                     <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Fee (FCFA)" value={newTourney.entryFee} onChange={e=>setNewTourney({...newTourney, entryFee: Number(e.target.value)})}/>
-                                    <input type="datetime-local" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.startTime} onChange={e=>setNewTourney({...newTourney, startTime: e.target.value})} required/>
+                                    <input type="number" className="flex-1 bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" placeholder="Start Pot (FCFA)" value={newTourney.prizePool} onChange={e=>setNewTourney({...newTourney, prizePool: Number(e.target.value)})}/>
                                 </div>
+                                <input type="datetime-local" className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.startTime} onChange={e=>setNewTourney({...newTourney, startTime: e.target.value})} required/>
                                 <button type="submit" className="w-full py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-xs">Create Event</button>
                             </form>
                         </div>
@@ -299,7 +299,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                 </div>
                                 <div className="flex justify-between text-xs text-slate-400 mb-3">
                                     <span>{t.participants.length}/{t.maxPlayers} Players</span>
-                                    <span>{t.entryFee} FCFA</span>
+                                    <span>Pool: {((t.prizePool || 0) + (t.entryFee * t.participants.length * 0.9)).toLocaleString()}</span>
                                 </div>
                                 <div className="flex gap-2">
                                     {t.status === 'registration' && (
