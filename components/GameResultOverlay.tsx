@@ -140,11 +140,16 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                 </h2>
                 
                 <p className="text-slate-400 mb-8 text-sm">
-                    {result === 'win' ? 'Great match! Your winnings have been secured.' : 'Better luck next time. Your skill is improving.'}
+                    {isTournament ? (
+                        result === 'win' ? 'Match Won! Proceed to bracket for next round.' : 'Eliminated. Thank you for participating.'
+                    ) : (
+                        result === 'win' ? 'Great match! Your winnings have been secured.' : 'Better luck next time. Your skill is improving.'
+                    )}
                 </p>
 
-                {/* Money Animation */}
-                {result === 'win' && financials ? (
+                {/* Money Animation - Only show for standard games OR if it's a win */}
+                {/* For Tournaments, we don't show individual match payout unless it's the final (handled by backend logic, but here we can just show generic win) */}
+                {!isTournament && result === 'win' && financials ? (
                     <div className="mb-8 w-full bg-royal-950/50 rounded-2xl p-4 border border-white/10">
                         <div className="flex justify-between items-center text-xs text-slate-400 mb-2">
                             <span>Total Pot</span>
@@ -161,7 +166,7 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                             </div>
                         </div>
                     </div>
-                ) : amount !== 0 && (
+                ) : !isTournament && amount !== 0 && (
                     <div className="mb-8 w-full">
                         <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
                             {result === 'win' ? 'Winnings Added' : 'Stake Lost'}

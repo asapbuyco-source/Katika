@@ -1,4 +1,3 @@
-
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -585,10 +584,46 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
     const winners = matches.map(m => m.winnerId).filter(Boolean) as string[];
 
     if (winners.length === 1) {
-        // Tournament Over
-        await updateDoc(doc(db, "tournaments", tournamentId), {
-            status: 'completed',
-            winnerId: winners[0]
+        const winnerId = winners[0];
+        
+        // Use transaction to ensure safe payout and status update
+        await runTransaction(db, async (transaction) => {
+            const tourneyRef = doc(db, "tournaments", tournamentId);
+            const tourneyDoc = await transaction.get(tourneyRef);
+            if (!tourneyDoc.exists()) throw "Tournament not found";
+            
+            const tData = tourneyDoc.data() as Tournament;
+            
+            // Check if already completed to prevent double payout
+            if (tData.status === 'completed') return; 
+
+            // Update Winner Balance
+            const winnerRef = doc(db, "users", winnerId);
+            const winnerDoc = await transaction.get(winnerRef);
+            
+            if (winnerDoc.exists()) {
+                const currentBal = winnerDoc.data().balance || 0;
+                transaction.update(winnerRef, { 
+                    balance: currentBal + tData.prizePool 
+                });
+                
+                // Transaction Record
+                const txRef = doc(collection(db, "users", winnerId, "transactions"));
+                transaction.set(txRef, {
+                    type: 'winnings', 
+                    amount: tData.prizePool,
+                    status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: serverTimestamp(),
+                    note: `Tournament Win: ${tData.name}`
+                });
+            }
+
+            // Close Tournament
+            transaction.update(tourneyRef, {
+                status: 'completed',
+                winnerId: winnerId
+            });
         });
         return;
     }
@@ -631,14 +666,6 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
     }
     
     await batch.commit();
-    
-    // If the newly generated round has only 1 match and it was a BYE (odd number case where only 1 person advanced to final unintentionally via bye in prev round? No, byes just push to next round)
-    // If the *next* round consists of only auto-completed matches (e.g. 1 player left getting a bye), we need to recurse or check completion.
-    // However, the 'winners.length === 1' check at top handles the final winner.
-    // If we have 3 players: 
-    // R1: 1v2, 3vBye. Winners: [W1, 3]
-    // R2: W1 v 3. 
-    // This logic handles it correctly.
 };
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
