@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -524,6 +525,10 @@ export const startTournament = async (tournamentId: string) => {
     await batch.commit();
 };
 
+export const setTournamentMatchActive = async (matchId: string) => {
+    await updateDoc(doc(db, "tournament_matches", matchId), { status: 'active' });
+};
+
 export const checkTournamentTimeouts = async (tournamentId: string) => {
     const q = query(
         collection(db, "tournament_matches"), 
@@ -531,21 +536,21 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
         where("status", "==", "scheduled")
     );
     const snapshot = await getDocs(q);
-    const batch = writeBatch(db);
     const now = new Date();
 
-    let updates = 0;
-    snapshot.forEach(doc => {
-        const m = doc.data() as TournamentMatch;
+    for (const docSnap of snapshot.docs) {
+        const m = docSnap.data() as TournamentMatch;
         const start = new Date(m.startTime);
         const diffMins = (now.getTime() - start.getTime()) / 60000;
 
-        if (diffMins > 10) { // Extended to 10 mins before auto-forfeit checks
-             // In a real app, logic to forfeit absent players goes here.
+        if (diffMins > 5) { // 5 minutes strict Forfeit
+             console.log(`Auto-forfeiting match ${m.id} due to absence`);
+             // Default win to Player 1 if both absent, or just random to keep bracket moving
+             // In a real scenario, we'd check if one player is online.
+             const winnerId = m.player1?.id || 'bye';
+             await reportTournamentMatchResult(m.id, winnerId);
         }
-    });
-    
-    if (updates > 0) await batch.commit();
+    }
 };
 
 // New function to report match result and advance bracket

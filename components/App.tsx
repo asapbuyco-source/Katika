@@ -1,4 +1,5 @@
-import React, { Component, useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
 import { ViewState, User, Table, Challenge } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -27,7 +28,7 @@ import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
     auth, syncUserProfile, logout, subscribeToUser, createBotMatch, 
-    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult
+    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult, setTournamentMatchActive
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -47,7 +48,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -526,6 +527,10 @@ const AppContent = () => {
 
   const handleMatchFound = async (table: Table) => {
       setActiveTable(table);
+      // Ensure tournament match status is updated to active so it doesn't get auto-forfeited
+      if (table.tournamentMatchId) {
+          setTournamentMatchActive(table.tournamentMatchId);
+      }
       setView('game');
   };
 
