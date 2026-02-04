@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts, subscribeToUser } from '../services/firebase';
+import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts, subscribeToUser, subscribeToTournament } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
@@ -25,6 +25,19 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   const [regTarget, setRegTarget] = useState<Tournament | null>(null);
   const [isRegistering, setIsRegistering] = useState(false);
 
+  // Real-time Status Subscription
+  useEffect(() => {
+      let unsub: (() => void) | undefined;
+      
+      if (selectedTournament) {
+          unsub = subscribeToTournament(selectedTournament.id, (updatedT) => {
+              setSelectedTournament(updatedT);
+              // If tournament becomes completed, champion effect below will trigger
+          });
+      }
+      return () => { if(unsub) unsub(); };
+  }, [selectedTournament?.id]); // Re-subscribe if ID changes (switching tournaments)
+
   // Time Elimination Loop
   useEffect(() => {
       let interval: any;
@@ -33,10 +46,10 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
               checkTournamentTimeouts(selectedTournament.id);
               // Optimistic refresh
               getTournamentMatches(selectedTournament.id).then(setMatches);
-          }, 30000); // Check every 30s
+          }, 15000); // Check every 15s to be responsive for auto-forfeit demo
       }
       return () => clearInterval(interval);
-  }, [selectedTournament]);
+  }, [selectedTournament?.status, selectedTournament?.id]);
 
   // Fetch Champion Logic
   useEffect(() => {
@@ -47,7 +60,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
       } else {
           setChampionProfile(null);
       }
-  }, [selectedTournament]);
+  }, [selectedTournament?.status, selectedTournament?.winnerId]);
 
   useEffect(() => {
     fetchTournaments();
@@ -93,8 +106,8 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
       
       // If we are currently viewing the tournament we just joined, update it locally
       if (selectedTournament?.id === regTarget.id) {
+          // Note: subscribeToTournament will catch this update anyway, but optimistic update feels faster
           const updatedT = { ...regTarget, participants: [...regTarget.participants, user.id] };
-          // If dynamic, speculatively update prize pool for UI instant feedback
           if (regTarget.type !== 'fixed') {
               updatedT.prizePool = (updatedT.prizePool || 0) + (regTarget.entryFee * 0.9);
           }
@@ -144,11 +157,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
               const diff = start - now;
               
               if (diff <= 0) {
-                  // Check grace period (5 mins)
-                  if (now - start > 5 * 60 * 1000) {
-                      setTimeLeft("FORFEIT CHECK");
+                  // Check grace period (3 mins based on updated logic)
+                  if (now - start > 3 * 60 * 1000) {
+                      setTimeLeft("AWAITING FORFEIT");
                   } else {
-                      setTimeLeft("LIVE");
+                      setTimeLeft("LIVE - JOIN NOW");
                   }
               } else {
                   const m = Math.floor(diff / 60000);

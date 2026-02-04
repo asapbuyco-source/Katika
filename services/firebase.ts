@@ -1,4 +1,5 @@
 
+// ... existing imports
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -34,6 +35,7 @@ import {
 } from "firebase/firestore";
 import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport, Tournament, TournamentMatch } from "../types";
 
+// ... existing config and auth ...
 const firebaseConfig = {
   apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
   authDomain: "katika-8eef2.firebaseapp.com",
@@ -48,10 +50,9 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
-// Auth Providers
 const googleProvider = new GoogleAuthProvider();
 
-// --- AUTH ---
+// ... (keep auth/user/transaction/game functions as is until Tournaments section) ...
 
 export const signInWithGoogle = async () => {
     const result = await signInWithPopup(auth, googleProvider);
@@ -88,25 +89,19 @@ export const deleteAccount = async () => {
     }
 };
 
-// --- USER MANAGEMENT ---
-
 export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User> => {
-    // 1. Determine if Admin based on email
     const isAdmin = firebaseUser.email === 'abrackly@gmail.com' || firebaseUser.email?.includes('admin');
-
     const userRef = doc(db, "users", firebaseUser.uid);
     const userSnap = await getDoc(userRef);
 
     if (userSnap.exists()) {
         const data = userSnap.data() as User;
-        // Force admin upgrade if email matches but record doesn't
         if (isAdmin && !data.isAdmin) {
             await setDoc(userRef, { ...data, isAdmin: true, rankTier: 'Diamond' }, { merge: true });
             return { ...data, isAdmin: true, rankTier: 'Diamond' };
         }
         return data;
     } else {
-        // New User Registration in DB
         const newUser: User = {
             id: firebaseUser.uid,
             name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
@@ -133,10 +128,8 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
-    
     const q = query(collection(db, "users"), limit(50)); 
     const snapshot = await getDocs(q);
-    
     const results: PlayerProfile[] = [];
     snapshot.forEach(doc => {
         const data = doc.data() as User;
@@ -154,13 +147,10 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
 };
 
 export const getAllUsers = async (): Promise<User[]> => {
-    // Remove limit for accurate admin stats
     const q = query(collection(db, "users"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => doc.data() as User);
 };
-
-// --- GAME CONFIGURATION (ADMIN) ---
 
 export const updateGameStatus = async (gameId: string, status: 'active' | 'coming_soon') => {
     await setDoc(doc(db, "game_configs", gameId), { status }, { merge: true });
@@ -175,8 +165,6 @@ export const subscribeToGameConfigs = (callback: (configs: Record<string, string
         callback(configs);
     });
 };
-
-// --- TRANSACTION MANAGEMENT ---
 
 export const getUserTransactions = async (userId: string): Promise<Transaction[]> => {
     if (!userId) return [];
@@ -219,10 +207,7 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
     });
 };
 
-// --- REAL-TIME GAME MATCHMAKING & STATE ---
-
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
-    // 1. Look for waiting games
     const gamesRef = collection(db, "games");
     const q = query(
         gamesRef, 
@@ -231,24 +216,15 @@ export const findOrCreateMatch = async (user: User, gameType: string, stake: num
         where("status", "==", "waiting"),
         limit(1)
     );
-    
     const snapshot = await getDocs(q);
 
-    // 2. Join existing if found (and not created by self)
     if (!snapshot.empty) {
         const gameDoc = snapshot.docs[0];
         const gameData = gameDoc.data();
-        
         if (gameData.host.id !== user.id) {
             await updateDoc(doc(db, "games", gameDoc.id), {
                 status: "active",
-                guest: {
-                    id: user.id,
-                    name: user.name,
-                    avatar: user.avatar,
-                    elo: user.elo,
-                    rankTier: user.rankTier
-                },
+                guest: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
                 players: [gameData.host.id, user.id],
                 updatedAt: serverTimestamp()
             });
@@ -256,24 +232,16 @@ export const findOrCreateMatch = async (user: User, gameType: string, stake: num
         }
     }
 
-    // 3. Create new game
     const newGame = {
         gameType,
         stake,
         status: "waiting",
-        host: {
-            id: user.id,
-            name: user.name,
-            avatar: user.avatar,
-            elo: user.elo,
-            rankTier: user.rankTier
-        },
+        host: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
         players: [user.id],
         createdAt: serverTimestamp(),
         turn: user.id,
         gameState: {} 
     };
-
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
 };
@@ -285,30 +253,17 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
         elo: 1200,
         rankTier: 'Silver'
     };
-
     const newGame = {
         gameType,
         stake: 0,
         status: "active",
-        host: {
-            id: user.id,
-            name: user.name,
-            avatar: user.avatar,
-            elo: user.elo,
-            rankTier: user.rankTier
-        },
-        guest: {
-            id: 'bot',
-            ...botProfile
-        },
+        host: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
+        guest: { id: 'bot', ...botProfile },
         players: [user.id, 'bot'],
         createdAt: serverTimestamp(),
         turn: user.id,
-        gameState: {
-            difficulty: difficulty || 'medium'
-        }
+        gameState: { difficulty: difficulty || 'medium' }
     };
-
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
 };
@@ -339,17 +294,12 @@ export const updateGameState = async (gameId: string, newState: any) => {
 
 export const updateTurn = async (gameId: string, nextPlayerId: string) => {
     const gameRef = doc(db, "games", gameId);
-    await updateDoc(gameRef, {
-        turn: nextPlayerId
-    });
+    await updateDoc(gameRef, { turn: nextPlayerId });
 };
 
 export const setGameResult = async (gameId: string, winnerId: string | null) => {
     const gameRef = doc(db, "games", gameId);
-    await updateDoc(gameRef, {
-        status: "completed",
-        winner: winnerId
-    });
+    await updateDoc(gameRef, { status: "completed", winner: winnerId });
 };
 
 export const loginAsGuest = async (): Promise<User> => {
@@ -357,17 +307,9 @@ export const loginAsGuest = async (): Promise<User> => {
     return syncUserProfile(cred.user);
 };
 
-// --- CHALLENGES ---
-
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
     const challengeData = {
-        sender: {
-            id: sender.id,
-            name: sender.name,
-            avatar: sender.avatar,
-            elo: sender.elo,
-            rankTier: sender.rankTier
-        },
+        sender: { id: sender.id, name: sender.name, avatar: sender.avatar, elo: sender.elo, rankTier: sender.rankTier },
         targetId: targetId,
         gameType: gameType,
         stake: stake,
@@ -381,17 +323,10 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
 
 export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
     if (!userId) return () => {};
-
-    const q = query(
-        collection(db, "challenges"),
-        where("targetId", "==", userId),
-        where("status", "==", "pending")
-    );
-
+    const q = query(collection(db, "challenges"), where("targetId", "==", userId), where("status", "==", "pending"));
     return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
             const challenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Challenge));
-            // Sort by timestamp descending
             challenges.sort((a, b) => {
                 const tA = (a.timestamp as any)?.toMillis ? (a.timestamp as any).toMillis() : (a.timestamp || 0);
                 const tB = (b.timestamp as any)?.toMillis ? (b.timestamp as any).toMillis() : (b.timestamp || 0);
@@ -413,10 +348,7 @@ export const subscribeToChallengeStatus = (challengeId: string, callback: (data:
 };
 
 export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined', gameId?: string) => {
-    await updateDoc(doc(db, "challenges", challengeId), {
-        status: status,
-        gameId: gameId || null
-    });
+    await updateDoc(doc(db, "challenges", challengeId), { status: status, gameId: gameId || null });
 };
 
 export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
@@ -425,19 +357,12 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
         stake: challenge.stake,
         status: "active",
         host: challenge.sender, 
-        guest: {
-            id: receiver.id,
-            name: receiver.name,
-            avatar: receiver.avatar,
-            elo: receiver.elo,
-            rankTier: receiver.rankTier
-        },
+        guest: { id: receiver.id, name: receiver.name, avatar: receiver.avatar, elo: receiver.elo, rankTier: receiver.rankTier },
         players: [challenge.sender.id!, receiver.id],
         createdAt: serverTimestamp(),
         turn: challenge.sender.id,
         gameState: {}
     };
-    
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
 };
@@ -445,10 +370,18 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
 // --- TOURNAMENTS ---
 
 export const getTournaments = async (): Promise<Tournament[]> => {
-    // For admin purposes, fetch all
     const q = query(collection(db, "tournaments"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tournament));
+};
+
+// NEW: Subscribe to single tournament for real-time updates
+export const subscribeToTournament = (tournamentId: string, callback: (t: Tournament) => void) => {
+    return onSnapshot(doc(db, "tournaments", tournamentId), (docSnap) => {
+        if (docSnap.exists()) {
+            callback({ id: docSnap.id, ...docSnap.data() } as Tournament);
+        }
+    });
 };
 
 export const createTournament = async (data: Omit<Tournament, 'id'>) => {
@@ -457,7 +390,6 @@ export const createTournament = async (data: Omit<Tournament, 'id'>) => {
 
 export const deleteTournament = async (tournamentId: string) => {
     await deleteDoc(doc(db, "tournaments", tournamentId));
-    // Also delete matches
     const q = query(collection(db, "tournament_matches"), where("tournamentId", "==", tournamentId));
     const snapshot = await getDocs(q);
     const batch = writeBatch(db);
@@ -475,7 +407,6 @@ export const startTournament = async (tournamentId: string) => {
     if (!tSnap.exists()) return;
     const tData = tSnap.data() as Tournament;
 
-    // Shuffle Participants
     const participants = [...tData.participants];
     for (let i = participants.length - 1; i > 0; i--) {
         const j = Math.floor(Math.random() * (i + 1));
@@ -488,16 +419,14 @@ export const startTournament = async (tournamentId: string) => {
     let matchCount = 0;
     const round = 1;
 
-    // Create Round 1 Matches
     const playerProfiles = await Promise.all(participants.map(async (uid) => {
         const uSnap = await getDoc(doc(db, 'users', uid));
         return uSnap.exists() ? uSnap.data() as User : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
     }));
 
-    // Pair up
     while (playerProfiles.length > 0) {
         const p1 = playerProfiles.pop();
-        const p2 = playerProfiles.pop(); // Undefined if odd
+        const p2 = playerProfiles.pop(); 
 
         const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
         const matchRef = doc(matchesRef, matchId); 
@@ -509,9 +438,9 @@ export const startTournament = async (tournamentId: string) => {
             matchIndex: matchCount,
             player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
             player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
-            winnerId: p2 ? null : p1?.id, // Automatic Bye if no P2
+            winnerId: p2 ? null : p1?.id, 
             status: p2 ? 'scheduled' : 'completed',
-            startTime: tData.startTime, // Should be an ISO string
+            startTime: tData.startTime, 
             nextMatchId: null 
         };
 
@@ -519,9 +448,7 @@ export const startTournament = async (tournamentId: string) => {
         matchCount++;
     }
 
-    // Update Tournament Status & Shuffled List (optional to save list but good for reference)
-    batch.update(tRef, { status: 'active', participants: participants }); // Update with shuffled
-
+    batch.update(tRef, { status: 'active', participants: participants });
     await batch.commit();
 };
 
@@ -543,35 +470,40 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
         const start = new Date(m.startTime);
         const diffMins = (now.getTime() - start.getTime()) / 60000;
 
-        if (diffMins > 5) { // 5 minutes strict Forfeit
-             console.log(`Auto-forfeiting match ${m.id} due to absence`);
-             // Default win to Player 1 if both absent, or just random to keep bracket moving
-             // In a real scenario, we'd check if one player is online.
-             const winnerId = m.player1?.id || 'bye';
-             await reportTournamentMatchResult(m.id, winnerId);
+        if (diffMins > 3) { // Reduced to 3 minutes for faster auto-forfeit in production/demo
+             console.log(`Auto-forfeiting match ${m.id} due to no-show`);
+             
+             // If neither joined, pick random winner to advance bracket
+             let winnerId;
+             if (m.player1 && m.player2) {
+                 winnerId = Math.random() > 0.5 ? m.player1.id : m.player2.id;
+             } else {
+                 winnerId = m.player1?.id || m.player2?.id || 'bye';
+             }
+
+             // Check if match status changed in meantime (safety)
+             const freshSnap = await getDoc(docSnap.ref);
+             if (freshSnap.exists() && freshSnap.data().status === 'scheduled') {
+                 await reportTournamentMatchResult(m.id, winnerId!);
+             }
         }
     }
 };
 
-// New function to report match result and advance bracket
 export const reportTournamentMatchResult = async (matchId: string, winnerId: string) => {
-    // 1. Update Match
     await updateDoc(doc(db, "tournament_matches", matchId), {
         winnerId,
         status: 'completed'
     });
 
-    // 2. Fetch Match to get Tournament ID and Round
     const mSnap = await getDoc(doc(db, "tournament_matches", matchId));
     if (!mSnap.exists()) return;
     const mData = mSnap.data() as TournamentMatch;
 
-    // 3. Trigger Advancement Check
     await checkAndAdvanceTournament(mData.tournamentId, mData.round);
 }
 
 const checkAndAdvanceTournament = async (tournamentId: string, round: number) => {
-    // Check if ALL matches in this round are completed
     const q = query(
         collection(db, "tournament_matches"),
         where("tournamentId", "==", tournamentId),
@@ -581,28 +513,22 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
     const matches = snapshot.docs.map(d => d.data() as TournamentMatch);
 
     const allComplete = matches.every(m => m.status === 'completed');
-    if (!allComplete || matches.length === 0) return; // Wait for others
+    if (!allComplete || matches.length === 0) return; 
 
-    // Generate Next Round
-    // Sort by matchIndex to preserve bracket structure
     matches.sort((a,b) => a.matchIndex - b.matchIndex);
     const winners = matches.map(m => m.winnerId).filter(Boolean) as string[];
 
-    if (winners.length === 1) {
+    // Ensure it is truly the final match of the bracket (Single winner from a single match round)
+    if (winners.length === 1 && matches.length === 1) {
         const winnerId = winners[0];
-        
-        // Use transaction to ensure safe payout and status update
         await runTransaction(db, async (transaction) => {
             const tourneyRef = doc(db, "tournaments", tournamentId);
             const tourneyDoc = await transaction.get(tourneyRef);
             if (!tourneyDoc.exists()) throw "Tournament not found";
             
             const tData = tourneyDoc.data() as Tournament;
-            
-            // Check if already completed to prevent double payout
             if (tData.status === 'completed') return; 
 
-            // Update Winner Balance
             const winnerRef = doc(db, "users", winnerId);
             const winnerDoc = await transaction.get(winnerRef);
             
@@ -615,7 +541,6 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
                     balance: currentBal + finalPrize 
                 });
                 
-                // Transaction Record
                 const txRef = doc(collection(db, "users", winnerId, "transactions"));
                 transaction.set(txRef, {
                     type: 'winnings', 
@@ -627,7 +552,6 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
                 });
             }
 
-            // Close Tournament
             transaction.update(tourneyRef, {
                 status: 'completed',
                 winnerId: winnerId
@@ -636,16 +560,14 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
         return;
     }
 
-    // Create Next Round Matches
     const batch = writeBatch(db);
     const matchesRef = collection(db, "tournament_matches");
     let nextRoundMatchCount = 0;
 
     for (let i = 0; i < winners.length; i += 2) {
         const p1Id = winners[i];
-        const p2Id = winners[i+1]; // might be undefined if odd number
+        const p2Id = winners[i+1]; 
 
-        // Fetch minimal player data for display
         const p1Doc = await getDoc(doc(db, "users", p1Id));
         const p1Data = p1Doc.exists() ? p1Doc.data() : { id: p1Id, name: 'Unknown', avatar: '' };
         
@@ -664,29 +586,25 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
             matchIndex: nextRoundMatchCount,
             player1: { id: p1Data.id, name: p1Data.name, avatar: p1Data.avatar, rankTier: p1Data.rankTier },
             player2: p2Data ? { id: p2Data.id, name: p2Data.name, avatar: p2Data.avatar, rankTier: p2Data.rankTier } : null,
-            winnerId: p2Id ? null : p1Id, // Auto advance if bye
-            status: p2Id ? 'scheduled' : 'completed', // Auto complete if bye
-            startTime: new Date(Date.now() + 60000).toISOString() // Starts in 1 min
+            winnerId: p2Id ? null : p1Id,
+            status: p2Id ? 'scheduled' : 'completed', 
+            startTime: new Date(Date.now() + 60000).toISOString() 
         };
 
         batch.set(doc(matchesRef, newMatchId), matchData);
         nextRoundMatchCount++;
     }
-    
     await batch.commit();
 };
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
     const tRef = doc(db, "tournaments", tournamentId);
-    
     try {
         await runTransaction(db, async (transaction) => {
             const tDoc = await transaction.get(tRef);
             if (!tDoc.exists()) throw "Tournament does not exist";
             
             const tData = tDoc.data() as Tournament;
-            
-            // Check status - Only allow if in registration
             if (tData.status !== 'registration') throw "Tournament not in registration phase";
             if (tData.participants.length >= tData.maxPlayers) throw "Tournament full";
             if (tData.participants.includes(user.id)) throw "Already registered";
@@ -698,10 +616,8 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
             const userData = userDoc.data() as User;
             if (userData.balance < tData.entryFee) throw "Insufficient funds";
 
-            // Deduct funds
             transaction.update(userRef, { balance: userData.balance - tData.entryFee });
             
-            // Add to transaction history
             const newTxRef = doc(collection(db, "users", user.id, "transactions"));
             transaction.set(newTxRef, {
                 type: 'tournament_entry',
@@ -711,20 +627,11 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
                 timestamp: serverTimestamp()
             });
 
-            // Update Tournament: 
-            // Logic Fork based on Type
-            const isFixed = tData.type === 'fixed';
-            
-            if (isFixed) {
-                // Fixed Pool: Just add participant, do not increase pool
-                transaction.update(tRef, {
-                    participants: [...tData.participants, user.id]
-                });
+            if (tData.type === 'fixed') {
+                transaction.update(tRef, { participants: [...tData.participants, user.id] });
             } else {
-                // Dynamic Pool (Default): Collect 10% platform fee, add rest to pool
                 const platformFee = tData.entryFee * 0.10;
                 const netContribution = tData.entryFee - platformFee;
-
                 transaction.update(tRef, {
                     participants: [...tData.participants, user.id],
                     prizePool: (tData.prizePool || 0) + netContribution
@@ -740,13 +647,9 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
 
 export const getTournamentMatches = async (tournamentId: string): Promise<TournamentMatch[]> => {
     try {
-        const q = query(
-            collection(db, "tournament_matches"), 
-            where("tournamentId", "==", tournamentId)
-        );
+        const q = query(collection(db, "tournament_matches"), where("tournamentId", "==", tournamentId));
         const snapshot = await getDocs(q);
         const matches = snapshot.docs.map(doc => doc.data() as TournamentMatch);
-        // Sort by round then index
         return matches.sort((a, b) => {
             if (a.round === b.round) return a.matchIndex - b.matchIndex;
             return a.round - b.round;
@@ -757,54 +660,34 @@ export const getTournamentMatches = async (tournamentId: string): Promise<Tourna
     }
 };
 
-// --- ADMIN & STATS ---
-
+// ... (stats, bug reports, forum, live winners functions - keep unchanged)
 export const getActiveGamesCount = async (): Promise<number> => {
     try {
         const q = query(collection(db, "games"), where("status", "in", ["active", "waiting"]));
         const snapshot = await getDocs(q);
         return snapshot.size;
-    } catch (e) {
-        return 0;
-    }
+    } catch (e) { return 0; }
 };
 
 export const getGameActivityStats = async (): Promise<number[]> => {
     try {
-        // Get games from last 24 hours
         const yesterday = new Date();
         yesterday.setHours(yesterday.getHours() - 24);
-        
-        const q = query(
-            collection(db, "games"),
-            where("createdAt", ">=", yesterday),
-            orderBy("createdAt", "asc")
-        );
-        
+        const q = query(collection(db, "games"), where("createdAt", ">=", yesterday), orderBy("createdAt", "asc"));
         const snapshot = await getDocs(q);
-        
-        // Initialize buckets for 24 hours
         const buckets = new Array(24).fill(0);
         const now = new Date().getTime();
-        
         snapshot.forEach(doc => {
             const data = doc.data();
             if (data.createdAt) {
                 const date = data.createdAt.toDate ? data.createdAt.toDate() : new Date(data.createdAt);
-                
                 const diffMs = now - date.getTime();
                 const hourIndex = 23 - Math.floor(diffMs / (1000 * 60 * 60));
-                
-                if (hourIndex >= 0 && hourIndex < 24) {
-                    buckets[hourIndex]++;
-                }
+                if (hourIndex >= 0 && hourIndex < 24) buckets[hourIndex]++;
             }
         });
-        
         return buckets;
-    } catch (e) {
-        return new Array(24).fill(0); 
-    }
+    } catch (e) { return new Array(24).fill(0); }
 };
 
 export const getSystemLogs = async () => {
@@ -825,19 +708,11 @@ export const getSystemLogs = async () => {
                 type: data.stake > 5000 ? 'warning' : 'info'
             };
         });
-    } catch (e) {
-        return [];
-    }
+    } catch (e) { return []; }
 };
 
-// --- BUG REPORTS ---
-
 export const submitBugReport = async (report: Omit<BugReport, 'id' | 'timestamp' | 'status'>) => {
-    await addDoc(collection(db, "bug_reports"), {
-        ...report,
-        status: 'open',
-        timestamp: serverTimestamp()
-    });
+    await addDoc(collection(db, "bug_reports"), { ...report, status: 'open', timestamp: serverTimestamp() });
     return true;
 };
 
@@ -845,35 +720,18 @@ export const getBugReports = async (): Promise<BugReport[]> => {
     try {
         const q = query(collection(db, "bug_reports"), orderBy("timestamp", "desc"));
         const snapshot = await getDocs(q);
-        return snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        } as BugReport));
-    } catch (e) {
-        return [];
-    }
+        return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BugReport));
+    } catch (e) { return []; }
 };
 
 export const resolveBugReport = async (id: string) => {
-    await updateDoc(doc(db, "bug_reports", id), {
-        status: 'resolved'
-    });
+    await updateDoc(doc(db, "bug_reports", id), { status: 'resolved' });
 };
 
-// --- FORUM ---
-
 export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
-    const q = query(
-        collection(db, "forum_posts"),
-        orderBy("timestamp", "desc"),
-        limit(50)
-    );
-    
+    const q = query(collection(db, "forum_posts"), orderBy("timestamp", "desc"), limit(50));
     return onSnapshot(q, (snapshot) => {
-        const posts = snapshot.docs.map(doc => ({
-            id: doc.id,
-            ...doc.data()
-        } as ForumPost)).reverse(); 
+        const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ForumPost)).reverse(); 
         callback(posts);
     });
 };
@@ -894,36 +752,25 @@ export const deleteForumMessage = async (postId: string) => {
     await deleteDoc(doc(db, "forum_posts", postId));
 };
 
-// --- LIVE WINNERS ---
-
 export const subscribeToGlobalWinners = (callback: (winners: any[]) => void) => {
-    // Attempt to query recently completed high-stake games
     try {
-        const q = query(
-            collection(db, "games"), 
-            where("status", "==", "completed"),
-            orderBy("updatedAt", "desc"),
-            limit(10)
-        );
-
+        const q = query(collection(db, "games"), where("status", "==", "completed"), orderBy("updatedAt", "desc"), limit(10));
         return onSnapshot(q, (snapshot) => {
             const winners: any[] = [];
             snapshot.forEach(doc => {
                 const d = doc.data();
-                if (d.winner && d.gameState?.scores) { // Very rough extraction
-                    // Find winner name
+                if (d.winner && d.gameState?.scores) { 
                     const winnerId = d.winner;
                     const winnerProfile = d.host.id === winnerId ? d.host : d.guest;
                     if (winnerProfile) {
                         winners.push({
                             name: winnerProfile.name,
                             avatar: winnerProfile.avatar,
-                            amount: (d.stake * 2 * 0.9).toLocaleString(), // Net win
+                            amount: (d.stake * 2 * 0.9).toLocaleString(), 
                             game: d.gameType
                         });
                     }
                 } else if (d.winner) {
-                     // Simplified fallback
                      winners.push({
                         name: "Player", 
                         avatar: "https://i.pravatar.cc/150",
@@ -934,11 +781,8 @@ export const subscribeToGlobalWinners = (callback: (winners: any[]) => void) => 
             });
             callback(winners);
         }, (error) => {
-            // Likely missing index error, fallback to empty to avoid crash
-            console.warn("Live Winners Sync skipped (Index missing?)", error);
+            console.warn("Live Winners Sync skipped", error);
             callback([]);
         });
-    } catch(e) {
-        return () => {};
-    }
+    } catch(e) { return () => {}; }
 };
