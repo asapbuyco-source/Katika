@@ -1,3 +1,4 @@
+
 import { initializeApp } from "firebase/app";
 import { 
   getAuth, 
@@ -607,15 +608,18 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
             
             if (winnerDoc.exists()) {
                 const currentBal = winnerDoc.data().balance || 0;
+                // Accumulate prize if dynamic (ensure we use the latest pool value from DB)
+                const finalPrize = tData.prizePool || 0;
+
                 transaction.update(winnerRef, { 
-                    balance: currentBal + tData.prizePool 
+                    balance: currentBal + finalPrize 
                 });
                 
                 // Transaction Record
                 const txRef = doc(collection(db, "users", winnerId, "transactions"));
                 transaction.set(txRef, {
                     type: 'winnings', 
-                    amount: tData.prizePool,
+                    amount: finalPrize,
                     status: 'completed',
                     date: new Date().toISOString(),
                     timestamp: serverTimestamp(),
@@ -681,6 +685,9 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
             if (!tDoc.exists()) throw "Tournament does not exist";
             
             const tData = tDoc.data() as Tournament;
+            
+            // Check status - Only allow if in registration
+            if (tData.status !== 'registration') throw "Tournament not in registration phase";
             if (tData.participants.length >= tData.maxPlayers) throw "Tournament full";
             if (tData.participants.includes(user.id)) throw "Already registered";
 
@@ -720,7 +727,7 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
 
                 transaction.update(tRef, {
                     participants: [...tData.participants, user.id],
-                    prizePool: tData.prizePool + netContribution
+                    prizePool: (tData.prizePool || 0) + netContribution
                 });
             }
         });
