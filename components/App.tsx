@@ -1,6 +1,6 @@
 
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
-import { ViewState, User, Table, Challenge } from '../types';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import { ViewState, User, Table, Challenge, Tournament } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
 import { GameRoom } from './GameRoom'; // Generic room, used for Ludo/Others if active
@@ -28,10 +28,12 @@ import { GameResultOverlay } from './GameResultOverlay';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { 
     auth, syncUserProfile, logout, subscribeToUser, createBotMatch, 
-    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult, setTournamentMatchActive
+    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult, setTournamentMatchActive,
+    db 
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
 import { AnimatePresence, motion } from 'framer-motion';
 import { io, Socket } from 'socket.io-client';
 import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
@@ -48,8 +50,11 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { hasError: false };
+class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
+    super(props);
+    this.state = { hasError: false };
+  }
 
   static getDerivedStateFromError(error: any): ErrorBoundaryState {
     return { hasError: true };
@@ -192,7 +197,7 @@ const AppContent = () => {
   const [authLoading, setAuthLoading] = useState(true);
   
   // Game End State
-  const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number, financials?: any } | null>(null);
+  const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number, financials?: any, tournamentPot?: number } | null>(null);
   
   // Rematch State
   const [rematchStatus, setRematchStatus] = useState<'idle' | 'requested' | 'opponent_requested' | 'declined'>('idle');
@@ -532,13 +537,32 @@ const AppContent = () => {
   };
 
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
+      let tournamentPot = 0;
+
       // Check if this was a tournament game and we won
-      if (activeTable && activeTable.tournamentMatchId && result === 'win' && user) {
-          // Report win to backend to advance bracket
-          await reportTournamentMatchResult(activeTable.tournamentMatchId, user.id);
+      if (activeTable && activeTable.tournamentMatchId && user) {
+          // Fetch pot info for display
+          try {
+              const matchParts = activeTable.tournamentMatchId.split('-'); // m-{tourneyId}-...
+              if (matchParts.length > 1) {
+                  const tourneyId = matchParts[1];
+                  const tDoc = await getDoc(doc(db, 'tournaments', tourneyId));
+                  if (tDoc.exists()) {
+                      const tData = tDoc.data() as Tournament;
+                      tournamentPot = tData.type === 'fixed' 
+                          ? tData.prizePool 
+                          : (tData.prizePool || 0) + (tData.entryFee * tData.participants.length * 0.9);
+                  }
+              }
+          } catch (e) { console.error("Error fetching pot", e); }
+
+          if (result === 'win') {
+              // Report win to backend to advance bracket
+              await reportTournamentMatchResult(activeTable.tournamentMatchId, user.id);
+          }
       }
       
-      setGameResult({ result, amount: 0 }); 
+      setGameResult({ result, amount: 0, tournamentPot }); 
   };
 
   const finalizeGameEnd = () => {
@@ -706,6 +730,7 @@ const AppContent = () => {
               stake={socketGame?.stake} 
               userBalance={user?.balance} 
               isTournament={!!activeTable?.tournamentMatchId}
+              tournamentPot={gameResult.tournamentPot}
           />}
           
           {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}

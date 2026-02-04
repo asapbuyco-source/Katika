@@ -1,7 +1,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, XCircle, Home, RotateCcw, Coins, ShieldAlert, ArrowRight, Wallet, Percent, Users, Loader2 } from 'lucide-react';
+import { Trophy, XCircle, Home, RotateCcw, Coins, ShieldAlert, ArrowRight, Wallet, Percent, Users, Loader2, Crown } from 'lucide-react';
 
 interface GameResultOverlayProps {
   result: 'win' | 'loss' | 'quit';
@@ -18,6 +18,7 @@ interface GameResultOverlayProps {
   stake?: number;
   userBalance?: number;
   isTournament?: boolean; // New Prop
+  tournamentPot?: number; // New Prop for Pot Display
 }
 
 export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({ 
@@ -29,7 +30,8 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
     rematchStatus = 'idle',
     stake = 0,
     userBalance = 0,
-    isTournament = false
+    isTournament = false,
+    tournamentPot = 0
 }) => {
   const [displayAmount, setDisplayAmount] = useState(0);
 
@@ -136,19 +138,36 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                 <h2 className={`text-4xl font-display font-black uppercase mb-2 ${
                     result === 'win' ? 'text-transparent bg-clip-text bg-gradient-to-b from-white to-gold-400' : 'text-slate-200'
                 }`}>
-                    {result === 'win' ? 'Victory!' : result === 'quit' ? 'Draw' : 'Defeat'}
+                    {result === 'win' ? (isTournament ? 'Round Cleared!' : 'Victory!') : result === 'quit' ? 'Draw' : 'Defeat'}
                 </h2>
                 
                 <p className="text-slate-400 mb-8 text-sm">
                     {isTournament ? (
-                        result === 'win' ? 'Match Won! Proceed to bracket for next round.' : 'Eliminated. Thank you for participating.'
+                        result === 'win' ? 'You have advanced to the next bracket.' : 'Eliminated. Thank you for participating.'
                     ) : (
                         result === 'win' ? 'Great match! Your winnings have been secured.' : 'Better luck next time. Your skill is improving.'
                     )}
                 </p>
 
-                {/* Money Animation - Only show for standard games OR if it's a win */}
-                {/* For Tournaments, we don't show individual match payout unless it's the final (handled by backend logic, but here we can just show generic win) */}
+                {/* TOURNAMENT POT DISPLAY (If Tournament & Win) */}
+                {isTournament && result === 'win' && (
+                    <div className="mb-8 w-full bg-gradient-to-r from-purple-900/50 to-royal-900/50 rounded-2xl p-4 border border-gold-500/30 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-8 bg-gold-500/10 blur-xl rounded-full"></div>
+                        <div className="flex flex-col items-center relative z-10">
+                            <div className="flex items-center gap-2 text-xs font-bold text-gold-400 uppercase tracking-widest mb-1">
+                                <Crown size={12} /> Grand Prize Pool
+                            </div>
+                            <div className="text-3xl font-mono font-bold text-white">
+                                {tournamentPot.toLocaleString()} <span className="text-xs text-slate-500">FCFA</span>
+                            </div>
+                            <div className="mt-2 text-[10px] text-green-400 font-bold bg-green-500/10 px-2 py-0.5 rounded border border-green-500/20">
+                                ONE STEP CLOSER
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* STANDARD MONEY DISPLAY (If Not Tournament & Win) */}
                 {!isTournament && result === 'win' && financials ? (
                     <div className="mb-8 w-full bg-royal-950/50 rounded-2xl p-4 border border-white/10">
                         <div className="flex justify-between items-center text-xs text-slate-400 mb-2">
@@ -166,7 +185,7 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                             </div>
                         </div>
                     </div>
-                ) : !isTournament && amount !== 0 && (
+                ) : !isTournament && amount !== 0 && !isTournament && (
                     <div className="mb-8 w-full">
                         <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
                             {result === 'win' ? 'Winnings Added' : 'Stake Lost'}
