@@ -4,10 +4,13 @@ import { ArrowLeft, Crown, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, Ex
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { createLidraughtsGame, fetchLidraughtsState, makeLidraughtsMove, toCoords, toNotation } from '../services/lidraughts';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface CheckersGameProps {
   table: Table;

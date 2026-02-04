@@ -1,9 +1,12 @@
 
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
+import { motion as originalMotion } from 'framer-motion';
 import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft } from 'lucide-react';
 import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile } from '../services/firebase';
 import { User as AppUser, ViewState } from '../types';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface AuthScreenProps {
   onAuthenticated: (user?: AppUser) => void;

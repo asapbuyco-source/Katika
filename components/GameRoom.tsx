@@ -1,11 +1,15 @@
+
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface GameRoomProps {
   table: Table;

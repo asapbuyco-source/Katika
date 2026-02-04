@@ -3,8 +3,11 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, subscribeToGameConfigs, subscribeToGlobalWinners } from '../services/firebase';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface DashboardProps {
   user: User;

@@ -1,7 +1,11 @@
+
 import React, { useEffect, useState } from 'react';
 import { Shield, Activity, Wifi, Eye } from 'lucide-react';
 import { AIRefereeLog } from '../types';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface AIRefereeProps {
     externalLog?: AIRefereeLog | null;

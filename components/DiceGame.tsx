@@ -4,8 +4,11 @@ import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw, BookOpen
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
-import { motion, AnimatePresence, PanInfo } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface DiceGameProps {
   table: Table;
@@ -329,7 +332,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
       }
   };
 
-  const handleSwipe = (event: any, info: PanInfo) => {
+  const handleSwipe = (event: any, info: any) => {
       const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
       if (info.offset.y < -50 && isMyTurn && phase === 'waiting' && !hasRolled) {
           roll();

@@ -3,9 +3,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
 import { getUserTransactions, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface FinanceProps {
   user: User;
@@ -261,7 +264,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                }`}
                                            >
                                                <div className="w-8 h-8 rounded-full bg-[#ffcc00] flex items-center justify-center text-black font-black text-xs">MTN</div>
-                                               <span className={`text-sm font-bold ${provider === 'mtn' ? 'text-yellow-400' : 'text-slate-400'}`}>MTN MoMo</span>
+                                               <span className={`text-sm font-bold ${provider === 'mtn' ? 'text-yellow-400' : 'text-slate-400'}`}>MTN Mobile Money</span>
                                            </button>
                                            <button 
                                                onClick={() => setProvider('orange')}
@@ -274,94 +277,71 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                            </button>
                                        </div>
 
-                                       <div className="space-y-4">
-                                           <div>
-                                               <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('amount')} (FCFA)</label>
-                                               <div className="relative">
-                                                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
-                                                   <input 
-                                                       type="number" 
-                                                       value={amount}
-                                                       onChange={e => setAmount(e.target.value)}
-                                                       className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
-                                                       placeholder="5,000"
-                                                   />
-                                               </div>
-                                               <div className="flex gap-2 mt-2">
-                                                   {[1000, 5000, 10000, 25000].map(val => (
-                                                       <button 
-                                                           key={val}
-                                                           onClick={() => setAmount(val.toString())}
-                                                           className="px-3 py-1 rounded-lg bg-white/5 text-xs text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
-                                                       >
-                                                           +{val.toLocaleString()}
-                                                       </button>
-                                                   ))}
-                                               </div>
+                                       <div>
+                                           <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('amount')} (FCFA)</label>
+                                           <input 
+                                               type="number" 
+                                               value={amount}
+                                               onChange={(e) => setAmount(e.target.value)}
+                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-4 text-white font-mono font-bold text-xl focus:border-gold-500 transition-colors"
+                                               placeholder="500"
+                                           />
+                                           <div className="flex gap-2 mt-2">
+                                               {[500, 1000, 5000, 10000].map(amt => (
+                                                   <button key={amt} onClick={() => setAmount(amt.toString())} className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-mono text-slate-400 transition-colors">
+                                                       {amt}
+                                                   </button>
+                                               ))}
                                            </div>
-
-                                           {/* Charge Summary */}
-                                           {inputAmount > 0 && (
-                                               <div className="p-4 bg-royal-950/50 rounded-xl border border-white/5 space-y-2">
-                                                   <div className="flex justify-between text-sm">
-                                                       <span className="text-slate-400">Deposit Amount</span>
-                                                       <span className="font-bold text-white">{inputAmount.toLocaleString()} FCFA</span>
-                                                   </div>
-                                                   <div className="flex justify-between text-sm">
-                                                       <span className="text-slate-400">Processing Fee (3%)</span>
-                                                       <span className="font-bold text-red-400">+{fee.toLocaleString()} FCFA</span>
-                                                   </div>
-                                                   <div className="border-t border-white/10 my-1"></div>
-                                                   <div className="flex justify-between text-base font-bold">
-                                                       <span className="text-white">Total Charge</span>
-                                                       <span className="text-gold-400">{total.toLocaleString()} FCFA</span>
-                                                   </div>
-                                                   <div className="flex items-start gap-2 mt-2 p-2 bg-yellow-500/10 rounded-lg">
-                                                       <Info size={14} className="text-yellow-500 shrink-0 mt-0.5" />
-                                                       <p className="text-[10px] text-yellow-200/80 leading-tight">
-                                                           A 3% fee is applied by the payment processor. You will be charged {total.toLocaleString()} FCFA but your wallet will be credited with {inputAmount.toLocaleString()} FCFA.
-                                                       </p>
-                                                   </div>
-                                               </div>
-                                           )}
-
-                                           <button 
-                                               onClick={handleDeposit}
-                                               disabled={isLoading || !amount}
-                                               className="w-full py-4 bg-green-500 hover:bg-green-400 text-royal-900 font-bold rounded-xl shadow-lg shadow-green-500/20 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                           >
-                                               {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowDownLeft />}
-                                               {isLoading ? t('processing') : `${t('proceed_payment')} (${total.toLocaleString()} FCFA)`}
-                                           </button>
                                        </div>
+
+                                       <div className="p-4 bg-royal-950/50 rounded-xl border border-white/5 space-y-2">
+                                           <div className="flex justify-between text-sm">
+                                               <span className="text-slate-400">{t('amount')}</span>
+                                               <span className="text-white font-mono">{inputAmount.toLocaleString()} FCFA</span>
+                                           </div>
+                                           <div className="flex justify-between text-sm">
+                                               <span className="text-slate-400">Fee (3%)</span>
+                                               <span className="text-white font-mono">{fee.toLocaleString()} FCFA</span>
+                                           </div>
+                                           <div className="border-t border-white/10 my-2"></div>
+                                           <div className="flex justify-between font-bold">
+                                               <span className="text-white">Total</span>
+                                               <span className="text-gold-400 font-mono">{total.toLocaleString()} FCFA</span>
+                                           </div>
+                                       </div>
+
+                                       <button 
+                                           onClick={handleDeposit} 
+                                           disabled={isLoading || !amount}
+                                           className="w-full py-4 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                       >
+                                           {isLoading ? <RefreshCw className="animate-spin" /> : t('proceed_payment')} <ArrowRight size={18} />
+                                       </button>
                                    </>
                                ) : (
-                                   <div className="text-center py-8">
-                                       <div className="w-16 h-16 bg-gold-500/20 text-gold-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
+                                   <motion.div 
+                                       initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                       className="text-center py-8"
+                                   >
+                                       <div className="w-16 h-16 bg-yellow-500/20 text-yellow-500 rounded-full flex items-center justify-center mx-auto mb-4 animate-pulse">
                                            <Smartphone size={32} />
                                        </div>
                                        <h3 className="text-xl font-bold text-white mb-2">{t('payment_initiated')}</h3>
                                        <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
-                                           Checking transaction status... <br/>
-                                           <span className="text-xs text-slate-500">Transaction ID: {transId}</span>
+                                           Please verify the transaction on your phone. <br/>
+                                           <span className="text-xs text-slate-500">(Use code *126# for MTN or #150# for Orange if prompt doesn't appear)</span>
                                        </p>
+                                       
                                        <div className="flex flex-col gap-3">
-                                            <a 
-                                                href={paymentLink} 
-                                                target="_blank" 
-                                                rel="noreferrer"
-                                                className="w-full py-3 bg-gold-500 text-royal-900 font-bold rounded-xl hover:bg-gold-400 flex items-center justify-center gap-2"
-                                            >
-                                                <ExternalLink size={18} /> {t('open_payment')}
-                                            </a>
-                                            <button 
-                                                onClick={cancelPayment}
-                                                className="text-slate-400 text-sm hover:text-white"
-                                            >
-                                                {t('cancel_pay')}
-                                            </button>
+                                           <button onClick={() => window.open(paymentLink, '_blank')} className="w-full py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                                               <ExternalLink size={18} /> {t('open_payment')}
+                                           </button>
+                                           <button onClick={cancelPayment} className="w-full py-3 text-red-400 font-bold hover:bg-red-500/10 rounded-xl transition-colors">
+                                               {t('cancel_pay')}
+                                           </button>
                                        </div>
-                                   </div>
+                                   </motion.div>
                                )}
                            </motion.div>
                        )}
@@ -379,102 +359,98 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                    </div>
                                    <div>
                                        <h3 className="text-lg font-bold text-white">{t('withdraw_funds')}</h3>
-                                       <p className="text-sm text-slate-400">Cash out to your mobile wallet</p>
+                                       <p className="text-sm text-slate-400">Transfer to Mobile Wallet</p>
                                    </div>
                                </div>
 
-                               <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl mb-6 flex gap-3">
-                                   <Building className="text-yellow-500 flex-shrink-0" size={20} />
+                               <div>
+                                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('amount')} (FCFA)</label>
+                                   <input 
+                                       type="number" 
+                                       value={amount}
+                                       onChange={(e) => setAmount(e.target.value)}
+                                       className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-4 text-white font-mono font-bold text-xl focus:border-red-500 transition-colors"
+                                       placeholder="Min 1000"
+                                   />
+                                   <div className="text-right mt-1">
+                                       <button onClick={() => setAmount(user.balance.toString())} className="text-xs text-gold-400 hover:text-white font-bold uppercase">Max: {user.balance}</button>
+                                   </div>
+                               </div>
+
+                               <div>
+                                   <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('send_to')}</label>
+                                   <div className="relative">
+                                       <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
+                                       <input 
+                                           type="tel" 
+                                           value={phone}
+                                           onChange={(e) => setPhone(e.target.value)}
+                                           className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white font-mono focus:border-red-500 transition-colors"
+                                           placeholder="6XX XXX XXX"
+                                       />
+                                   </div>
+                               </div>
+
+                               <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex gap-3 items-start">
+                                   <Info className="text-yellow-500 shrink-0 mt-0.5" size={16} />
                                    <p className="text-xs text-yellow-200/80 leading-relaxed">
-                                       Withdrawals are processed instantly. A standard carrier fee of 1.5% applies to all transactions.
+                                       Withdrawals are processed instantly but may take up to 30 mins during network congestion. Ensure your number matches your account verification.
                                    </p>
                                </div>
 
-                               <div className="space-y-4">
-                                   <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('amount')} (FCFA)</label>
-                                       <div className="relative">
-                                           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">FCFA</span>
-                                           <input 
-                                               type="number" 
-                                               value={amount}
-                                               onChange={e => setAmount(e.target.value)}
-                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-16 pr-4 text-white font-mono font-bold focus:outline-none focus:border-gold-500 transition-colors"
-                                               placeholder="0"
-                                           />
-                                       </div>
-                                       <div className="flex justify-between mt-2 text-xs">
-                                           <span className="text-slate-500">Available: {user.balance.toLocaleString()} FCFA</span>
-                                           <button onClick={() => setAmount(user.balance.toString())} className="text-gold-400 font-bold uppercase">Max</button>
-                                       </div>
-                                   </div>
-
-                                   <div>
-                                       <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('send_to')}</label>
-                                       <div className="relative">
-                                           <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                           <input 
-                                               type="tel" 
-                                               value={phone}
-                                               onChange={e => setPhone(e.target.value)}
-                                               className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white font-mono focus:outline-none focus:border-gold-500 transition-colors"
-                                               placeholder="6XX XXX XXX"
-                                           />
-                                       </div>
-                                   </div>
-
-                                   <button 
-                                       onClick={handleWithdraw}
-                                       disabled={isLoading || !amount || !phone || Number(amount) > user.balance}
-                                       className="w-full py-4 bg-white text-royal-900 font-bold rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                                   >
-                                       {isLoading ? <RefreshCw className="animate-spin" /> : <ArrowUpRight />}
-                                       {isLoading ? t('processing') : t('withdraw_cash')}
-                                   </button>
-                               </div>
+                               <button 
+                                   onClick={handleWithdraw}
+                                   disabled={isLoading || !amount || !phone}
+                                   className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                               >
+                                   {isLoading ? <RefreshCw className="animate-spin" /> : t('withdraw_cash')} <ArrowUpRight size={18} />
+                               </button>
                            </motion.div>
                        )}
 
-                        {/* HISTORY TAB */}
-                        {activeTab === 'history' && (
+                       {/* HISTORY */}
+                       {activeTab === 'history' && (
                            <motion.div 
                                key="history"
                                initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}
                            >
-                               <h3 className="text-lg font-bold text-white mb-4">{t('recent_transactions')}</h3>
-                               {transactions.length > 0 ? (
-                                   <div className="space-y-3">
-                                       {transactions.map((tx) => (
-                                           <div key={tx.id} className="flex justify-between items-center p-4 bg-royal-950/50 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`p-2.5 rounded-full ${
-                                                        tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
-                                                    }`}>
-                                                        {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
-                                                         tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> :
-                                                         tx.type === 'winnings' ? <Wallet size={16} /> : <CreditCard size={16} />}
-                                                    </div>
-                                                    <div>
-                                                        <div className="text-sm font-bold text-white capitalize">{tx.type}</div>
-                                                        <div className="text-xs text-slate-500">{tx.date}</div>
-                                                    </div>
-                                                </div>
-                                                <div className="text-right">
-                                                    <div className={`font-mono font-bold ${tx.amount > 0 ? 'text-green-400' : 'text-slate-300'}`}>
-                                                        {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
-                                                    </div>
-                                                    <div className={`text-[10px] uppercase font-bold ${
-                                                        tx.status === 'completed' ? 'text-green-600' : 'text-yellow-600'
-                                                    }`}>{tx.status}</div>
-                                                </div>
+                               <div className="flex items-center justify-between mb-4">
+                                   <h3 className="font-bold text-white text-sm">{t('recent_transactions')}</h3>
+                                   <button className="text-xs text-gold-400 uppercase font-bold hover:text-white">Export</button>
+                               </div>
+                               
+                               <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                                   {transactions.length === 0 ? (
+                                       <div className="text-center py-8 text-slate-500 text-sm">No transaction history.</div>
+                                   ) : (
+                                       transactions.map((tx, i) => (
+                                           <div key={i} className="flex items-center justify-between p-3 rounded-xl bg-royal-900/30 border border-white/5">
+                                               <div className="flex items-center gap-3">
+                                                   <div className={`p-2 rounded-lg ${
+                                                       tx.type === 'deposit' || tx.type === 'winnings' ? 'bg-green-500/10 text-green-500' : 'bg-red-500/10 text-red-500'
+                                                   }`}>
+                                                       {tx.type === 'deposit' ? <ArrowDownLeft size={16} /> : 
+                                                        tx.type === 'withdrawal' ? <ArrowUpRight size={16} /> : <History size={16} />}
+                                                   </div>
+                                                   <div>
+                                                       <div className="font-bold text-white text-sm capitalize">{tx.type}</div>
+                                                       <div className="text-[10px] text-slate-500">{new Date(tx.date).toLocaleDateString()}</div>
+                                                   </div>
+                                               </div>
+                                               <div className="text-right">
+                                                   <div className={`font-mono font-bold text-sm ${
+                                                       tx.amount > 0 ? 'text-green-400' : 'text-slate-200'
+                                                   }`}>
+                                                       {tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}
+                                                   </div>
+                                                   <div className={`text-[10px] font-bold uppercase ${
+                                                       tx.status === 'completed' ? 'text-green-500' : tx.status === 'pending' ? 'text-yellow-500' : 'text-red-500'
+                                                   }`}>{tx.status}</div>
+                                               </div>
                                            </div>
-                                       ))}
-                                   </div>
-                               ) : (
-                                   <div className="p-8 text-center text-slate-500 text-sm">
-                                       No transactions found.
-                                   </div>
-                               )}
+                                       ))
+                                   )}
+                               </div>
                            </motion.div>
                        )}
 
@@ -482,44 +458,41 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                </div>
            </div>
 
-           {/* RIGHT COLUMN: INFO */}
+           {/* RIGHT COLUMN: STATS & HELP */}
            <div className="space-y-6">
-                <div className="p-6 rounded-2xl bg-gradient-to-b from-royal-800 to-royal-900 border border-white/5">
-                    <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                        <History size={18} className="text-gold-400" /> {t('quick_stats')}
-                    </h3>
-                    <div className="space-y-4">
-                        <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                            <span className="text-sm text-slate-400">{t('total_deposited')}</span>
-                            <span className="font-mono text-white">
-                                {transactions.filter(t => t.type === 'deposit').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-center pb-4 border-b border-white/5">
-                            <span className="text-sm text-slate-400">{t('total_withdrawn')}</span>
-                            <span className="font-mono text-white">
-                                {Math.abs(transactions.filter(t => t.type === 'withdrawal').reduce((acc, curr) => acc + curr.amount, 0)).toLocaleString()} FCFA
-                            </span>
-                        </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-sm text-slate-400">{t('net_profit')}</span>
-                            <span className="font-mono text-green-400">
-                                {transactions.filter(t => t.type === 'winnings').reduce((acc, curr) => acc + curr.amount, 0).toLocaleString()} FCFA
-                            </span>
-                        </div>
-                    </div>
-                </div>
+               <div className="glass-panel p-6 rounded-2xl border border-white/5">
+                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
+                       <Building size={18} className="text-blue-400" /> {t('quick_stats')}
+                   </h3>
+                   <div className="space-y-4">
+                       <div className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl">
+                           <span className="text-xs text-slate-400">{t('total_deposited')}</span>
+                           <span className="font-mono font-bold text-white">
+                               {transactions.filter(t => t.type === 'deposit' && t.status === 'completed').reduce((acc, t) => acc + t.amount, 0).toLocaleString()}
+                           </span>
+                       </div>
+                       <div className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl">
+                           <span className="text-xs text-slate-400">{t('total_withdrawn')}</span>
+                           <span className="font-mono font-bold text-white">
+                               {Math.abs(transactions.filter(t => t.type === 'withdrawal' && t.status === 'completed').reduce((acc, t) => acc + t.amount, 0)).toLocaleString()}
+                           </span>
+                       </div>
+                       <div className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl border border-green-500/20">
+                           <span className="text-xs text-green-400 font-bold uppercase">{t('net_profit')}</span>
+                           <span className="font-mono font-bold text-green-400">
+                               {transactions.filter(t => t.type === 'winnings').reduce((acc, t) => acc + t.amount, 0).toLocaleString()}
+                           </span>
+                       </div>
+                   </div>
+               </div>
 
-                <div className="p-6 rounded-2xl bg-royal-950/50 border border-dashed border-slate-700">
-                    <h4 className="font-bold text-slate-300 text-sm mb-2">{t('need_help')}</h4>
-                    <p className="text-xs text-slate-500 mb-4">Issues with a deposit or withdrawal? Our support team is available 24/7.</p>
-                    <button 
-                        onClick={() => window.open('https://wa.me/237657960690', '_blank')}
-                        className="w-full py-2 bg-royal-800 hover:bg-royal-700 text-white text-xs font-bold rounded-lg transition-colors"
-                    >
-                        {t('contact_support')}
-                    </button>
-                </div>
+               <div className="p-6 bg-gradient-to-br from-royal-800 to-royal-900 rounded-2xl border border-white/10 text-center">
+                   <h3 className="font-bold text-white mb-2">{t('need_help')}</h3>
+                   <p className="text-xs text-slate-400 mb-4">Issues with a transaction? Our support team is here 24/7.</p>
+                   <button className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold rounded-xl text-sm transition-colors">
+                       {t('contact_support')}
+                   </button>
+               </div>
            </div>
 
        </div>

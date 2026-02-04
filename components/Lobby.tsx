@@ -5,8 +5,11 @@ import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
 import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs } from '../services/firebase';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface LobbyProps {
   user: User;

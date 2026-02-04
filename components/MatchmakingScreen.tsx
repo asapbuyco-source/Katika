@@ -1,9 +1,12 @@
 
 import React, { useEffect, useState, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { User, Table, PlayerProfile } from '../types';
 import { Search, Lock, AlertTriangle, Wifi, ShieldAlert } from 'lucide-react';
 import { findOrCreateMatch, subscribeToGame } from '../services/firebase';
+
+// Fix for Framer Motion type mismatches in current environment
+const motion = originalMotion as any;
 
 interface MatchmakingScreenProps {
   user: User;
