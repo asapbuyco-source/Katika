@@ -510,7 +510,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             <motion.div 
                 className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                 onPanEnd={handleSwipe}
-                onTouchEnd={(e) => {
+                onTouchEnd={(e: React.TouchEvent) => {
                     // Simple swipe logic for touch
                     if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
                        roll();
