@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, getTournamentMatches, checkTournamentTimeouts, subscribeToUser, subscribeToTournament } from '../services/firebase';
+import { getTournaments, registerForTournament, checkTournamentTimeouts, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
@@ -27,16 +27,27 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
   // Real-time Status Subscription
   useEffect(() => {
-      let unsub: (() => void) | undefined;
+      let unsubTournament: (() => void) | undefined;
+      let unsubMatches: (() => void) | undefined;
       
       if (selectedTournament) {
-          unsub = subscribeToTournament(selectedTournament.id, (updatedT) => {
+          // Listen to Tournament Updates
+          unsubTournament = subscribeToTournament(selectedTournament.id, (updatedT) => {
               setSelectedTournament(updatedT);
-              // If tournament becomes completed, champion effect below will trigger
+          });
+
+          // Listen to Match Updates (Bracket)
+          setLoading(true);
+          unsubMatches = subscribeToTournamentMatches(selectedTournament.id, (updatedMatches) => {
+              setMatches(updatedMatches);
+              setLoading(false);
           });
       }
-      return () => { if(unsub) unsub(); };
-  }, [selectedTournament?.id]); // Re-subscribe if ID changes (switching tournaments)
+      return () => { 
+          if(unsubTournament) unsubTournament();
+          if(unsubMatches) unsubMatches();
+      };
+  }, [selectedTournament?.id]);
 
   // Time Elimination Loop
   useEffect(() => {
@@ -44,9 +55,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
       if (selectedTournament && selectedTournament.status === 'active') {
           interval = setInterval(() => {
               checkTournamentTimeouts(selectedTournament.id);
-              // Optimistic refresh
-              getTournamentMatches(selectedTournament.id).then(setMatches);
-          }, 15000); // Check every 15s to be responsive for auto-forfeit demo
+          }, 15000); 
       }
       return () => clearInterval(interval);
   }, [selectedTournament?.status, selectedTournament?.id]);
@@ -54,7 +63,6 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
   // Fetch Champion Logic
   useEffect(() => {
       if (selectedTournament?.status === 'completed' && selectedTournament.winnerId) {
-          // Subscribe to winner to get latest details
           const unsub = subscribeToUser(selectedTournament.winnerId, (u) => setChampionProfile(u));
           return () => unsub();
       } else {
@@ -75,11 +83,8 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
   const handleSelectTournament = async (t: Tournament) => {
     setSelectedTournament(t);
-    setLoading(true);
-    const ms = await getTournamentMatches(t.id);
-    setMatches(ms);
+    // Loading handled by useEffect subscription now
     setActiveTab('detail');
-    setLoading(false);
   };
 
   const initiateRegistration = (t: Tournament) => {
@@ -102,11 +107,9 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
     if (success) {
       playSFX('win'); 
       setShowRegModal(false);
-      fetchTournaments(); // Refresh list to show updated participant count
+      fetchTournaments(); 
       
-      // If we are currently viewing the tournament we just joined, update it locally
       if (selectedTournament?.id === regTarget.id) {
-          // Note: subscribeToTournament will catch this update anyway, but optimistic update feels faster
           const updatedT = { ...regTarget, participants: [...regTarget.participants, user.id] };
           if (regTarget.type !== 'fixed') {
               updatedT.prizePool = (updatedT.prizePool || 0) + (regTarget.entryFee * 0.9);
@@ -130,14 +133,12 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
   const myNextMatch = getMyNextMatch();
 
-  // Helper to structure bracket data
   const getBracketRounds = () => {
       const rounds: Record<number, TournamentMatch[]> = {};
       matches.forEach(m => {
           if (!rounds[m.round]) rounds[m.round] = [];
           rounds[m.round].push(m);
       });
-      // Sort matches within rounds by index
       Object.keys(rounds).forEach(k => {
           rounds[Number(k)].sort((a, b) => a.matchIndex - b.matchIndex);
       });
@@ -146,7 +147,6 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
   const bracketData = getBracketRounds();
 
-  // Next Match Timer
   const MatchTimer = ({ startTime }: { startTime: string }) => {
       const [timeLeft, setTimeLeft] = useState("");
       
@@ -157,7 +157,6 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
               const diff = start - now;
               
               if (diff <= 0) {
-                  // Check grace period (3 mins based on updated logic)
                   if (now - start > 3 * 60 * 1000) {
                       setTimeLeft("AWAITING FORFEIT");
                   } else {
@@ -205,7 +204,6 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                               <p className="text-xs text-slate-400">Entry Fee</p>
                           </div>
 
-                          {/* TRANSPARENCY BLOCK */}
                           <div className="bg-black/40 rounded-xl p-4 border border-white/10">
                               <h4 className="text-slate-300 font-bold uppercase text-xs tracking-wider mb-3 flex items-center gap-2">
                                   <Info size={12} /> Fee Breakdown
@@ -590,7 +588,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
           {viewMode === 'bracket' && (
               <div className="flex-1 overflow-x-auto overflow-y-hidden custom-scrollbar bg-black/20 rounded-2xl border border-white/5 p-8 relative min-h-[500px]">
-                  {loading ? (
+                  {loading && matches.length === 0 ? (
                       <div className="absolute inset-0 flex items-center justify-center">
                           <RefreshCw className="animate-spin text-gold-400" size={32} />
                       </div>

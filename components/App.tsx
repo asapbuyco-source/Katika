@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo } from 'react';
+import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
 import { ViewState, User, Table, Challenge, Tournament } from '../types';
 import { Dashboard } from './Dashboard';
 import { Lobby } from './Lobby';
@@ -50,7 +50,7 @@ interface ErrorBoundaryState {
   hasError: boolean;
 }
 
-class GameErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -536,14 +536,32 @@ const AppContent = () => {
       setView('game');
   };
 
+  const constructTableFromSocket = (game: any): Table => {
+      if (!user) return {} as Table;
+      const opponentId = game.players.find((id: string) => id !== user.id);
+      const hostProfile = game.profiles ? game.profiles[opponentId] : { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' };
+      return {
+          id: game.roomId || game.id,
+          gameType: game.gameType,
+          stake: game.stake,
+          players: 2,
+          maxPlayers: 2,
+          status: 'active',
+          host: hostProfile,
+          tournamentMatchId: game.privateRoomId // Map privateRoomId to tournamentMatchId if applicable
+      };
+  };
+
+  const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
+
   const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
       let tournamentPot = 0;
 
-      // Check if this was a tournament game and we won
-      if (activeTable && activeTable.tournamentMatchId && user) {
+      // Check if this was a tournament game using activeGameTable (which covers socket cases)
+      if (activeGameTable && activeGameTable.tournamentMatchId && user) {
           // Fetch pot info for display
           try {
-              const matchParts = activeTable.tournamentMatchId.split('-'); // m-{tourneyId}-...
+              const matchParts = activeGameTable.tournamentMatchId.split('-'); // m-{tourneyId}-...
               if (matchParts.length > 1) {
                   const tourneyId = matchParts[1];
                   const tDoc = await getDoc(doc(db, 'tournaments', tourneyId));
@@ -558,7 +576,7 @@ const AppContent = () => {
 
           if (result === 'win') {
               // Report win to backend to advance bracket
-              await reportTournamentMatchResult(activeTable.tournamentMatchId, user.id);
+              await reportTournamentMatchResult(activeGameTable.tournamentMatchId, user.id);
           }
       }
       
@@ -570,8 +588,8 @@ const AppContent = () => {
         socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
     }
     
-    // If tournament, redirect to tournaments view instead of generic dashboard
-    if (activeTable?.tournamentMatchId) {
+    // Use activeGameTable to check if it was a tournament
+    if (activeGameTable?.tournamentMatchId) {
         setView('tournaments');
         setActiveTable(null);
         setGameResult(null);
@@ -607,22 +625,6 @@ const AppContent = () => {
       if (gameId) setPreSelectedGame(gameId);
       else setPreSelectedGame(null);
       setView('lobby');
-  };
-
-  const constructTableFromSocket = (game: any): Table => {
-      if (!user) return {} as Table;
-      const opponentId = game.players.find((id: string) => id !== user.id);
-      const hostProfile = game.profiles ? game.profiles[opponentId] : { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' };
-      return {
-          id: game.roomId || game.id,
-          gameType: game.gameType,
-          stake: game.stake,
-          players: 2,
-          maxPlayers: 2,
-          status: 'active',
-          host: hostProfile,
-          tournamentMatchId: game.privateRoomId // Map privateRoomId to tournamentMatchId if applicable
-      };
   };
 
   // Tournament Logic Integration
@@ -661,8 +663,6 @@ const AppContent = () => {
       );
   }
 
-  const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
-  
   // Find opponent profile for reconnection modal
   let opponentProfile = null;
   if (socketGame && user && socketGame.profiles) {
@@ -729,7 +729,7 @@ const AppContent = () => {
               rematchStatus={rematchStatus} 
               stake={socketGame?.stake} 
               userBalance={user?.balance} 
-              isTournament={!!activeTable?.tournamentMatchId}
+              isTournament={!!activeGameTable?.tournamentMatchId}
               tournamentPot={gameResult.tournamentPot}
           />}
           
