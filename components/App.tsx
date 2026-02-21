@@ -303,6 +303,11 @@ const AppContent = () => {
         if (!socket) return;
 
         const handleMatchFound = (gameState: any) => {
+            // T4 Fix: Mark the tournament match as active so the bracket shows the live dot.
+            if (gameState.tournamentMatchId) {
+                setTournamentMatchActive(gameState.tournamentMatchId)
+                    .catch(e => console.error('Failed to activate tournament match:', e));
+            }
             setSocketGame(gameState);
             setIsWaitingForSocketMatch(false);
             setBypassConnection(false);
@@ -342,6 +347,14 @@ const AppContent = () => {
 
         const handleGameOver = ({ winner, financials }: { winner: string, financials?: any }) => {
             setOpponentDisconnected(false);
+
+            // T5 Fix: Report tournament bracket result from winner's client.
+            // This is the only reliable path for P2P games since handleGameEnd('win') is not called.
+            if (user && winner === user.id && socketGame?.tournamentMatchId) {
+                reportTournamentMatchResult(socketGame.tournamentMatchId, winner)
+                    .catch(e => console.error('Tournament result report failed:', e));
+            }
+
             if (user && winner === user.id) {
                 setGameResult({
                     result: 'win',

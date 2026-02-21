@@ -5,21 +5,72 @@ import cors from 'cors';
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8080;
-const app = express();
 
-// Allow CORS for all origins (Netlify frontend compatibility)
-app.use(cors({ origin: '*' }));
+// Fapshi secrets — server-side only, never sent to browser
+const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
+const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
+const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
+
+// Trusted frontend origin (set FRONTEND_URL in Railway env vars)
+const FRONTEND_ORIGIN = process.env.FRONTEND_URL || '*';
+
+const app = express();
+app.use(express.json());
+app.use(cors({ origin: FRONTEND_ORIGIN }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: "*",
+        origin: FRONTEND_ORIGIN,
         methods: ["GET", "POST"],
         credentials: true
     },
-    transports: ['polling', 'websocket'], // Ensure compatibility
+    transports: ['polling', 'websocket'],
     pingTimeout: 60000,
 });
+
+// --- HEALTH CHECK (required for Railway) ---
+app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
+
+// --- FAPSHI PAYMENT PROXY (keeps API keys server-side) ---
+app.post('/api/pay/initiate', async (req, res) => {
+    try {
+        const { amount, userId, redirectUrl } = req.body;
+        const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
+        const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+            method: 'POST',
+            headers: {
+                'apiuser': FAPSHI_USER_TOKEN,
+                'apikey': FAPSHI_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ amount, email, userId, redirectUrl })
+        });
+        const data = await response.json();
+        if (!response.ok) return res.status(response.status).json(data);
+        res.json(data);
+    } catch (err) {
+        console.error('Fapshi initiate proxy error:', err);
+        res.status(500).json({ error: 'Payment initiation failed' });
+    }
+});
+
+app.get('/api/pay/status/:transId', async (req, res) => {
+    try {
+        const response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${req.params.transId}`, {
+            headers: {
+                'apiuser': FAPSHI_USER_TOKEN,
+                'apikey': FAPSHI_API_KEY
+            }
+        });
+        const data = await response.json();
+        res.status(response.status).json(data);
+    } catch (err) {
+        console.error('Fapshi status proxy error:', err);
+        res.status(500).json({ error: 'Status check failed' });
+    }
+});
+
 
 // --- IN-MEMORY STATE ---
 const rooms = new Map(); // roomId -> { players: [], gameState: {}, ... }

@@ -462,10 +462,24 @@ export const startTournament = async (tournamentId: string) => {
 
     batch.update(tRef, { status: 'active', participants: participants });
     await batch.commit();
+
+    // Process any immediate byes in Round 1 so the next round is created right away
+    await checkAndAdvanceTournament(tournamentId, 1);
 };
 
 export const setTournamentMatchActive = async (matchId: string) => {
     await updateDoc(doc(db, "tournament_matches", matchId), { status: 'active' });
+};
+
+// Mark a player as checked-in for a tournament match (used for fair forfeit resolution)
+export const setTournamentMatchCheckedIn = async (matchId: string, userId: string) => {
+    const matchRef = doc(db, "tournament_matches", matchId);
+    const matchSnap = await getDoc(matchRef);
+    if (!matchSnap.exists()) return;
+    const existing = matchSnap.data().checkedIn || [];
+    if (!existing.includes(userId)) {
+        await updateDoc(matchRef, { checkedIn: [...existing, userId] });
+    }
 };
 
 export const checkTournamentTimeouts = async (tournamentId: string) => {
@@ -485,16 +499,31 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
         if (diffMins > 3) {
             console.log(`Auto-forfeiting match ${m.id} due to no-show`);
 
-            let winnerId;
+            let winnerId: string | undefined;
+
             if (m.player1 && m.player2) {
-                winnerId = Math.random() > 0.5 ? m.player1.id : m.player2.id;
+                const checkedIn: string[] = (m as any).checkedIn || [];
+                const p1id = m.player1.id!;
+                const p2id = m.player2.id!;
+                if (checkedIn.includes(p1id) && !checkedIn.includes(p2id)) {
+                    // Only player1 checked in — they win
+                    winnerId = p1id;
+                } else if (checkedIn.includes(p2id) && !checkedIn.includes(p1id)) {
+                    // Only player2 checked in — they win
+                    winnerId = p2id;
+                } else {
+                    // Neither (or both) checked in — player1 wins by seed (deterministic)
+                    winnerId = p1id;
+                }
             } else {
-                winnerId = m.player1?.id || m.player2?.id || 'bye';
+                winnerId = m.player1?.id || m.player2?.id || undefined;
             }
 
-            const freshSnap = await getDoc(docSnap.ref);
-            if (freshSnap.exists() && freshSnap.data().status === 'scheduled') {
-                await reportTournamentMatchResult(m.id, winnerId!);
+            if (winnerId) {
+                const freshSnap = await getDoc(docSnap.ref);
+                if (freshSnap.exists() && freshSnap.data().status === 'scheduled') {
+                    await reportTournamentMatchResult(m.id, winnerId);
+                }
             }
         }
     }

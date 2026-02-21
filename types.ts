@@ -124,5 +124,6 @@ export interface TournamentMatch {
   player2?: PlayerProfile;
   winnerId?: string;
   status: 'scheduled' | 'active' | 'completed';
-  startTime: string; 
+  startTime: string;
+  checkedIn?: string[]; // Player IDs who clicked "Enter Match Lobby" — used for forfeit resolution
 }
