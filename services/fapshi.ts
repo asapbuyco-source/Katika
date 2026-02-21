@@ -1,9 +1,9 @@
 
 import { User } from '../types';
 
-const FAPSHI_API_KEY = "FAK_b3f06f6e729eae34cb17800b55fac2fb";
-const FAPSHI_USER_TOKEN = "121f2619-e47f-4c26-8bbb-479d70eafe4b";
-const BASE_URL = "https://live.fapshi.com"; 
+const FAPSHI_API_KEY = import.meta.env.VITE_FAPSHI_API_KEY;
+const FAPSHI_USER_TOKEN = import.meta.env.VITE_FAPSHI_USER_TOKEN;
+const BASE_URL = import.meta.env.VITE_FAPSHI_BASE_URL;
 
 export interface PaymentResponse {
     link: string;
@@ -53,10 +53,10 @@ export const checkPaymentStatus = async (transId: string): Promise<'SUCCESSFUL' 
                 'apikey': FAPSHI_API_KEY
             }
         });
-        
+
         if (!response.ok) return null;
         const data = await response.json();
-        return data.status; 
+        return data.status;
     } catch (error) {
         console.error("Status check failed", error);
         return null;

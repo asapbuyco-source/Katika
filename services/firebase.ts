@@ -1,48 +1,48 @@
 
 import { initializeApp } from "firebase/app";
-import { 
-  getAuth, 
-  GoogleAuthProvider, 
-  signInWithPopup, 
-  createUserWithEmailAndPassword,
-  signInWithEmailAndPassword,
-  signOut as firebaseSignOut,
-  sendPasswordResetEmail,
-  updateEmail,
-  deleteUser,
-  User as FirebaseUser,
-  signInAnonymously
+import {
+    getAuth,
+    GoogleAuthProvider,
+    signInWithPopup,
+    createUserWithEmailAndPassword,
+    signInWithEmailAndPassword,
+    signOut as firebaseSignOut,
+    sendPasswordResetEmail,
+    updateEmail,
+    deleteUser,
+    User as FirebaseUser,
+    signInAnonymously
 } from "firebase/auth";
-import { 
-  getFirestore, 
-  doc, 
-  getDoc, 
-  setDoc, 
-  collection, 
-  query, 
-  where,
-  orderBy, 
-  limit, 
-  getDocs, 
-  addDoc, 
-  updateDoc, 
-  onSnapshot, 
-  serverTimestamp,
-  runTransaction,
-  deleteDoc,
-  writeBatch
+import {
+    getFirestore,
+    doc,
+    getDoc,
+    setDoc,
+    collection,
+    query,
+    where,
+    orderBy,
+    limit,
+    getDocs,
+    addDoc,
+    updateDoc,
+    onSnapshot,
+    serverTimestamp,
+    runTransaction,
+    deleteDoc,
+    writeBatch
 } from "firebase/firestore";
 import { User, Transaction, Table, PlayerProfile, ForumPost, Challenge, BugReport, Tournament, TournamentMatch } from "../types";
 
 // ... existing config and auth ...
 const firebaseConfig = {
-  apiKey: "AIzaSyAzcqlzZkfI8nwC_gmo2gRK6_IqVvZ1LzI",
-  authDomain: "katika-8eef2.firebaseapp.com",
-  projectId: "katika-8eef2",
-  storageBucket: "katika-8eef2.firebasestorage.app",
-  messagingSenderId: "758549221515",
-  appId: "1:758549221515:web:67ff82bbb07e01556b448e",
-  measurementId: "G-6882Y7PZ9Q"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 };
 
 const app = initializeApp(firebaseConfig);
@@ -105,7 +105,7 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
             id: firebaseUser.uid,
             name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            balance: isAdmin ? 1000000 : 1000, 
+            balance: isAdmin ? 1000000 : 1000,
             elo: 1000,
             rankTier: 'Bronze',
             isAdmin: isAdmin,
@@ -117,7 +117,7 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
 };
 
 export const subscribeToUser = (uid: string, callback: (user: User) => void) => {
-    if (!uid) return () => {};
+    if (!uid) return () => { };
     return onSnapshot(doc(db, "users", uid), (doc) => {
         if (doc.exists()) {
             callback(doc.data() as User);
@@ -127,7 +127,7 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
-    const q = query(collection(db, "users"), limit(50)); 
+    const q = query(collection(db, "users"), limit(50));
     const snapshot = await getDocs(q);
     const results: PlayerProfile[] = [];
     snapshot.forEach(doc => {
@@ -176,8 +176,8 @@ export const getUserTransactions = async (userId: string): Promise<Transaction[]
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => {
             const data = doc.data();
-            return { 
-                id: doc.id, 
+            return {
+                id: doc.id,
                 type: data.type,
                 amount: data.amount,
                 status: data.status,
@@ -209,8 +209,8 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
     const gamesRef = collection(db, "games");
     const q = query(
-        gamesRef, 
-        where("gameType", "==", gameType), 
+        gamesRef,
+        where("gameType", "==", gameType),
         where("stake", "==", stake),
         where("status", "==", "waiting"),
         limit(1)
@@ -239,7 +239,7 @@ export const findOrCreateMatch = async (user: User, gameType: string, stake: num
         players: [user.id],
         createdAt: serverTimestamp(),
         turn: user.id,
-        gameState: {} 
+        gameState: {}
     };
     const docRef = await addDoc(collection(db, "games"), newGame);
     return docRef.id;
@@ -321,7 +321,7 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
 };
 
 export const subscribeToIncomingChallenges = (userId: string, callback: (challenge: Challenge | null) => void) => {
-    if (!userId) return () => {};
+    if (!userId) return () => { };
     const q = query(collection(db, "challenges"), where("targetId", "==", userId), where("status", "==", "pending"));
     return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
@@ -355,7 +355,7 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
         gameType: challenge.gameType,
         stake: challenge.stake,
         status: "active",
-        host: challenge.sender, 
+        host: challenge.sender,
         guest: { id: receiver.id, name: receiver.name, avatar: receiver.avatar, elo: receiver.elo, rankTier: receiver.rankTier },
         players: [challenge.sender.id!, receiver.id],
         createdAt: serverTimestamp(),
@@ -438,10 +438,10 @@ export const startTournament = async (tournamentId: string) => {
 
     while (playerProfiles.length > 0) {
         const p1 = playerProfiles.pop();
-        const p2 = playerProfiles.pop(); 
+        const p2 = playerProfiles.pop();
 
         const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
-        const matchRef = doc(matchesRef, matchId); 
+        const matchRef = doc(matchesRef, matchId);
 
         const matchData: any = {
             id: matchId,
@@ -450,10 +450,10 @@ export const startTournament = async (tournamentId: string) => {
             matchIndex: matchCount,
             player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
             player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
-            winnerId: p2 ? null : p1?.id, 
+            winnerId: p2 ? null : p1?.id,
             status: p2 ? 'scheduled' : 'completed',
-            startTime: tData.startTime, 
-            nextMatchId: null 
+            startTime: tData.startTime,
+            nextMatchId: null
         };
 
         batch.set(matchRef, matchData);
@@ -470,7 +470,7 @@ export const setTournamentMatchActive = async (matchId: string) => {
 
 export const checkTournamentTimeouts = async (tournamentId: string) => {
     const q = query(
-        collection(db, "tournament_matches"), 
+        collection(db, "tournament_matches"),
         where("tournamentId", "==", tournamentId),
         where("status", "==", "scheduled")
     );
@@ -482,20 +482,20 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
         const start = new Date(m.startTime);
         const diffMins = (now.getTime() - start.getTime()) / 60000;
 
-        if (diffMins > 3) { 
-             console.log(`Auto-forfeiting match ${m.id} due to no-show`);
-             
-             let winnerId;
-             if (m.player1 && m.player2) {
-                 winnerId = Math.random() > 0.5 ? m.player1.id : m.player2.id;
-             } else {
-                 winnerId = m.player1?.id || m.player2?.id || 'bye';
-             }
+        if (diffMins > 3) {
+            console.log(`Auto-forfeiting match ${m.id} due to no-show`);
 
-             const freshSnap = await getDoc(docSnap.ref);
-             if (freshSnap.exists() && freshSnap.data().status === 'scheduled') {
-                 await reportTournamentMatchResult(m.id, winnerId!);
-             }
+            let winnerId;
+            if (m.player1 && m.player2) {
+                winnerId = Math.random() > 0.5 ? m.player1.id : m.player2.id;
+            } else {
+                winnerId = m.player1?.id || m.player2?.id || 'bye';
+            }
+
+            const freshSnap = await getDoc(docSnap.ref);
+            if (freshSnap.exists() && freshSnap.data().status === 'scheduled') {
+                await reportTournamentMatchResult(m.id, winnerId!);
+            }
         }
     }
 };
@@ -523,7 +523,7 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
     const matches = snapshot.docs.map(d => d.data() as TournamentMatch);
 
     const allComplete = matches.every(m => m.status === 'completed');
-    if (!allComplete || matches.length === 0) return; 
+    if (!allComplete || matches.length === 0) return;
 
     // Double Check: Ensure next round doesn't already exist to prevent race conditions
     const nextRoundCheck = query(
@@ -533,9 +533,9 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
         limit(1)
     );
     const nextRoundSnap = await getDocs(nextRoundCheck);
-    if (!nextRoundSnap.empty) return; 
+    if (!nextRoundSnap.empty) return;
 
-    matches.sort((a,b) => a.matchIndex - b.matchIndex);
+    matches.sort((a, b) => a.matchIndex - b.matchIndex);
     const winners = matches.map(m => m.winnerId).filter(Boolean) as string[];
 
     if (winners.length === 1 && matches.length === 1) {
@@ -544,24 +544,24 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
             const tourneyRef = doc(db, "tournaments", tournamentId);
             const tourneyDoc = await transaction.get(tourneyRef);
             if (!tourneyDoc.exists()) throw "Tournament not found";
-            
+
             const tData = tourneyDoc.data() as Tournament;
-            if (tData.status === 'completed') return; 
+            if (tData.status === 'completed') return;
 
             const winnerRef = doc(db, "users", winnerId);
             const winnerDoc = await transaction.get(winnerRef);
-            
+
             if (winnerDoc.exists()) {
                 const currentBal = winnerDoc.data().balance || 0;
                 const finalPrize = tData.prizePool || 0;
 
-                transaction.update(winnerRef, { 
-                    balance: currentBal + finalPrize 
+                transaction.update(winnerRef, {
+                    balance: currentBal + finalPrize
                 });
-                
+
                 const txRef = doc(collection(db, "users", winnerId, "transactions"));
                 transaction.set(txRef, {
-                    type: 'winnings', 
+                    type: 'winnings',
                     amount: finalPrize,
                     status: 'completed',
                     date: new Date().toISOString(),
@@ -584,19 +584,19 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
 
     for (let i = 0; i < winners.length; i += 2) {
         const p1Id = winners[i];
-        const p2Id = winners[i+1]; 
+        const p2Id = winners[i + 1];
 
         const p1Doc = await getDoc(doc(db, "users", p1Id));
         const p1Data = p1Doc.exists() ? p1Doc.data() : { id: p1Id, name: 'Unknown', avatar: '' };
-        
+
         let p2Data = null;
         if (p2Id) {
             const p2Doc = await getDoc(doc(db, "users", p2Id));
             p2Data = p2Doc.exists() ? p2Doc.data() : { id: p2Id, name: 'Unknown', avatar: '' };
         }
 
-        const newMatchId = `m-${tournamentId}-r${round+1}-${nextRoundMatchCount}`;
-        
+        const newMatchId = `m-${tournamentId}-r${round + 1}-${nextRoundMatchCount}`;
+
         const matchData: any = {
             id: newMatchId,
             tournamentId,
@@ -605,8 +605,8 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
             player1: { id: p1Data.id, name: p1Data.name, avatar: p1Data.avatar, rankTier: p1Data.rankTier },
             player2: p2Data ? { id: p2Data.id, name: p2Data.name, avatar: p2Data.avatar, rankTier: p2Data.rankTier } : null,
             winnerId: p2Id ? null : p1Id,
-            status: p2Id ? 'scheduled' : 'completed', 
-            startTime: new Date(Date.now() + 60000).toISOString() 
+            status: p2Id ? 'scheduled' : 'completed',
+            startTime: new Date(Date.now() + 60000).toISOString()
         };
 
         batch.set(doc(matchesRef, newMatchId), matchData);
@@ -621,7 +621,7 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
         await runTransaction(db, async (transaction) => {
             const tDoc = await transaction.get(tRef);
             if (!tDoc.exists()) throw "Tournament does not exist";
-            
+
             const tData = tDoc.data() as Tournament;
             if (tData.status !== 'registration') throw "Tournament not in registration phase";
             if (tData.participants.length >= tData.maxPlayers) throw "Tournament full";
@@ -630,12 +630,12 @@ export const registerForTournament = async (tournamentId: string, user: User) =>
             const userRef = doc(db, "users", user.id);
             const userDoc = await transaction.get(userRef);
             if (!userDoc.exists()) throw "User not found";
-            
+
             const userData = userDoc.data() as User;
             if (userData.balance < tData.entryFee) throw "Insufficient funds";
 
             transaction.update(userRef, { balance: userData.balance - tData.entryFee });
-            
+
             const newTxRef = doc(collection(db, "users", user.id, "transactions"));
             transaction.set(newTxRef, {
                 type: 'tournament_entry',
@@ -716,7 +716,7 @@ export const getSystemLogs = async () => {
             const data = doc.data();
             let time = 'Just now';
             if (data.createdAt && typeof data.createdAt.toDate === 'function') {
-                time = data.createdAt.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                time = data.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             }
             return {
                 id: doc.id,
@@ -749,7 +749,7 @@ export const resolveBugReport = async (id: string) => {
 export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
     const q = query(collection(db, "forum_posts"), orderBy("timestamp", "desc"), limit(50));
     return onSnapshot(q, (snapshot) => {
-        const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ForumPost)).reverse(); 
+        const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ForumPost)).reverse();
         callback(posts);
     });
 };
@@ -777,24 +777,24 @@ export const subscribeToGlobalWinners = (callback: (winners: any[]) => void) => 
             const winners: any[] = [];
             snapshot.forEach(doc => {
                 const d = doc.data();
-                if (d.winner && d.gameState?.scores) { 
+                if (d.winner && d.gameState?.scores) {
                     const winnerId = d.winner;
                     const winnerProfile = d.host.id === winnerId ? d.host : d.guest;
                     if (winnerProfile) {
                         winners.push({
                             name: winnerProfile.name,
                             avatar: winnerProfile.avatar,
-                            amount: (d.stake * 2 * 0.9).toLocaleString(), 
+                            amount: (d.stake * 2 * 0.9).toLocaleString(),
                             game: d.gameType
                         });
                     }
                 } else if (d.winner) {
-                     winners.push({
-                        name: "Player", 
+                    winners.push({
+                        name: "Player",
                         avatar: "https://i.pravatar.cc/150",
                         amount: (d.stake * 1.8).toLocaleString(),
                         game: d.gameType
-                     });
+                    });
                 }
             });
             callback(winners);
@@ -802,5 +802,5 @@ export const subscribeToGlobalWinners = (callback: (winners: any[]) => void) => 
             console.warn("Live Winners Sync skipped", error);
             callback([]);
         });
-    } catch(e) { return () => {}; }
+    } catch (e) { return () => { }; }
 };

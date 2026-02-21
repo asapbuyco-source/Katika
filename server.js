@@ -12,13 +12,13 @@ app.use(cors({ origin: '*' }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"],
-    credentials: true
-  },
-  transports: ['polling', 'websocket'], // Ensure compatibility
-  pingTimeout: 60000,
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"],
+        credentials: true
+    },
+    transports: ['polling', 'websocket'], // Ensure compatibility
+    pingTimeout: 60000,
 });
 
 // --- IN-MEMORY STATE ---
@@ -47,7 +47,7 @@ const endGame = (roomId, winnerId, reason) => {
 
     const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
 
-    io.to(roomId).emit('game_over', { 
+    io.to(roomId).emit('game_over', {
         winner: winnerId,
         reason: reason,
         financials: {
@@ -64,15 +64,15 @@ const endGame = (roomId, winnerId, reason) => {
         if (r && r.status === 'completed') {
             rooms.delete(roomId);
         }
-    }, 60000); 
+    }, 60000);
 };
 
 // Card Game Helpers
 const createDeck = () => {
     const suits = ['H', 'D', 'C', 'S'];
-    const ranks = ['2','3','4','5','6','7','8','9','10','J','Q','K','A'];
+    const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
     let deck = [];
-    for(let s of suits) for(let r of ranks) deck.push({ id: s+r, suit: s, rank: r });
+    for (let s of suits) for (let r of ranks) deck.push({ id: s + r, suit: s, rank: r });
     return deck.sort(() => Math.random() - 0.5);
 };
 
@@ -100,8 +100,8 @@ const createInitialGameState = (gameType, p1, p2) => {
             };
         case 'Ludo':
             const pieces = [];
-            for(let i=0; i<4; i++) pieces.push({ id: i, color: 'Red', step: -1, owner: p1 });
-            for(let i=0; i<4; i++) pieces.push({ id: i+4, color: 'Yellow', step: -1, owner: p2 });
+            for (let i = 0; i < 4; i++) pieces.push({ id: i, color: 'Red', step: -1, owner: p1 });
+            for (let i = 0; i < 4; i++) pieces.push({ id: i + 4, color: 'Yellow', step: -1, owner: p2 });
             return {
                 ...common,
                 pieces,
@@ -123,15 +123,15 @@ const createInitialGameState = (gameType, p1, p2) => {
             const checkersPieces = [];
             let cid = 0;
             // Player 2 (Top, Rows 0-2)
-            for(let r=0; r<3; r++) {
-                for(let c=0; c<8; c++) {
-                    if((r+c)%2===1) checkersPieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c });
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if ((r + c) % 2 === 1) checkersPieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c });
                 }
             }
             // Player 1 (Bottom, Rows 5-7)
-            for(let r=5; r<8; r++) {
-                for(let c=0; c<8; c++) {
-                    if((r+c)%2===1) checkersPieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c });
+            for (let r = 5; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    if ((r + c) % 2 === 1) checkersPieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c });
                 }
             }
             return {
@@ -158,7 +158,7 @@ io.on('connection', (socket) => {
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', ({ stake, userProfile, gameType, privateRoomId }) => {
         const userId = userProfile.id;
-        
+
         // Handle rapid re-connections
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));
@@ -174,7 +174,7 @@ io.on('connection', (socket) => {
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId) && room.status === 'active') {
                 socket.join(roomId);
-                
+
                 // Notify others that I'm back
                 socket.to(roomId).emit('opponent_reconnected', { userId });
 
@@ -196,9 +196,9 @@ io.on('connection', (socket) => {
         // Public Matchmaking Queue
         const queueKey = `${gameType}_${stake}`;
         if (!queues.has(queueKey)) queues.set(queueKey, []);
-        
+
         const queue = queues.get(queueKey);
-        
+
         // Remove self from queue if already there
         const existingIdx = queue.findIndex(item => item.userProfile.id === userId);
         if (existingIdx > -1) queue.splice(existingIdx, 1);
@@ -219,7 +219,7 @@ io.on('connection', (socket) => {
                     [opponentId]: opponent.userProfile,
                     [userId]: userProfile
                 },
-                turn: opponentId, 
+                turn: opponentId,
                 status: 'active',
                 gameState: createInitialGameState(gameType, opponentId, userId),
                 chat: [],
@@ -230,7 +230,7 @@ io.on('connection', (socket) => {
 
             // Notify Players
             const oppSocketId = userSockets.get(opponentId);
-            
+
             // Join Socket Rooms
             socket.join(roomId);
             if (io.sockets.sockets.get(oppSocketId)) {
@@ -261,7 +261,7 @@ io.on('connection', (socket) => {
     // 2. REJOIN EXPLICIT
     socket.on('rejoin_game', ({ userProfile }) => {
         const userId = userProfile.id;
-        
+
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));
             disconnectTimers.delete(userId);
@@ -274,7 +274,7 @@ io.on('connection', (socket) => {
             if (room.players.includes(userId) && room.status === 'active') {
                 socket.join(roomId);
                 socket.to(roomId).emit('opponent_reconnected', { userId });
-                
+
                 socket.emit('match_found', {
                     roomId,
                     players: room.players,
@@ -298,10 +298,34 @@ io.on('connection', (socket) => {
         const userId = socketUsers.get(socket.id);
         if (!userId || !room.players.includes(userId)) return;
 
-        // --- FORFEIT / QUIT (Generic) ---
+        // --- GENERIC ACTIONS: handled before game-type branches ---
+
+        // FORFEIT
         if (action.type === 'FORFEIT') {
             const winner = room.players.find(id => id !== userId);
             endGame(roomId, winner, 'Opponent Forfeited');
+            return;
+        }
+
+        // CHAT (works for all game types including Cards & Ludo)
+        if (action.type === 'CHAT') {
+            const msg = {
+                id: Date.now().toString(),
+                senderId: userId,
+                message: action.message,
+                timestamp: Date.now()
+            };
+            if (!room.chat) room.chat = [];
+            room.chat.push(msg);
+            if (room.chat.length > 50) room.chat.shift();
+            io.to(roomId).emit('game_update', { ...room, roomId, chat: room.chat });
+            return;
+        }
+
+        // TIMEOUT CLAIM (works for all game types)
+        if (action.type === 'TIMEOUT_CLAIM') {
+            const winner = room.players.find(id => id !== userId);
+            endGame(roomId, winner, 'Time Expired');
             return;
         }
 
@@ -316,14 +340,14 @@ io.on('connection', (socket) => {
             // If both players accepted
             if (room.rematchVotes.size === room.players.length) {
                 console.log(`Rematch accepted in room ${roomId}`);
-                
+
                 // Reset Room State
                 room.status = 'active';
                 room.winner = null;
                 room.rematchVotes.clear();
                 room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
                 // Keep chat history
-                
+
                 // Emit Match Found (this resets the client UI)
                 io.to(roomId).emit('match_found', {
                     roomId,
@@ -347,19 +371,19 @@ io.on('connection', (socket) => {
 
         // --- DICE LOGIC ---
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
-            if (room.turn !== userId) return; 
+            if (room.turn !== userId) return;
 
             const roll1 = Math.ceil(Math.random() * 6);
             const roll2 = Math.ceil(Math.random() * 6);
-            
+
             room.gameState.roundRolls[userId] = [roll1, roll2];
-            
+
             io.to(roomId).emit('game_update', {
                 ...room,
-                roomId: roomId, 
+                roomId: roomId,
                 gameState: room.gameState,
                 diceRolled: true,
-                diceValue: roll1 + roll2 
+                diceValue: roll1 + roll2
             });
 
             const p1 = room.players[0];
@@ -403,49 +427,49 @@ io.on('connection', (socket) => {
                 room.gameState = { ...room.gameState, ...action.newState };
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
                 if (action.newState.turn) room.turn = action.newState.turn;
-                
+
                 if (action.newState.winner) {
                     endGame(roomId, action.newState.winner, 'Checkmate / Win Condition');
                     return;
                 }
-            } 
+            }
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
-               const board = room.gameState.board;
-               if (board[action.index] === null) {
-                   const symbol = userId === room.players[0] ? 'X' : 'O';
-                   board[action.index] = symbol;
-                   room.turn = room.players.find(id => id !== userId);
-                   
-                   const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
-                   let winner = null;
-                   for(let line of lines) {
-                       if(board[line[0]] && board[line[0]] === board[line[1]] && board[line[0]] === board[line[2]]) {
-                           winner = userId;
-                       }
-                   }
-                   
-                   if (winner) {
-                       endGame(roomId, winner, 'Line Complete');
-                       return;
-                   } else if (!board.includes(null)) {
-                       io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
-                       setTimeout(() => {
-                           room.gameState.board = Array(9).fill(null);
-                           room.status = 'active'; // Reset status from draw
-                           io.to(roomId).emit('game_update', { ...room, roomId });
-                       }, 3000);
-                   }
-               }
+                const board = room.gameState.board;
+                if (board[action.index] === null) {
+                    const symbol = userId === room.players[0] ? 'X' : 'O';
+                    board[action.index] = symbol;
+                    room.turn = room.players.find(id => id !== userId);
+
+                    const lines = [[0, 1, 2], [3, 4, 5], [6, 7, 8], [0, 3, 6], [1, 4, 7], [2, 5, 8], [0, 4, 8], [2, 4, 6]];
+                    let winner = null;
+                    for (let line of lines) {
+                        if (board[line[0]] && board[line[0]] === board[line[1]] && board[line[0]] === board[line[2]]) {
+                            winner = userId;
+                        }
+                    }
+
+                    if (winner) {
+                        endGame(roomId, winner, 'Line Complete');
+                        return;
+                    } else if (!board.includes(null)) {
+                        io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
+                        setTimeout(() => {
+                            room.gameState.board = Array(9).fill(null);
+                            room.status = 'active'; // Reset status from draw
+                            io.to(roomId).emit('game_update', { ...room, roomId });
+                        }, 3000);
+                    }
+                }
             }
             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
         }
         else if (room.gameType === 'TicTacToe' && action.type === 'DRAW_ROUND') {
-             io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
-             setTimeout(() => {
-                 room.gameState.board = Array(9).fill(null);
-                 room.status = 'active';
-                 io.to(roomId).emit('game_update', { ...room, roomId });
-             }, 3000);
+            io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
+            setTimeout(() => {
+                room.gameState.board = Array(9).fill(null);
+                room.status = 'active';
+                io.to(roomId).emit('game_update', { ...room, roomId });
+            }, 3000);
         }
 
         // --- LUDO ---
@@ -475,7 +499,7 @@ io.on('connection', (socket) => {
             if (action.type === 'PLAY') {
                 const hand = room.gameState.hands[userId];
                 const cardIndex = hand.findIndex(c => c.id === action.card.id);
-                
+
                 if (cardIndex > -1) {
                     // Remove from hand
                     hand.splice(cardIndex, 1);
@@ -483,18 +507,17 @@ io.on('connection', (socket) => {
                     room.gameState.discardPile.push(action.card);
                     // Update suit
                     room.gameState.activeSuit = action.suit;
-                    
-                    // Emit update BEFORE ending game so client sees empty hand
-                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
 
-                    // Win Check
+                    // Win Check BEFORE emitting (avoid stale-state flash)
                     if (hand.length === 0) {
                         endGame(roomId, userId, 'Hand Cleared');
                         return;
                     }
-                    
+
                     // Turn Pass
                     room.turn = room.players.find(id => id !== userId);
+
+                    // Single authoritative emit with final state
                     io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                 }
             } else if (action.type === 'DRAW') {
@@ -515,7 +538,7 @@ io.on('connection', (socket) => {
             }
         }
 
-        // --- CHAT ---
+        // --- CHAT (generic — handled first so it works in all game types) ---
         else if (action.type === 'CHAT') {
             const msg = {
                 id: Date.now().toString(),
@@ -529,7 +552,7 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('game_update', { ...room, roomId, chat: room.chat });
         }
 
-        // --- TIMEOUT CLAIM ---
+        // --- TIMEOUT CLAIM (generic) ---
         else if (action.type === 'TIMEOUT_CLAIM') {
             const winner = room.players.find(id => id !== userId);
             endGame(roomId, winner, 'Time Expired');
@@ -540,16 +563,16 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         const userId = socketUsers.get(socket.id);
         console.log(`User disconnected: ${socket.id} (${userId})`);
-        
+
         if (userId) {
             // Find active room
             for (const [roomId, room] of rooms.entries()) {
                 if (room.players.includes(userId) && room.status === 'active') {
                     // Start Disconnect Timer
                     console.log(`Starting 240s forfeit timer for ${userId}`);
-                    
+
                     // Notify other player immediately
-                    io.to(roomId).emit('opponent_disconnected', { 
+                    io.to(roomId).emit('opponent_disconnected', {
                         disconnectedUserId: userId,
                         timeoutSeconds: 240 // 4 minutes
                     });
@@ -573,7 +596,7 @@ io.on('connection', (socket) => {
 
             userSockets.delete(userId);
             socketUsers.delete(socket.id);
-            
+
             // Remove from matchmaking queues
             queues.forEach((queue, key) => {
                 const idx = queue.findIndex(i => i.userProfile.id === userId);
