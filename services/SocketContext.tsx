@@ -50,8 +50,14 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     // ── Initialize Socket ──────────────────────────────────────────────────────
     useEffect(() => {
-        const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://katika-production.up.railway.app';
+        const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
         const timerInterval = setInterval(() => setConnectionTime(prev => prev + 1), 1000);
+        if (!SOCKET_URL) {
+            console.error('[SocketContext] VITE_SOCKET_URL is not set. Socket.IO will not connect.');
+            clearInterval(timerInterval);
+            setBypassConnection(true);
+            return () => clearInterval(timerInterval);
+        }
 
         const newSocket = io(SOCKET_URL, {
             reconnectionAttempts: 10,

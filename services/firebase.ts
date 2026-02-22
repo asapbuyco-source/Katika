@@ -89,7 +89,8 @@ export const deleteAccount = async () => {
 };
 
 export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User> => {
-    const isAdmin = firebaseUser.email === 'abrackly@gmail.com' || firebaseUser.email?.includes('admin');
+    // SECURITY: Only grant admin to the single known admin email - never rely on substring matching
+    const isAdmin = firebaseUser.email === 'abrackly@gmail.com';
     const userRef = doc(db, "users", firebaseUser.uid);
     const userSnap = await getDoc(userRef);
 
@@ -127,22 +128,26 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
-    const q = query(collection(db, "users"), limit(50));
+    // Use a server-side prefix range query instead of fetching 50 docs then filtering client-side
+    const term = searchTerm;
+    const q = query(
+        collection(db, "users"),
+        orderBy("name"),
+        where("name", ">=", term),
+        where("name", "<=", term + '\uf8ff'),
+        limit(10)
+    );
     const snapshot = await getDocs(q);
-    const results: PlayerProfile[] = [];
-    snapshot.forEach(doc => {
+    return snapshot.docs.map(doc => {
         const data = doc.data() as User;
-        if (data.name.toLowerCase().includes(searchTerm.toLowerCase())) {
-            results.push({
-                id: data.id,
-                name: data.name,
-                elo: data.elo,
-                avatar: data.avatar,
-                rankTier: data.rankTier
-            });
-        }
+        return {
+            id: data.id,
+            name: data.name,
+            elo: data.elo,
+            avatar: data.avatar,
+            rankTier: data.rankTier
+        };
     });
-    return results;
 };
 
 export const getAllUsers = async (): Promise<User[]> => {
@@ -369,7 +374,7 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
 // --- TOURNAMENTS ---
 
 export const getTournaments = async (): Promise<Tournament[]> => {
-    const q = query(collection(db, "tournaments"));
+    const q = query(collection(db, "tournaments"), orderBy("startTime", "desc"));
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Tournament));
 };

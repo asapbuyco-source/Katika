@@ -4,19 +4,30 @@ import { Server } from 'socket.io';
 import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
+import helmet from 'helmet';
 
-// --- CONFIGURATION ---
+// --- CONFIGURATION & VALIDATION ---
+const requiredEnv = ['FAPSHI_API_KEY', 'FAPSHI_USER_TOKEN'];
+const missingEnv = requiredEnv.filter(env => !process.env[env]);
+
+if (missingEnv.length > 0) {
+    console.error(`FATAL ERROR: Missing required environment variables: ${missingEnv.join(', ')}`);
+    // In production, we should exit, but for dev/audit we'll just log loudly
+    if (process.env.NODE_ENV === 'production') process.exit(1);
+}
+
 const PORT = process.env.PORT || 8080;
-
-// Fapshi secrets — server-side only, never sent to browser
 const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
-
-// Trusted frontend origin (set FRONTEND_URL in Railway env vars)
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || '*';
 
 const app = express();
+
+// Security Headers
+app.use(helmet());
+
+// Logging
 app.use(morgan('combined'));
 
 // Rate limiting
@@ -30,12 +41,17 @@ app.use('/api/', limiter);
 app.use(express.json());
 app.use(cors({
     origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl) or matching FRONTEND_ORIGIN
         if (!origin || FRONTEND_ORIGIN === '*' || origin === FRONTEND_ORIGIN) {
             callback(null, true);
         } else {
+            console.warn(`CORS blocked request from origin: ${origin}`);
             callback(new Error('Not allowed by CORS'));
         }
-    }
+    },
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'apiuser', 'apikey'],
+    credentials: true
 }));
 
 const sanitize = (text) => String(text).replace(/<[^>]*>?/gm, '').substring(0, 500);
@@ -58,6 +74,23 @@ app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 app.post('/api/pay/initiate', async (req, res) => {
     try {
         const { amount, userId, redirectUrl } = req.body;
+
+        // --- Input validation ---
+        if (!amount || typeof amount !== 'number' || amount <= 0 || !Number.isInteger(amount)) {
+            return res.status(400).json({ error: 'Invalid amount. Must be a positive integer in FCFA.' });
+        }
+        if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+            return res.status(400).json({ error: 'Invalid userId.' });
+        }
+        // Enforce a sensible minimum (Fapshi minimum is 100 FCFA)
+        if (amount < 100) {
+            return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
+        }
+        // Enforce a maximum to prevent accidental large charges
+        if (amount > 1_000_000) {
+            return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
+        }
+
         const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
         const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
             method: 'POST',
@@ -79,7 +112,13 @@ app.post('/api/pay/initiate', async (req, res) => {
 
 app.get('/api/pay/status/:transId', async (req, res) => {
     try {
-        const response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${req.params.transId}`, {
+        // Sanitize transId: Fapshi IDs are alphanumeric only — prevent path traversal
+        const rawTransId = req.params.transId;
+        const transId = rawTransId.replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!transId || transId.length === 0) {
+            return res.status(400).json({ error: 'Invalid transaction ID.' });
+        }
+        const response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
             headers: {
                 'apiuser': FAPSHI_USER_TOKEN,
                 'apikey': FAPSHI_API_KEY
