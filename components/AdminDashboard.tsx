@@ -43,6 +43,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     // Server Status State
     const [serverStatus, setServerStatus] = useState<any>(null);
     const [loadingServerStatus, setLoadingServerStatus] = useState(false);
+    const [serverError, setServerError] = useState<string | null>(null);
     const [newTourney, setNewTourney] = useState({
         name: '',
         gameType: 'Ludo',
@@ -100,6 +101,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     }, [activeTab]);
 
     const fetchServerStatus = async () => {
+        setLoadingServerStatus(true);
         try {
             // In development, server is usually on :8080. In production, we use relative paths.
             const isProd = window.location.hostname !== 'localhost';
@@ -107,12 +109,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                 ? '/api/admin/server-status'
                 : `${window.location.protocol}//${window.location.hostname}:8080/api/admin/server-status`;
 
-            const response = await fetch(url);
+            const headers: Record<string, string> = {};
+            const adminSecret = (import.meta as any).env?.VITE_ADMIN_SECRET;
+            if (adminSecret) headers['x-admin-secret'] = adminSecret;
+
+            const response = await fetch(url, { headers });
+            if (!response.ok) {
+                const errData = await response.json().catch(() => ({}));
+                throw new Error(errData.error || `HTTP ${response.status}`);
+            }
             const data = await response.json();
             setServerStatus(data);
-        } catch (e) {
+            setServerError(null);
+        } catch (e: any) {
             console.error("Server status fetch error", e);
+            setServerError(e.message || 'Connection failed');
         }
+        setLoadingServerStatus(false);
     };
 
     const fetchAdminTournaments = async () => {
@@ -697,7 +710,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             {/* SERVER TAB */}
             {activeTab === 'server' && (
                 <div className="space-y-6">
-                    {!serverStatus ? (
+                    {/* Connection Status Banner */}
+                    <div className={`flex items-center justify-between p-4 rounded-xl border ${serverError
+                            ? 'bg-red-500/10 border-red-500/30'
+                            : serverStatus
+                                ? 'bg-green-500/10 border-green-500/30'
+                                : 'bg-yellow-500/10 border-yellow-500/30'
+                        }`}>
+                        <div className="flex items-center gap-3">
+                            <div className={`w-3 h-3 rounded-full animate-pulse ${serverError ? 'bg-red-500' : serverStatus ? 'bg-green-500' : 'bg-yellow-500'
+                                }`} />
+                            <div>
+                                <div className={`text-sm font-bold ${serverError ? 'text-red-400' : serverStatus ? 'text-green-400' : 'text-yellow-400'
+                                    }`}>
+                                    {serverError ? 'Server Unreachable' : serverStatus ? 'Server Online' : 'Connecting...'}
+                                </div>
+                                {serverError && (
+                                    <div className="text-xs text-red-400/70 mt-0.5 font-mono">{serverError}</div>
+                                )}
+                                {serverStatus && (
+                                    <div className="text-xs text-slate-500 mt-0.5">
+                                        {serverStatus.environment?.toUpperCase()} · {serverStatus.nodeVersion} · Last polled: {new Date(serverStatus.timestamp).toLocaleTimeString()}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        <button
+                            onClick={fetchServerStatus}
+                            disabled={loadingServerStatus}
+                            className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 hover:text-white transition-colors"
+                        >
+                            <RefreshCw size={16} className={loadingServerStatus ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
+
+                    {serverError && !serverStatus ? (
+                        <div className="glass-panel rounded-2xl border border-red-500/20 p-12 text-center">
+                            <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
+                            <h3 className="text-lg font-bold text-white mb-2">Cannot Connect to Server</h3>
+                            <p className="text-sm text-slate-400 max-w-md mx-auto mb-1">
+                                The admin dashboard could not reach the game server API.
+                            </p>
+                            <p className="text-xs text-red-400/80 font-mono mb-6">{serverError}</p>
+                            <div className="text-xs text-slate-500 space-y-1">
+                                <p>• Check that the server is running (<code className="text-slate-400">node server.js</code>)</p>
+                                <p>• Verify ADMIN_SECRET matches in both .env and VITE_ADMIN_SECRET</p>
+                                <p>• If in production, ensure the server is deployed and healthy</p>
+                            </div>
+                        </div>
+                    ) : !serverStatus ? (
                         <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
                             <RefreshCw className="animate-spin" size={16} /> Connecting to server API...
                         </div>
@@ -713,7 +774,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                 <div className="glass-panel p-5 rounded-xl border border-white/5">
                                     <Gamepad2 className="text-blue-400 mb-2" size={20} />
                                     <div className="text-2xl font-bold text-white mb-1">{serverStatus.sockets.activeRooms}</div>
-                                    <div className="text-xs text-slate-400 uppercase tracking-wider">Active Guest Rooms</div>
+                                    <div className="text-xs text-slate-400 uppercase tracking-wider">Active Game Rooms</div>
                                 </div>
                                 <div className="glass-panel p-5 rounded-xl border border-white/5">
                                     <RefreshCw className="text-green-400 mb-2" size={20} />
@@ -782,7 +843,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             </div>
 
                             {/* Active Rooms Table */}
-                            <div className="glass-panel rounded-2xl border border-white/5 mb-8">
+                            <div className="glass-panel rounded-2xl border border-white/5">
                                 <div className="p-4 border-b border-white/5 flex justify-between items-center">
                                     <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
                                         <Gamepad2 size={16} className="text-blue-400" /> Live Match Rooms
@@ -823,6 +884,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                             )}
                                         </tbody>
                                     </table>
+                                </div>
+                            </div>
+
+                            {/* System Activity Logs */}
+                            <div className="glass-panel rounded-2xl border border-white/5">
+                                <div className="p-4 border-b border-white/5 flex justify-between items-center">
+                                    <h3 className="text-sm font-bold text-white uppercase tracking-widest flex items-center gap-2">
+                                        <AlertCircle size={16} className="text-yellow-400" /> System Event Log
+                                    </h3>
+                                    <span className="text-[10px] font-mono text-slate-500">Last 10 events</span>
+                                </div>
+                                <div className="divide-y divide-white/5 max-h-[400px] overflow-y-auto custom-scrollbar">
+                                    {logs.length === 0 ? (
+                                        <div className="p-8 text-center text-slate-500 text-xs italic">No system events recorded</div>
+                                    ) : (
+                                        logs.map((log: any) => (
+                                            <div key={log.id} className="flex items-center justify-between p-4 hover:bg-white/5 transition-colors">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`w-2 h-2 rounded-full ${log.type === 'critical' ? 'bg-red-500' :
+                                                            log.type === 'warning' ? 'bg-yellow-500' : 'bg-blue-500'
+                                                        }`} />
+                                                    <div>
+                                                        <div className="text-xs font-bold text-white">{log.action}</div>
+                                                        <div className="text-[10px] text-slate-500">{log.target}</div>
+                                                    </div>
+                                                </div>
+                                                <div className="flex items-center gap-3">
+                                                    <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold uppercase ${log.type === 'critical' ? 'bg-red-500/20 text-red-400' :
+                                                            log.type === 'warning' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-blue-500/20 text-blue-400'
+                                                        }`}>
+                                                        {log.type}
+                                                    </span>
+                                                    <span className="text-[10px] text-slate-600 font-mono">{log.time}</span>
+                                                </div>
+                                            </div>
+                                        ))
+                                    )}
                                 </div>
                             </div>
                         </>

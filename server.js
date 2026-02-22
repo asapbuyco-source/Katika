@@ -161,6 +161,8 @@ app.get('/api/admin/server-status', (req, res) => {
         const status = {
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
+            nodeVersion: process.version,
+            environment: process.env.NODE_ENV || 'development',
             memoryUsage: {
                 heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100,
                 heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024 * 100) / 100,
