@@ -7,24 +7,25 @@ import { playSFX } from '../services/sound';
 import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+import { useToast } from '../services/toast';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
 
 interface LobbyProps {
-  user: User;
-  setView: (view: ViewState) => void;
-  onQuickMatch: (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => void;
-  initialGameId?: string | null;
-  onClearInitialGame?: () => void;
+    user: User;
+    setView: (view: ViewState) => void;
+    onQuickMatch: (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => void;
+    initialGameId?: string | null;
+    onClearInitialGame?: () => void;
 }
 
 // Defined locally to remove reliance on mockData file
 const GAME_TIERS: GameTier[] = [
-  { id: 'tier-1', name: 'Starter', stake: 100, potentialWin: 180, playersOnline: 0, speed: 'Instant', minElo: 0 },
-  { id: 'tier-2', name: 'Casual', stake: 500, potentialWin: 900, playersOnline: 0, speed: 'Instant', minElo: 0 },
-  { id: 'tier-3', name: 'Pro', stake: 2000, potentialWin: 3600, playersOnline: 0, speed: 'Fast', minElo: 1000 },
-  { id: 'tier-4', name: 'High Roller', stake: 5000, potentialWin: 9000, playersOnline: 0, speed: 'Normal', minElo: 1500 },
+    { id: 'tier-1', name: 'Starter', stake: 100, potentialWin: 180, playersOnline: 0, speed: 'Instant', minElo: 0 },
+    { id: 'tier-2', name: 'Casual', stake: 500, potentialWin: 900, playersOnline: 0, speed: 'Instant', minElo: 0 },
+    { id: 'tier-3', name: 'Pro', stake: 2000, potentialWin: 3600, playersOnline: 0, speed: 'Fast', minElo: 1000 },
+    { id: 'tier-4', name: 'High Roller', stake: 5000, potentialWin: 9000, playersOnline: 0, speed: 'Normal', minElo: 1500 },
 ];
 
 const STATIC_GAME_LIST = [
@@ -38,701 +39,700 @@ const STATIC_GAME_LIST = [
 ];
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
-  const { t } = useLanguage();
-  const [viewState, setViewState] = useState<'games' | 'stakes'>('games');
-  const [selectedGame, setSelectedGame] = useState<string | null>(null);
-  const [isMaintenance, setIsMaintenance] = useState(false);
-  const [gameOverrides, setGameOverrides] = useState<Record<string, string>>({});
-  
-  const [showDepositModal, setShowDepositModal] = useState(false);
-  const [neededAmount, setNeededAmount] = useState(0);
+    const { t } = useLanguage();
+    const toast = useToast();
+    const [viewState, setViewState] = useState<'games' | 'stakes'>('games');
+    const [selectedGame, setSelectedGame] = useState<string | null>(null);
+    const [isMaintenance, setIsMaintenance] = useState(false);
+    const [gameOverrides, setGameOverrides] = useState<Record<string, string>>({});
 
-  // Difficulty Modal
-  const [showDifficultyModal, setShowDifficultyModal] = useState(false);
+    const [showDepositModal, setShowDepositModal] = useState(false);
+    const [neededAmount, setNeededAmount] = useState(0);
 
-  // Challenge Mode State
-  const [showChallengeModal, setShowChallengeModal] = useState(false);
-  const [challengeStep, setChallengeStep] = useState<'search' | 'config' | 'sending'>('search');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<PlayerProfile[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [selectedFriend, setSelectedFriend] = useState<PlayerProfile | null>(null);
-  const [challengeStake, setChallengeStake] = useState<number>(1000);
-  const [challengeGame, setChallengeGame] = useState('Dice');
-  
-  // Active Challenge Monitoring
-  const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
-  const challengeUnsubscribeRef = useRef<(() => void) | null>(null);
-  
-  // Payment State
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+    // Difficulty Modal
+    const [showDifficultyModal, setShowDifficultyModal] = useState(false);
 
-  // Load Maintenance State and Game Configs
-  useEffect(() => {
-      const maintenance = localStorage.getItem('vantage_maintenance') === 'true';
-      setIsMaintenance(maintenance);
+    // Challenge Mode State
+    const [showChallengeModal, setShowChallengeModal] = useState(false);
+    const [challengeStep, setChallengeStep] = useState<'search' | 'config' | 'sending'>('search');
+    const [searchQuery, setSearchQuery] = useState('');
+    const [searchResults, setSearchResults] = useState<PlayerProfile[]>([]);
+    const [isSearching, setIsSearching] = useState(false);
+    const [selectedFriend, setSelectedFriend] = useState<PlayerProfile | null>(null);
+    const [challengeStake, setChallengeStake] = useState<number>(1000);
+    const [challengeGame, setChallengeGame] = useState('Dice');
 
-      // Subscribe to admin overrides
-      const unsub = subscribeToGameConfigs(setGameOverrides);
-      return () => unsub();
-  }, []);
+    // Active Challenge Monitoring
+    const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
+    const challengeUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Handle Initial Deep Link
-  useEffect(() => {
-    if (initialGameId) {
-        setSelectedGame(initialGameId);
+    // Payment State
+    const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+    // Load Maintenance State and Game Configs
+    useEffect(() => {
+        const maintenance = localStorage.getItem('vantage_maintenance') === 'true';
+        setIsMaintenance(maintenance);
+
+        // Subscribe to admin overrides
+        const unsub = subscribeToGameConfigs(setGameOverrides);
+        return () => unsub();
+    }, []);
+
+    // Handle Initial Deep Link
+    useEffect(() => {
+        if (initialGameId) {
+            setSelectedGame(initialGameId);
+            setViewState('stakes');
+        } else {
+            setViewState('games');
+            setSelectedGame(null);
+        }
+    }, [initialGameId]);
+
+    // Scroll to top when switching to stakes view
+    useEffect(() => {
+        if (viewState === 'stakes') {
+            const mainContainer = document.getElementById('main-scroll-container');
+            setTimeout(() => {
+                if (mainContainer) {
+                    mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }, 100);
+        }
+    }, [viewState]);
+
+    // Real-time Search Effect
+    useEffect(() => {
+        const delayDebounceFn = setTimeout(async () => {
+            if (searchQuery.length >= 3) {
+                setIsSearching(true);
+                try {
+                    const results = await searchUsers(searchQuery);
+                    setSearchResults(results.filter(r => r.id !== user.id));
+                } catch (error) {
+                    console.error("Search failed", error);
+                }
+                setIsSearching(false);
+            } else {
+                setSearchResults([]);
+            }
+        }, 500);
+
+        return () => clearTimeout(delayDebounceFn);
+    }, [searchQuery, user.id]);
+
+    // Cleanup challenge listener
+    useEffect(() => {
+        return () => {
+            if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+        };
+    }, []);
+
+    const handleGameSelect = (gameId: string, status: string) => {
+        if (status !== 'active') return;
+        if (isMaintenance) return;
+        setSelectedGame(gameId);
         setViewState('stakes');
-    } else {
+        playSFX('click');
+    };
+
+    const handleBackToGames = () => {
         setViewState('games');
         setSelectedGame(null);
-    }
-  }, [initialGameId]);
+        playSFX('click');
+        if (onClearInitialGame) onClearInitialGame();
+    };
 
-  // Scroll to top when switching to stakes view
-  useEffect(() => {
-    if (viewState === 'stakes') {
-        const mainContainer = document.getElementById('main-scroll-container');
-        setTimeout(() => {
-            if (mainContainer) {
-                mainContainer.scrollTo({ top: 0, behavior: 'smooth' });
-            } else {
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            }
-        }, 100);
-    }
-  }, [viewState]);
+    const handleTierSelect = (tier: GameTier) => {
+        playSFX('click');
+        if (isMaintenance) return;
+        if (!selectedGame) return;
+        if (user.balance < tier.stake) {
+            setNeededAmount(tier.stake - user.balance);
+            setShowDepositModal(true);
+            playSFX('error');
+        } else {
+            onQuickMatch(tier.stake, selectedGame);
+        }
+    };
 
-  // Real-time Search Effect
-  useEffect(() => {
-      const delayDebounceFn = setTimeout(async () => {
-          if (searchQuery.length >= 3) {
-              setIsSearching(true);
-              try {
-                  const results = await searchUsers(searchQuery);
-                  setSearchResults(results.filter(r => r.id !== user.id));
-              } catch (error) {
-                  console.error("Search failed", error);
-              }
-              setIsSearching(false);
-          } else {
-              setSearchResults([]);
-          }
-      }, 500);
+    const handleBotPlay = async () => {
+        playSFX('click');
+        if (!selectedGame) return;
 
-      return () => clearTimeout(delayDebounceFn);
-  }, [searchQuery, user.id]);
+        // For Chess, show difficulty selector
+        if (selectedGame === 'Chess') {
+            setShowDifficultyModal(true);
+            return;
+        }
 
-  // Cleanup challenge listener
-  useEffect(() => {
-      return () => {
-          if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
-      };
-  }, []);
+        onQuickMatch(-1, selectedGame);
+    };
 
-  const handleGameSelect = (gameId: string, status: string) => {
-      if (status !== 'active') return;
-      if (isMaintenance) return;
-      setSelectedGame(gameId);
-      setViewState('stakes');
-      playSFX('click');
-  };
+    const handleDifficultySelect = (difficulty: string) => {
+        playSFX('click');
+        if (!selectedGame) return;
+        setShowDifficultyModal(false);
+        onQuickMatch(-1, selectedGame, undefined, difficulty);
+    };
 
-  const handleBackToGames = () => {
-      setViewState('games');
-      setSelectedGame(null);
-      playSFX('click');
-      if (onClearInitialGame) onClearInitialGame();
-  };
+    const handleDeposit = async () => {
+        playSFX('click');
+        const depositAmount = Math.max(neededAmount, 500);
+        setIsProcessingPayment(true);
+        const response = await initiateFapshiPayment(depositAmount, user);
+        setIsProcessingPayment(false);
 
-  const handleTierSelect = (tier: GameTier) => {
-      playSFX('click');
-      if (isMaintenance) return;
-      if (!selectedGame) return;
-      if (user.balance < tier.stake) {
-          setNeededAmount(tier.stake - user.balance);
-          setShowDepositModal(true);
-          playSFX('error');
-      } else {
-          onQuickMatch(tier.stake, selectedGame);
-      }
-  };
+        if (response && response.link) {
+            window.open(response.link, '_blank');
+            setShowDepositModal(false);
+            toast.info("Payment page opened! Please complete transaction to update balance.");
+        } else {
+            toast.error("Failed to initiate payment. Please try again.");
+        }
+    };
 
-  const handleBotPlay = async () => {
-      playSFX('click');
-      if (!selectedGame) return;
-      
-      // For Chess, show difficulty selector
-      if (selectedGame === 'Chess') {
-          setShowDifficultyModal(true);
-          return;
-      }
-      
-      onQuickMatch(-1, selectedGame);
-  };
+    const handleSendChallenge = async () => {
+        playSFX('click');
+        if (isMaintenance) return;
+        if (!selectedFriend || !selectedFriend.id) {
+            toast.error("Invalid user selected");
+            return;
+        }
 
-  const handleDifficultySelect = (difficulty: string) => {
-      playSFX('click');
-      if (!selectedGame) return;
-      setShowDifficultyModal(false);
-      onQuickMatch(-1, selectedGame, undefined, difficulty);
-  };
+        if (user.balance < challengeStake) {
+            setNeededAmount(challengeStake - user.balance);
+            setShowChallengeModal(false);
+            setShowDepositModal(true);
+            return;
+        }
 
-  const handleDeposit = async () => {
-      playSFX('click');
-      const depositAmount = Math.max(neededAmount, 500); 
-      setIsProcessingPayment(true);
-      const response = await initiateFapshiPayment(depositAmount, user);
-      setIsProcessingPayment(false);
+        setChallengeStep('sending');
 
-      if (response && response.link) {
-          window.open(response.link, '_blank');
-          setShowDepositModal(false);
-          alert("Payment page opened! Please complete transaction to update balance.");
-      } else {
-          // Alert handled in fapshi service or here
-      }
-  };
+        try {
+            const challengeId = await sendChallenge(user, selectedFriend.id, challengeGame, challengeStake);
+            setActiveChallengeId(challengeId);
 
-  const handleSendChallenge = async () => {
-      playSFX('click');
-      if (isMaintenance) return;
-      if (!selectedFriend || !selectedFriend.id) {
-          alert("Invalid user selected");
-          return;
-      }
-      
-      if (user.balance < challengeStake) {
-          setNeededAmount(challengeStake - user.balance);
-          setShowChallengeModal(false);
-          setShowDepositModal(true);
-          return;
-      }
+            challengeUnsubscribeRef.current = subscribeToChallengeStatus(challengeId, (data) => {
+                if (data.status === 'accepted' && data.gameId) {
+                    playSFX('win');
+                    setShowChallengeModal(false);
+                    onQuickMatch(challengeStake, challengeGame, data.gameId);
+                    setActiveChallengeId(null);
+                    if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+                } else if (data.status === 'declined') {
+                    playSFX('error');
+                    toast.info(`${selectedFriend.name} declined the challenge.`);
+                    setChallengeStep('search');
+                    setActiveChallengeId(null);
+                    if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+                }
+            });
 
-      setChallengeStep('sending');
-      
-      try {
-          const challengeId = await sendChallenge(user, selectedFriend.id, challengeGame, challengeStake);
-          setActiveChallengeId(challengeId);
+        } catch (error) {
+            console.error("Failed to send challenge", error);
+            toast.error("Error sending challenge.");
+            setChallengeStep('config');
+        }
+    };
 
-          challengeUnsubscribeRef.current = subscribeToChallengeStatus(challengeId, (data) => {
-              if (data.status === 'accepted' && data.gameId) {
-                  playSFX('win'); 
-                  setShowChallengeModal(false);
-                  onQuickMatch(challengeStake, challengeGame, data.gameId);
-                  setActiveChallengeId(null);
-                  if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
-              } else if (data.status === 'declined') {
-                  playSFX('error');
-                  alert(`${selectedFriend.name} declined the challenge.`);
-                  setChallengeStep('search'); 
-                  setActiveChallengeId(null);
-                  if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
-              }
-          });
+    const handleCancelChallenge = () => {
+        if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+        setActiveChallengeId(null);
+        setChallengeStep('search');
+        setShowChallengeModal(false);
+    };
 
-      } catch (error) {
-          console.error("Failed to send challenge", error);
-          alert("Error sending challenge.");
-          setChallengeStep('config');
-      }
-  };
+    const activeGameData = STATIC_GAME_LIST.find(g => g.id === selectedGame);
 
-  const handleCancelChallenge = () => {
-      if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
-      setActiveChallengeId(null);
-      setChallengeStep('search');
-      setShowChallengeModal(false);
-  };
+    const pageVariants = {
+        enter: (direction: number) => ({ x: direction > 0 ? 50 : -50, opacity: 0 }),
+        center: { x: 0, opacity: 1 },
+        exit: (direction: number) => ({ x: direction > 0 ? -50 : 50, opacity: 0 })
+    };
 
-  const activeGameData = STATIC_GAME_LIST.find(g => g.id === selectedGame);
+    // Merge Configs
+    const availableGames = STATIC_GAME_LIST.map(g => ({
+        ...g,
+        status: gameOverrides[g.id] || g.defaultStatus
+    }));
 
-  const pageVariants = {
-      enter: (direction: number) => ({ x: direction > 0 ? 50 : -50, opacity: 0 }),
-      center: { x: 0, opacity: 1 },
-      exit: (direction: number) => ({ x: direction > 0 ? -50 : 50, opacity: 0 })
-  };
+    return (
+        <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative overflow-hidden">
 
-  // Merge Configs
-  const availableGames = STATIC_GAME_LIST.map(g => ({
-      ...g,
-      status: gameOverrides[g.id] || g.defaultStatus
-  }));
+            {isMaintenance && (
+                <div className="absolute inset-0 z-50 bg-royal-950/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8">
+                    <div className="bg-royal-900 border border-red-500/30 p-8 rounded-3xl shadow-2xl max-w-md relative overflow-hidden">
+                        <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>
+                        <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <AlertTriangle size={40} className="text-red-500" />
+                        </div>
+                        <h2 className="text-3xl font-display font-bold text-white mb-3">System Maintenance</h2>
+                        <p className="text-slate-400 mb-6 leading-relaxed">
+                            The Vantage Network is currently undergoing critical upgrades. All active stakes have been <span className="text-white font-bold">automatically refunded</span> to user wallets.
+                        </p>
+                        <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs font-mono text-slate-500">
+                            ESTIMATED DOWNTIME: 2 HOURS
+                        </div>
+                    </div>
+                </div>
+            )}
 
-  return (
-    <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative overflow-hidden">
-      
-      {isMaintenance && (
-          <div className="absolute inset-0 z-50 bg-royal-950/80 backdrop-blur-md flex flex-col items-center justify-center text-center p-8">
-              <div className="bg-royal-900 border border-red-500/30 p-8 rounded-3xl shadow-2xl max-w-md relative overflow-hidden">
-                  <div className="absolute inset-0 bg-red-500/5 animate-pulse pointer-events-none"></div>
-                  <div className="w-20 h-20 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <AlertTriangle size={40} className="text-red-500" />
-                  </div>
-                  <h2 className="text-3xl font-display font-bold text-white mb-3">System Maintenance</h2>
-                  <p className="text-slate-400 mb-6 leading-relaxed">
-                      The Vantage Network is currently undergoing critical upgrades. All active stakes have been <span className="text-white font-bold">automatically refunded</span> to user wallets.
-                  </p>
-                  <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs font-mono text-slate-500">
-                      ESTIMATED DOWNTIME: 2 HOURS
-                  </div>
-              </div>
-          </div>
-      )}
+            {/* --- DIFFICULTY MODAL --- */}
+            <AnimatePresence>
+                {showDifficultyModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowDifficultyModal(false)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                            className="relative bg-royal-900 border border-purple-500 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+                        >
+                            <div className="text-center mb-6">
+                                <h2 className="text-xl font-bold text-white mb-1">Select Difficulty</h2>
+                                <p className="text-slate-400 text-sm">Choose your AI opponent level</p>
+                            </div>
+                            <div className="space-y-3">
+                                <button onClick={() => handleDifficultySelect('easy')} className="w-full p-4 bg-white/5 hover:bg-green-500/20 border border-white/10 hover:border-green-500 rounded-xl flex items-center gap-4 transition-all group">
+                                    <div className="p-3 bg-green-500/20 text-green-400 rounded-lg group-hover:bg-green-500 group-hover:text-white transition-colors">
+                                        <Bot size={20} />
+                                    </div>
+                                    <div className="text-left">
+                                        <div className="font-bold text-white">Easy</div>
+                                        <div className="text-xs text-slate-400">Casual play</div>
+                                    </div>
+                                </button>
+                                <button onClick={() => handleDifficultySelect('medium')} className="w-full p-4 bg-white/5 hover:bg-yellow-500/20 border border-white/10 hover:border-yellow-500 rounded-xl flex items-center gap-4 transition-all group">
+                                    <div className="p-3 bg-yellow-500/20 text-yellow-400 rounded-lg group-hover:bg-yellow-500 group-hover:text-white transition-colors">
+                                        <Zap size={20} />
+                                    </div>
+                                    <div className="text-left">
+                                        <div className="font-bold text-white">Medium</div>
+                                        <div className="text-xs text-slate-400">Tactical play</div>
+                                    </div>
+                                </button>
+                                <button onClick={() => handleDifficultySelect('hard')} className="w-full p-4 bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500 rounded-xl flex items-center gap-4 transition-all group">
+                                    <div className="p-3 bg-red-500/20 text-red-400 rounded-lg group-hover:bg-red-500 group-hover:text-white transition-colors">
+                                        <Swords size={20} />
+                                    </div>
+                                    <div className="text-left">
+                                        <div className="font-bold text-white">Hard</div>
+                                        <div className="text-xs text-slate-400">Grandmaster Mode</div>
+                                    </div>
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
-      {/* --- DIFFICULTY MODAL --- */}
-      <AnimatePresence>
-          {showDifficultyModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowDifficultyModal(false)}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="relative bg-royal-900 border border-purple-500 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
-                  >
-                      <div className="text-center mb-6">
-                          <h2 className="text-xl font-bold text-white mb-1">Select Difficulty</h2>
-                          <p className="text-slate-400 text-sm">Choose your AI opponent level</p>
-                      </div>
-                      <div className="space-y-3">
-                          <button onClick={() => handleDifficultySelect('easy')} className="w-full p-4 bg-white/5 hover:bg-green-500/20 border border-white/10 hover:border-green-500 rounded-xl flex items-center gap-4 transition-all group">
-                              <div className="p-3 bg-green-500/20 text-green-400 rounded-lg group-hover:bg-green-500 group-hover:text-white transition-colors">
-                                  <Bot size={20} />
-                              </div>
-                              <div className="text-left">
-                                  <div className="font-bold text-white">Easy</div>
-                                  <div className="text-xs text-slate-400">Casual play</div>
-                              </div>
-                          </button>
-                          <button onClick={() => handleDifficultySelect('medium')} className="w-full p-4 bg-white/5 hover:bg-yellow-500/20 border border-white/10 hover:border-yellow-500 rounded-xl flex items-center gap-4 transition-all group">
-                              <div className="p-3 bg-yellow-500/20 text-yellow-400 rounded-lg group-hover:bg-yellow-500 group-hover:text-white transition-colors">
-                                  <Zap size={20} />
-                              </div>
-                              <div className="text-left">
-                                  <div className="font-bold text-white">Medium</div>
-                                  <div className="text-xs text-slate-400">Tactical play</div>
-                              </div>
-                          </button>
-                          <button onClick={() => handleDifficultySelect('hard')} className="w-full p-4 bg-white/5 hover:bg-red-500/20 border border-white/10 hover:border-red-500 rounded-xl flex items-center gap-4 transition-all group">
-                              <div className="p-3 bg-red-500/20 text-red-400 rounded-lg group-hover:bg-red-500 group-hover:text-white transition-colors">
-                                  <Swords size={20} />
-                              </div>
-                              <div className="text-left">
-                                  <div className="font-bold text-white">Hard</div>
-                                  <div className="text-xs text-slate-400">Grandmaster Mode</div>
-                              </div>
-                          </button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-      </AnimatePresence>
+            {/* --- DEPOSIT MODAL --- */}
+            <AnimatePresence>
+                {showDepositModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowDepositModal(false)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                            className="relative bg-royal-900 border border-gold-500 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+                        >
+                            <button onClick={() => setShowDepositModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                                <X size={20} />
+                            </button>
+                            <div className="text-center mb-6">
+                                <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <Wallet className="text-red-500" size={32} />
+                                </div>
+                                <h2 className="text-xl font-bold text-white mb-2">Insufficient Funds</h2>
+                                <p className="text-sm text-slate-400">
+                                    You need <span className="text-gold-400 font-bold">{neededAmount.toLocaleString()} FCFA</span> more.
+                                </p>
+                            </div>
+                            <div className="space-y-3">
+                                <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-yellow-400 text-black font-bold rounded-xl flex items-center justify-center gap-2">
+                                    {isProcessingPayment ? "Processing..." : "MTN Mobile Money"}
+                                </button>
+                                <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-orange-500 text-white font-bold rounded-xl flex items-center justify-center gap-2">
+                                    {isProcessingPayment ? "Processing..." : "Orange Money"}
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
-      {/* --- DEPOSIT MODAL --- */}
-      <AnimatePresence>
-          {showDepositModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowDepositModal(false)}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="relative bg-royal-900 border border-gold-500 rounded-2xl p-6 w-full max-w-sm shadow-2xl"
-                  >
-                      <button onClick={() => setShowDepositModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
-                          <X size={20} />
-                      </button>
-                      <div className="text-center mb-6">
-                          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
-                              <Wallet className="text-red-500" size={32} />
-                          </div>
-                          <h2 className="text-xl font-bold text-white mb-2">Insufficient Funds</h2>
-                          <p className="text-sm text-slate-400">
-                              You need <span className="text-gold-400 font-bold">{neededAmount.toLocaleString()} FCFA</span> more.
-                          </p>
-                      </div>
-                      <div className="space-y-3">
-                          <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-yellow-400 text-black font-bold rounded-xl flex items-center justify-center gap-2">
-                              {isProcessingPayment ? "Processing..." : "MTN Mobile Money"}
-                          </button>
-                          <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-orange-500 text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                               {isProcessingPayment ? "Processing..." : "Orange Money"}
-                          </button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-      </AnimatePresence>
+            {/* --- CHALLENGE MODAL --- */}
+            <AnimatePresence>
+                {showChallengeModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={handleCancelChallenge}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            layout
+                            initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
+                            className="relative bg-royal-900 border border-white/10 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+                        >
+                            <div className="p-6 border-b border-white/5 bg-royal-950/50 flex justify-between items-center z-10">
+                                <h2 className="text-xl font-display font-bold text-white flex items-center gap-2">
+                                    <Swords className="text-gold-400" size={20} />
+                                    {challengeStep === 'search' ? 'Challenge a Friend' : 'Configure Match'}
+                                </h2>
+                                <button onClick={handleCancelChallenge} className="text-slate-400 hover:text-white"><X size={20} /></button>
+                            </div>
 
-      {/* --- CHALLENGE MODAL --- */}
-      <AnimatePresence>
-          {showChallengeModal && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={handleCancelChallenge}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    layout
-                    initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                    className="relative bg-royal-900 border border-white/10 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
-                  >
-                      <div className="p-6 border-b border-white/5 bg-royal-950/50 flex justify-between items-center z-10">
-                          <h2 className="text-xl font-display font-bold text-white flex items-center gap-2">
-                              <Swords className="text-gold-400" size={20} />
-                              {challengeStep === 'search' ? 'Challenge a Friend' : 'Configure Match'}
-                          </h2>
-                          <button onClick={handleCancelChallenge} className="text-slate-400 hover:text-white"><X size={20} /></button>
-                      </div>
+                            <div className="p-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
+                                <AnimatePresence mode="wait" initial={false}>
+                                    {challengeStep === 'search' ? (
+                                        <motion.div
+                                            key="search"
+                                            initial={{ x: -50, opacity: 0 }}
+                                            animate={{ x: 0, opacity: 1 }}
+                                            exit={{ x: -50, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="space-y-4 absolute inset-0 p-6"
+                                        >
+                                            <div className="relative">
+                                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Search by username..."
+                                                    value={searchQuery}
+                                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                                    className="w-full bg-black/30 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white focus:border-gold-500 transition-colors"
+                                                    autoFocus
+                                                />
+                                            </div>
 
-                      <div className="p-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
-                          <AnimatePresence mode="wait" initial={false}>
-                              {challengeStep === 'search' ? (
-                                  <motion.div
-                                      key="search"
-                                      initial={{ x: -50, opacity: 0 }}
-                                      animate={{ x: 0, opacity: 1 }}
-                                      exit={{ x: -50, opacity: 0 }}
-                                      transition={{ duration: 0.2 }}
-                                      className="space-y-4 absolute inset-0 p-6"
-                                  >
-                                      <div className="relative">
-                                          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                                          <input 
-                                              type="text" 
-                                              placeholder="Search by username..."
-                                              value={searchQuery}
-                                              onChange={(e) => setSearchQuery(e.target.value)}
-                                              className="w-full bg-black/30 border border-white/10 rounded-xl py-3 pl-12 pr-4 text-white focus:border-gold-500 transition-colors"
-                                              autoFocus
-                                          />
-                                      </div>
-                                      
-                                      <div className="space-y-2">
-                                          <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Results</p>
-                                          {isSearching ? (
-                                              <div className="flex items-center justify-center py-8 text-gold-400 gap-2">
-                                                   <Loader2 className="animate-spin" size={20} /> Searching Database...
-                                              </div>
-                                          ) : searchResults.length === 0 ? (
-                                              <div className="text-center text-slate-600 text-sm py-8">
-                                                  {searchQuery.length > 0 ? "No users found." : "Type a name to search existing users."}
-                                              </div>
-                                          ) : (
-                                              searchResults.map((friend, idx) => (
-                                                  <motion.button
-                                                      key={idx}
-                                                      whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                                                      onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
-                                                      className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
-                                                  >
-                                                      <div className="flex items-center gap-3">
-                                                          <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full" />
-                                                          <div className="text-left">
-                                                              <div className="font-bold text-white">{friend.name}</div>
-                                                              <div className="text-xs text-slate-400">{friend.rankTier}</div>
-                                                          </div>
-                                                      </div>
-                                                      <div className="p-2 bg-royal-800 rounded-lg text-gold-400 opacity-0 group-hover:opacity-100"><Swords size={16} /></div>
-                                                  </motion.button>
-                                              ))
-                                          )}
-                                      </div>
-                                  </motion.div>
-                              ) : challengeStep === 'config' ? (
-                                  <motion.div
-                                      key="config"
-                                      initial={{ x: 50, opacity: 0 }}
-                                      animate={{ x: 0, opacity: 1 }}
-                                      exit={{ x: 50, opacity: 0 }}
-                                      transition={{ duration: 0.2 }}
-                                      className="space-y-6 absolute inset-0 p-6"
-                                  >
-                                      <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/5">
-                                          <div className="flex flex-col items-center">
-                                              <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
-                                              <span className="text-xs font-bold text-white mt-1">You</span>
-                                          </div>
-                                          <div className="text-2xl font-black text-slate-600 italic">VS</div>
-                                          <div className="flex flex-col items-center">
-                                              <img src={selectedFriend?.avatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
-                                              <span className="text-xs font-bold text-white mt-1">{selectedFriend?.name}</span>
-                                          </div>
-                                      </div>
+                                            <div className="space-y-2">
+                                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Results</p>
+                                                {isSearching ? (
+                                                    <div className="flex items-center justify-center py-8 text-gold-400 gap-2">
+                                                        <Loader2 className="animate-spin" size={20} /> Searching Database...
+                                                    </div>
+                                                ) : searchResults.length === 0 ? (
+                                                    <div className="text-center text-slate-600 text-sm py-8">
+                                                        {searchQuery.length > 0 ? "No users found." : "Type a name to search existing users."}
+                                                    </div>
+                                                ) : (
+                                                    searchResults.map((friend, idx) => (
+                                                        <motion.button
+                                                            key={idx}
+                                                            whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                                                            onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
+                                                            className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
+                                                        >
+                                                            <div className="flex items-center gap-3">
+                                                                <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full" />
+                                                                <div className="text-left">
+                                                                    <div className="font-bold text-white">{friend.name}</div>
+                                                                    <div className="text-xs text-slate-400">{friend.rankTier}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className="p-2 bg-royal-800 rounded-lg text-gold-400 opacity-0 group-hover:opacity-100"><Swords size={16} /></div>
+                                                        </motion.button>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    ) : challengeStep === 'config' ? (
+                                        <motion.div
+                                            key="config"
+                                            initial={{ x: 50, opacity: 0 }}
+                                            animate={{ x: 0, opacity: 1 }}
+                                            exit={{ x: 50, opacity: 0 }}
+                                            transition={{ duration: 0.2 }}
+                                            className="space-y-6 absolute inset-0 p-6"
+                                        >
+                                            <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/5">
+                                                <div className="flex flex-col items-center">
+                                                    <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
+                                                    <span className="text-xs font-bold text-white mt-1">You</span>
+                                                </div>
+                                                <div className="text-2xl font-black text-slate-600 italic">VS</div>
+                                                <div className="flex flex-col items-center">
+                                                    <img src={selectedFriend?.avatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
+                                                    <span className="text-xs font-bold text-white mt-1">{selectedFriend?.name}</span>
+                                                </div>
+                                            </div>
 
-                                      <div>
-                                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Select Game</label>
-                                          <div className="grid grid-cols-4 gap-2">
-                                              {availableGames.filter(g => g.status === 'active').map(g => (
-                                                  <button 
-                                                      key={g.id}
-                                                      onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
-                                                      className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${
-                                                          challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-500 hover:bg-white/5'
-                                                      }`}
-                                                  >
-                                                      <g.icon size={20} className={challengeGame === g.id ? 'text-gold-400' : ''} />
-                                                  </button>
-                                              ))}
-                                          </div>
-                                      </div>
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Select Game</label>
+                                                <div className="grid grid-cols-4 gap-2">
+                                                    {availableGames.filter(g => g.status === 'active').map(g => (
+                                                        <button
+                                                            key={g.id}
+                                                            onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
+                                                            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-500 hover:bg-white/5'
+                                                                }`}
+                                                        >
+                                                            <g.icon size={20} className={challengeGame === g.id ? 'text-gold-400' : ''} />
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
 
-                                      <div>
-                                          <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('entry_stake')} (FCFA)</label>
-                                          <input 
-                                              type="number" 
-                                              value={challengeStake}
-                                              onChange={(e) => setChallengeStake(Number(e.target.value))}
-                                              className="w-full bg-royal-950 border border-white/10 rounded-xl py-3 pl-4 text-white font-mono font-bold text-lg focus:border-gold-500"
-                                          />
-                                          <div className="flex gap-2 mt-2">
-                                              {[500, 1000, 5000].map(amt => (
-                                                  <button key={amt} onClick={() => { setChallengeStake(amt); playSFX('click'); }} className="px-2 py-1 bg-white/5 rounded text-xs text-slate-400 hover:text-white">{amt}</button>
-                                              ))}
-                                          </div>
-                                      </div>
+                                            <div>
+                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('entry_stake')} (FCFA)</label>
+                                                <input
+                                                    type="number"
+                                                    value={challengeStake}
+                                                    onChange={(e) => setChallengeStake(Number(e.target.value))}
+                                                    className="w-full bg-royal-950 border border-white/10 rounded-xl py-3 pl-4 text-white font-mono font-bold text-lg focus:border-gold-500"
+                                                />
+                                                <div className="flex gap-2 mt-2">
+                                                    {[500, 1000, 5000].map(amt => (
+                                                        <button key={amt} onClick={() => { setChallengeStake(amt); playSFX('click'); }} className="px-2 py-1 bg-white/5 rounded text-xs text-slate-400 hover:text-white">{amt}</button>
+                                                    ))}
+                                                </div>
+                                            </div>
 
-                                      <div className="flex gap-3 pt-2">
-                                          <button onClick={() => { setChallengeStep('search'); playSFX('click'); }} className="p-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400"><ArrowLeft size={20} /></button>
-                                          <button onClick={handleSendChallenge} className="flex-1 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black py-4 rounded-xl shadow-lg flex items-center justify-center gap-2">
-                                              <Swords size={20} /> SEND CHALLENGE
-                                          </button>
-                                      </div>
-                                  </motion.div>
-                              ) : (
-                                  <motion.div
-                                      key="sending"
-                                      initial={{ opacity: 0 }}
-                                      animate={{ opacity: 1 }}
-                                      exit={{ opacity: 0 }}
-                                      className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center"
-                                  >
-                                      <div className="w-20 h-20 relative mb-6">
-                                          <div className="absolute inset-0 bg-gold-500/20 rounded-full animate-ping"></div>
-                                          <div className="relative bg-royal-800 rounded-full w-full h-full flex items-center justify-center border-2 border-gold-500">
-                                               <Swords size={32} className="text-gold-400" />
-                                          </div>
-                                      </div>
-                                      <h3 className="text-xl font-bold text-white mb-2">Sending Challenge...</h3>
-                                      <p className="text-slate-400 text-sm">Waiting for <span className="text-white font-bold">{selectedFriend?.name}</span> to accept.</p>
-                                      
-                                      <button 
-                                          onClick={handleCancelChallenge}
-                                          className="mt-8 text-red-400 text-xs font-bold uppercase tracking-wider hover:text-red-300"
-                                      >
-                                          Cancel Request
-                                      </button>
-                                  </motion.div>
-                              )}
-                          </AnimatePresence>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-      </AnimatePresence>
+                                            <div className="flex gap-3 pt-2">
+                                                <button onClick={() => { setChallengeStep('search'); playSFX('click'); }} className="p-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400"><ArrowLeft size={20} /></button>
+                                                <button onClick={handleSendChallenge} className="flex-1 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black py-4 rounded-xl shadow-lg flex items-center justify-center gap-2">
+                                                    <Swords size={20} /> SEND CHALLENGE
+                                                </button>
+                                            </div>
+                                        </motion.div>
+                                    ) : (
+                                        <motion.div
+                                            key="sending"
+                                            initial={{ opacity: 0 }}
+                                            animate={{ opacity: 1 }}
+                                            exit={{ opacity: 0 }}
+                                            className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center"
+                                        >
+                                            <div className="w-20 h-20 relative mb-6">
+                                                <div className="absolute inset-0 bg-gold-500/20 rounded-full animate-ping"></div>
+                                                <div className="relative bg-royal-800 rounded-full w-full h-full flex items-center justify-center border-2 border-gold-500">
+                                                    <Swords size={32} className="text-gold-400" />
+                                                </div>
+                                            </div>
+                                            <h3 className="text-xl font-bold text-white mb-2">Sending Challenge...</h3>
+                                            <p className="text-slate-400 text-sm">Waiting for <span className="text-white font-bold">{selectedFriend?.name}</span> to accept.</p>
 
-      {/* --- HEADER --- */}
-      <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
-        <div>
-            <h1 className="text-3xl font-display font-bold text-white mb-2">
-                {viewState === 'games' ? t('game_selection') : activeGameData?.name || t('select_stake')}
-            </h1>
-            <p className="text-slate-400">
-                {viewState === 'games' ? t('choose_arena') : t('select_entry')}
-            </p>
-        </div>
-        <button 
-            onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); playSFX('click'); }}
-            className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
-        >
-            <Swords size={18} /> {t('challenge_friend')}
-        </button>
-      </div>
+                                            <button
+                                                onClick={handleCancelChallenge}
+                                                className="mt-8 text-red-400 text-xs font-bold uppercase tracking-wider hover:text-red-300"
+                                            >
+                                                Cancel Request
+                                            </button>
+                                        </motion.div>
+                                    )}
+                                </AnimatePresence>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
 
-      {/* --- MAIN CONTENT (2-STEP FLOW) --- */}
-      <AnimatePresence mode="wait" custom={viewState === 'stakes' ? 1 : -1}>
-          
-          {/* STEP 1: GAME SELECTION */}
-          {viewState === 'games' && (
-              <motion.div
-                  key="games"
-                  custom={-1}
-                  variants={pageVariants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  transition={{ duration: 0.3 }}
-                  className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
-              >
-                  {availableGames.map((game, idx) => {
-                      const isActive = game.status === 'active';
-                      return (
-                      <motion.div
-                          key={game.id}
-                          layoutId={`game-card-${game.id}`}
-                          onClick={() => handleGameSelect(game.id, game.status)}
-                          whileHover={isActive && !isMaintenance ? { y: -8, scale: 1.02 } : {}}
-                          initial={{ opacity: 0, y: 20 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: idx * 0.1 }}
-                          className={`glass-panel p-6 rounded-3xl border relative overflow-hidden transition-all duration-300 ${game.bg} ${game.border} 
+            {/* --- HEADER --- */}
+            <div className="mb-8 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                <div>
+                    <h1 className="text-3xl font-display font-bold text-white mb-2">
+                        {viewState === 'games' ? t('game_selection') : activeGameData?.name || t('select_stake')}
+                    </h1>
+                    <p className="text-slate-400">
+                        {viewState === 'games' ? t('choose_arena') : t('select_entry')}
+                    </p>
+                </div>
+                <button
+                    onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); playSFX('click'); }}
+                    className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
+                >
+                    <Swords size={18} /> {t('challenge_friend')}
+                </button>
+            </div>
+
+            {/* --- MAIN CONTENT (2-STEP FLOW) --- */}
+            <AnimatePresence mode="wait" custom={viewState === 'stakes' ? 1 : -1}>
+
+                {/* STEP 1: GAME SELECTION */}
+                {viewState === 'games' && (
+                    <motion.div
+                        key="games"
+                        custom={-1}
+                        variants={pageVariants}
+                        initial="enter"
+                        animate="center"
+                        exit="exit"
+                        transition={{ duration: 0.3 }}
+                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6"
+                    >
+                        {availableGames.map((game, idx) => {
+                            const isActive = game.status === 'active';
+                            return (
+                                <motion.div
+                                    key={game.id}
+                                    layoutId={`game-card-${game.id}`}
+                                    onClick={() => handleGameSelect(game.id, game.status)}
+                                    whileHover={isActive && !isMaintenance ? { y: -8, scale: 1.02 } : {}}
+                                    initial={{ opacity: 0, y: 20 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    transition={{ delay: idx * 0.1 }}
+                                    className={`glass-panel p-6 rounded-3xl border relative overflow-hidden transition-all duration-300 ${game.bg} ${game.border} 
                             ${isActive ? 'cursor-pointer group' : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
                           `}
-                      >
-                          {/* Coming Soon Overlay */}
-                          {!isActive && (
-                              <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
-                                  <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5">
-                                      <Lock size={12} className="text-slate-400" />
-                                      <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Coming Soon</span>
-                                  </div>
-                              </div>
-                          )}
-
-                          <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-royal-950 border border-white/10 ${isActive ? 'group-hover:scale-110 transition-transform' : ''} ${game.color}`}>
-                              <game.icon size={32} />
-                          </div>
-                          
-                          <h3 className="text-xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{game.name}</h3>
-                          
-                          {/* Description for active games like Chess */}
-                          {(game as any).desc && isActive && (
-                              <p className="text-[10px] text-slate-400 font-mono mb-2 uppercase tracking-wide">{(game as any).desc}</p>
-                          )}
-
-                          <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-                              <Users size={14} /> {game.players} Active
-                          </div>
-
-                          <button className={`w-full py-3 rounded-xl bg-royal-950/50 border border-white/10 text-sm font-bold uppercase tracking-wider transition-colors ${
-                              isActive ? `group-hover:bg-white/10 ${game.color}` : 'text-slate-600'
-                          }`}>
-                              {isActive ? 'Select Table' : 'Locked'}
-                          </button>
-                      </motion.div>
-                  )})}
-              </motion.div>
-          )}
-
-          {/* STEP 2: STAKE SELECTION */}
-          {viewState === 'stakes' && activeGameData && (
-              <motion.div
-                  key="stakes"
-                  custom={1}
-                  variants={pageVariants}
-                  initial="enter"
-                  animate="center"
-                  exit="exit"
-                  transition={{ duration: 0.3 }}
-                  className="space-y-6"
-              >
-                  {/* Back Button & Selected Game Indicator */}
-                  <div className="flex items-center justify-between mb-8">
-                      <div className="flex items-center gap-4">
-                          <button 
-                              onClick={handleBackToGames}
-                              className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                          >
-                              <ArrowLeft size={20} />
-                          </button>
-                          <motion.div 
-                              layoutId={`game-card-${activeGameData.id}`} 
-                              className={`flex items-center gap-3 px-4 py-2 rounded-xl border bg-royal-900/50 ${activeGameData.border}`}
-                          >
-                              <activeGameData.icon size={20} className={activeGameData.color} />
-                              <span className="font-bold text-white">{activeGameData.name}</span>
-                          </motion.div>
-                      </div>
-                      
-                      {/* BOT PRACTICE BUTTON */}
-                      <button 
-                          onClick={handleBotPlay}
-                          className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
-                      >
-                          <Bot size={16} /> {t('practice_ai')}
-                      </button>
-                  </div>
-
-                  {/* Tiers Grid */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                      {GAME_TIERS.map((tier, idx) => {
-                          const isPopular = tier.stake === 500;
-                          return (
-                            <motion.div
-                                key={tier.id}
-                                initial={{ opacity: 0, scale: 0.9 }}
-                                animate={{ opacity: 1, scale: 1 }}
-                                transition={{ delay: idx * 0.05 }}
-                                whileHover={isMaintenance ? {} : { y: -8, scale: 1.02 }}
-                                onClick={() => handleTierSelect(tier)}
-                                className={`glass-panel p-6 rounded-3xl border cursor-pointer group relative overflow-visible transition-all duration-300 ${
-                                    isPopular ? 'border-gold-500/50 bg-royal-800/80 shadow-[0_0_30px_rgba(251,191,36,0.1)] ring-1 ring-gold-500/20' : 'border-white/10 hover:border-gold-500/30'
-                                }`}
-                            >
-                                {isPopular && (
-                                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-max z-20">
-                                        <div className="relative">
-                                            <div className="absolute inset-0 bg-gold-400 blur-sm rounded-full opacity-50 animate-pulse"></div>
-                                            <div className="relative bg-gradient-to-r from-gold-400 to-gold-600 text-royal-950 text-[10px] font-black px-4 py-1 rounded-full shadow-lg flex items-center gap-1">
-                                                <Star size={10} fill="currentColor" /> POPULAR
+                                >
+                                    {/* Coming Soon Overlay */}
+                                    {!isActive && (
+                                        <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
+                                            <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5">
+                                                <Lock size={12} className="text-slate-400" />
+                                                <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Coming Soon</span>
                                             </div>
                                         </div>
-                                    </div>
-                                )}
+                                    )}
 
-                                <div className="flex justify-between items-start mb-6 relative z-10">
-                                    <div>
-                                        <h3 className={`text-sm font-bold uppercase tracking-wider mb-1 ${isPopular ? 'text-gold-400' : 'text-slate-400'}`}>{tier.name}</h3>
-                                        <div className="flex items-center gap-1.5 text-xs font-medium text-cam-green">
-                                            <span className="w-2 h-2 rounded-full bg-cam-green animate-pulse" />
-                                            {tier.speed} Matchmaking
+                                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-royal-950 border border-white/10 ${isActive ? 'group-hover:scale-110 transition-transform' : ''} ${game.color}`}>
+                                        <game.icon size={32} />
+                                    </div>
+
+                                    <h3 className="text-xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{game.name}</h3>
+
+                                    {/* Description for active games like Chess */}
+                                    {(game as any).desc && isActive && (
+                                        <p className="text-[10px] text-slate-400 font-mono mb-2 uppercase tracking-wide">{(game as any).desc}</p>
+                                    )}
+
+                                    <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
+                                        <Users size={14} /> {game.players} Active
+                                    </div>
+
+                                    <button className={`w-full py-3 rounded-xl bg-royal-950/50 border border-white/10 text-sm font-bold uppercase tracking-wider transition-colors ${isActive ? `group-hover:bg-white/10 ${game.color}` : 'text-slate-600'
+                                        }`}>
+                                        {isActive ? 'Select Table' : 'Locked'}
+                                    </button>
+                                </motion.div>
+                            )
+                        })}
+                    </motion.div>
+                )}
+
+                {/* STEP 2: STAKE SELECTION */}
+                {viewState === 'stakes' && activeGameData && (
+                    <motion.div
+                        key="stakes"
+                        custom={1}
+                        variants={pageVariants}
+                        initial="enter"
+                        animate="center"
+                        exit="exit"
+                        transition={{ duration: 0.3 }}
+                        className="space-y-6"
+                    >
+                        {/* Back Button & Selected Game Indicator */}
+                        <div className="flex items-center justify-between mb-8">
+                            <div className="flex items-center gap-4">
+                                <button
+                                    onClick={handleBackToGames}
+                                    className="p-3 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                                >
+                                    <ArrowLeft size={20} />
+                                </button>
+                                <motion.div
+                                    layoutId={`game-card-${activeGameData.id}`}
+                                    className={`flex items-center gap-3 px-4 py-2 rounded-xl border bg-royal-900/50 ${activeGameData.border}`}
+                                >
+                                    <activeGameData.icon size={20} className={activeGameData.color} />
+                                    <span className="font-bold text-white">{activeGameData.name}</span>
+                                </motion.div>
+                            </div>
+
+                            {/* BOT PRACTICE BUTTON */}
+                            <button
+                                onClick={handleBotPlay}
+                                className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
+                            >
+                                <Bot size={16} /> {t('practice_ai')}
+                            </button>
+                        </div>
+
+                        {/* Tiers Grid */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                            {GAME_TIERS.map((tier, idx) => {
+                                const isPopular = tier.stake === 500;
+                                return (
+                                    <motion.div
+                                        key={tier.id}
+                                        initial={{ opacity: 0, scale: 0.9 }}
+                                        animate={{ opacity: 1, scale: 1 }}
+                                        transition={{ delay: idx * 0.05 }}
+                                        whileHover={isMaintenance ? {} : { y: -8, scale: 1.02 }}
+                                        onClick={() => handleTierSelect(tier)}
+                                        className={`glass-panel p-6 rounded-3xl border cursor-pointer group relative overflow-visible transition-all duration-300 ${isPopular ? 'border-gold-500/50 bg-royal-800/80 shadow-[0_0_30px_rgba(251,191,36,0.1)] ring-1 ring-gold-500/20' : 'border-white/10 hover:border-gold-500/30'
+                                            }`}
+                                    >
+                                        {isPopular && (
+                                            <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-max z-20">
+                                                <div className="relative">
+                                                    <div className="absolute inset-0 bg-gold-400 blur-sm rounded-full opacity-50 animate-pulse"></div>
+                                                    <div className="relative bg-gradient-to-r from-gold-400 to-gold-600 text-royal-950 text-[10px] font-black px-4 py-1 rounded-full shadow-lg flex items-center gap-1">
+                                                        <Star size={10} fill="currentColor" /> POPULAR
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+
+                                        <div className="flex justify-between items-start mb-6 relative z-10">
+                                            <div>
+                                                <h3 className={`text-sm font-bold uppercase tracking-wider mb-1 ${isPopular ? 'text-gold-400' : 'text-slate-400'}`}>{tier.name}</h3>
+                                                <div className="flex items-center gap-1.5 text-xs font-medium text-cam-green">
+                                                    <span className="w-2 h-2 rounded-full bg-cam-green animate-pulse" />
+                                                    {tier.speed} Matchmaking
+                                                </div>
+                                            </div>
+                                            <div className={`p-2 rounded-xl border transition-colors ${isPopular ? 'bg-gold-500/10 border-gold-500/30' : 'bg-royal-950 border-white/10 group-hover:border-gold-500/30'
+                                                }`}>
+                                                <Lock size={18} className={isPopular ? 'text-gold-400' : 'text-slate-500 group-hover:text-gold-400'} />
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div className={`p-2 rounded-xl border transition-colors ${
-                                        isPopular ? 'bg-gold-500/10 border-gold-500/30' : 'bg-royal-950 border-white/10 group-hover:border-gold-500/30'
-                                    }`}>
-                                        <Lock size={18} className={isPopular ? 'text-gold-400' : 'text-slate-500 group-hover:text-gold-400'} />
-                                    </div>
-                                </div>
 
-                                <div className="space-y-4 relative z-10">
-                                    <div>
-                                        <p className="text-xs text-slate-500 mb-1">{t('entry_stake')}</p>
-                                        <h2 className="text-3xl font-display font-bold text-white">
-                                            {tier.stake} <span className="text-sm text-gold-500">FCFA</span>
-                                        </h2>
-                                    </div>
-                                    <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
-                                        <span className="text-xs text-slate-400">{t('potential_win')}</span>
-                                        <span className="font-mono font-bold text-green-400 text-lg">
-                                            {tier.potentialWin} <span className="text-xs">FCFA</span>
-                                        </span>
-                                    </div>
-                                </div>
+                                        <div className="space-y-4 relative z-10">
+                                            <div>
+                                                <p className="text-xs text-slate-500 mb-1">{t('entry_stake')}</p>
+                                                <h2 className="text-3xl font-display font-bold text-white">
+                                                    {tier.stake} <span className="text-sm text-gold-500">FCFA</span>
+                                                </h2>
+                                            </div>
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
+                                                <span className="text-xs text-slate-400">{t('potential_win')}</span>
+                                                <span className="font-mono font-bold text-green-400 text-lg">
+                                                    {tier.potentialWin} <span className="text-xs">FCFA</span>
+                                                </span>
+                                            </div>
+                                        </div>
 
-                                <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center relative z-10">
-                                    <div className="flex items-center gap-2 text-xs text-slate-500">
-                                        <Users size={14} className={isPopular ? 'text-gold-400' : ''} />
-                                        <span className={isPopular ? 'text-slate-300 font-bold' : ''}>{tier.playersOnline} {t('online')}</span>
-                                    </div>
-                                    <ChevronRight size={18} className="text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-transform" />
-                                </div>
-                            </motion.div>
-                        )})}
-                  </div>
-              </motion.div>
-          )}
+                                        <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center relative z-10">
+                                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                                                <Users size={14} className={isPopular ? 'text-gold-400' : ''} />
+                                                <span className={isPopular ? 'text-slate-300 font-bold' : ''}>{tier.playersOnline} {t('online')}</span>
+                                            </div>
+                                            <ChevronRight size={18} className="text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-transform" />
+                                        </div>
+                                    </motion.div>
+                                )
+                            })}
+                        </div>
+                    </motion.div>
+                )}
 
-      </AnimatePresence>
+            </AnimatePresence>
 
-      <div className="mt-8 p-4 bg-royal-900/30 border border-white/5 rounded-2xl flex items-center justify-center gap-2 text-sm text-slate-400">
-          <Lock size={14} /> Stakes are held in secure Escrow until game completion.
-      </div>
-    </div>
-  );
+            <div className="mt-8 p-4 bg-royal-900/30 border border-white/5 rounded-2xl flex items-center justify-center gap-2 text-sm text-slate-400">
+                <Lock size={14} /> Stakes are held in secure Escrow until game completion.
+            </div>
+        </div>
+    );
 };

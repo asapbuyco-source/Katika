@@ -2,6 +2,8 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
+import morgan from 'morgan';
+import rateLimit from 'express-rate-limit';
 
 // --- CONFIGURATION ---
 const PORT = process.env.PORT || 8080;
@@ -15,8 +17,28 @@ const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com'
 const FRONTEND_ORIGIN = process.env.FRONTEND_URL || '*';
 
 const app = express();
+app.use(morgan('combined'));
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 100,
+    message: { error: 'Too many requests, please try again later.' }
+});
+app.use('/api/', limiter);
+
 app.use(express.json());
-app.use(cors({ origin: FRONTEND_ORIGIN }));
+app.use(cors({
+    origin: (origin, callback) => {
+        if (!origin || FRONTEND_ORIGIN === '*' || origin === FRONTEND_ORIGIN) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    }
+}));
+
+const sanitize = (text) => String(text).replace(/<[^>]*>?/gm, '').substring(0, 500);
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -68,6 +90,41 @@ app.get('/api/pay/status/:transId', async (req, res) => {
     } catch (err) {
         console.error('Fapshi status proxy error:', err);
         res.status(500).json({ error: 'Status check failed' });
+    }
+});
+
+// --- ADMIN SERVER STATUS ---
+app.get('/api/admin/server-status', (req, res) => {
+    try {
+        const status = {
+            uptime: Math.floor(process.uptime()),
+            timestamp: Date.now(),
+            memoryUsage: {
+                heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024 * 100) / 100,
+                heapTotal: Math.round(process.memoryUsage().heapTotal / 1024 / 1024 * 100) / 100,
+                rss: Math.round(process.memoryUsage().rss / 1024 / 1024 * 100) / 100,
+            },
+            sockets: {
+                totalConnected: io.sockets.sockets.size,
+                activeRooms: rooms.size,
+                activeQueues: queues.size,
+            },
+            queues: Array.from(queues.entries()).map(([key, list]) => ({
+                key,
+                count: list.length
+            })),
+            rooms: Array.from(rooms.entries()).map(([id, room]) => ({
+                id,
+                gameType: room.gameType,
+                stake: room.stake,
+                players: room.players?.length || 0,
+                status: room.status || 'active'
+            }))
+        };
+        res.json(status);
+    } catch (err) {
+        console.error('Server status check error:', err);
+        res.status(500).json({ error: 'Failed to fetch server status' });
     }
 });
 
@@ -208,6 +265,10 @@ io.on('connection', (socket) => {
 
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', ({ stake, userProfile, gameType, privateRoomId }) => {
+        if (!userProfile?.id || !gameType || typeof stake !== 'number') {
+            console.error('Invalid join_game payload');
+            return;
+        }
         const userId = userProfile.id;
 
         // Handle rapid re-connections
@@ -343,6 +404,7 @@ io.on('connection', (socket) => {
 
     // 3. GAME ACTIONS
     socket.on('game_action', ({ roomId, action }) => {
+        if (!roomId || !action?.type) return;
         const room = rooms.get(roomId);
         if (!room) return;
 
@@ -360,10 +422,13 @@ io.on('connection', (socket) => {
 
         // CHAT (works for all game types including Cards & Ludo)
         if (action.type === 'CHAT') {
+            const messageText = sanitize(action.message);
+            if (!messageText) return;
+
             const msg = {
                 id: Date.now().toString(),
                 senderId: userId,
-                message: action.message,
+                message: messageText,
                 timestamp: Date.now()
             };
             if (!room.chat) room.chat = [];
@@ -373,10 +438,9 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // TIMEOUT CLAIM (works for all game types)
+        // TIMEOUT_CLAIM (the caller claiming the timeout is the winner)
         if (action.type === 'TIMEOUT_CLAIM') {
-            const winner = room.players.find(id => id !== userId);
-            endGame(roomId, winner, 'Time Expired');
+            endGame(roomId, userId, 'Time Expired (Claimed)');
             return;
         }
 
@@ -588,26 +652,6 @@ io.on('connection', (socket) => {
                 }
             }
         }
-
-        // --- CHAT (generic — handled first so it works in all game types) ---
-        else if (action.type === 'CHAT') {
-            const msg = {
-                id: Date.now().toString(),
-                senderId: userId,
-                message: action.message,
-                timestamp: Date.now()
-            };
-            if (!room.chat) room.chat = [];
-            room.chat.push(msg);
-            if (room.chat.length > 50) room.chat.shift();
-            io.to(roomId).emit('game_update', { ...room, roomId, chat: room.chat });
-        }
-
-        // --- TIMEOUT CLAIM (generic) ---
-        else if (action.type === 'TIMEOUT_CLAIM') {
-            const winner = room.players.find(id => id !== userId);
-            endGame(roomId, winner, 'Time Expired');
-        }
     });
 
     // 4. DISCONNECT
@@ -659,4 +703,14 @@ io.on('connection', (socket) => {
 
 httpServer.listen(PORT, () => {
     console.log(`Vantage Game Server running on port ${PORT}`);
+    if (!process.env.FAPSHI_API_KEY) console.warn('WARNING: FAPSHI_API_KEY not set.');
+});
+
+// Graceful shutdown
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received. Closing server...');
+    httpServer.close(() => {
+        console.log('Server closed. Exiting.');
+        process.exit(0);
+    });
 });

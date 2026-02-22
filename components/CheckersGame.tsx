@@ -640,8 +640,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                         initial={{ scale: 0.8, opacity: 0 }}
                         animate={{ scale: 1, opacity: 1 }}
                         className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${turn === 'me'
-                                ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20'
-                                : 'bg-royal-800 text-slate-400 border border-white/10'
+                            ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20'
+                            : 'bg-royal-800 text-slate-400 border border-white/10'
                             }`}
                     >
                         {turn === 'me' ? "Your Turn" : "Opponent's Turn"}
@@ -659,7 +659,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             Captured: <span className="text-white">{capturedCount.opponent}</span>
                         </span>
                     </div>
-                    {lidraughtsId && <a href={`https://lidraughts.org/${lidraughtsId}`} target="_blank" className="text-xs text-blue-400 flex items-center gap-1"><ExternalLink size={10} /> View</a>}
+                    {lidraughtsId && <a href={`https://lidraughts.org/${lidraughtsId}`} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-400 flex items-center gap-1"><ExternalLink size={10} /> View</a>}
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${turn === 'opponent' ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
                     <Clock size={16} />

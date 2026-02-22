@@ -1,54 +1,61 @@
 
-import React, { useState, useEffect, useRef, ReactNode, ErrorInfo, Component } from 'react';
-import { ViewState, User, Table, Challenge, Tournament } from '../types';
-import { Dashboard } from './Dashboard';
-import { Lobby } from './Lobby';
-import { GameRoom } from './GameRoom'; // Generic room, used for Ludo/Others if active
-import { CheckersGame } from './CheckersGame';
-import { DiceGame } from './DiceGame';
-import { ChessGame } from './ChessGame';
-import { CardGame } from './CardGame';
-import { TicTacToeGame } from './TicTacToeGame';
-import { PoolGame } from './PoolGame';
-import { Finance } from './Finance';
+import React, { useEffect, useRef, ReactNode, ErrorInfo, Component, lazy, Suspense, useCallback } from 'react';
+import { ViewState, Table, SocketGameState, GameAction } from '../types';
 import { Navigation } from './Navigation';
-import { LandingPage } from './LandingPage';
-import { MatchmakingScreen } from './MatchmakingScreen';
-import { AuthScreen } from './AuthScreen';
-import { Profile } from './Profile';
-import { HowItWorks } from './HowItWorks';
-import { AdminDashboard } from './AdminDashboard';
-import { HelpCenter } from './HelpCenter';
-import { ReportBug } from './ReportBug';
-import { TermsOfService } from './TermsOfService';
-import { PrivacyPolicy } from './PrivacyPolicy';
-import { Forum } from './Forum';
-import { Tournaments } from './Tournaments';
-import { GameResultOverlay } from './GameResultOverlay';
-import { ChallengeRequestModal } from './ChallengeRequestModal';
+import { AnimatePresence, motion } from 'framer-motion';
+import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
+import { LanguageProvider } from '../services/i18n';
+import { ThemeProvider, useTheme } from '../services/theme';
+import { AppStateProvider, useAppState } from '../services/AppContext';
+import { SocketProvider, useSocket } from '../services/SocketContext';
+import { ToastProvider, useToast } from '../services/toast';
 import {
-    auth, syncUserProfile, logout, subscribeToUser, createBotMatch,
-    subscribeToIncomingChallenges, respondToChallenge, getGame, subscribeToForum, reportTournamentMatchResult, setTournamentMatchActive,
-    db
+    auth, syncUserProfile, logout,
+    subscribeToUser, subscribeToIncomingChallenges,
+    respondToChallenge, getGame, subscribeToForum,
+    reportTournamentMatchResult, setTournamentMatchActive, createBotMatch, db
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
-import { AnimatePresence, motion } from 'framer-motion';
-import { io, Socket } from 'socket.io-client';
-import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
-import { LanguageProvider } from '../services/i18n';
-import { ThemeProvider, useTheme } from '../services/theme';
+import { Tournament } from '../types';
+import { ChallengeRequestModal } from './ChallengeRequestModal';
+import { GameResultOverlay } from './GameResultOverlay';
 
-// --- Error Boundary ---
-interface ErrorBoundaryProps {
-    children?: ReactNode;
-    onReset: () => void;
-}
+// ─── Lazy-loaded route views ───────────────────────────────────────────────────
+const LandingPage = lazy(() => import('./LandingPage').then(m => ({ default: m.LandingPage })));
+const AuthScreen = lazy(() => import('./AuthScreen').then(m => ({ default: m.AuthScreen })));
+const Dashboard = lazy(() => import('./Dashboard').then(m => ({ default: m.Dashboard })));
+const Lobby = lazy(() => import('./Lobby').then(m => ({ default: m.Lobby })));
+const MatchmakingScreen = lazy(() => import('./MatchmakingScreen').then(m => ({ default: m.MatchmakingScreen })));
+const Tournaments = lazy(() => import('./Tournaments').then(m => ({ default: m.Tournaments })));
+const Profile = lazy(() => import('./Profile').then(m => ({ default: m.Profile })));
+const Finance = lazy(() => import('./Finance').then(m => ({ default: m.Finance })));
+const AdminDashboard = lazy(() => import('./AdminDashboard').then(m => ({ default: m.AdminDashboard })));
+const HowItWorks = lazy(() => import('./HowItWorks').then(m => ({ default: m.HowItWorks })));
+const HelpCenter = lazy(() => import('./HelpCenter').then(m => ({ default: m.HelpCenter })));
+const ReportBug = lazy(() => import('./ReportBug').then(m => ({ default: m.ReportBug })));
+const TermsOfService = lazy(() => import('./TermsOfService').then(m => ({ default: m.TermsOfService })));
+const PrivacyPolicy = lazy(() => import('./PrivacyPolicy').then(m => ({ default: m.PrivacyPolicy })));
+const Forum = lazy(() => import('./Forum').then(m => ({ default: m.Forum })));
+const GameRoom = lazy(() => import('./GameRoom').then(m => ({ default: m.GameRoom })));
+const CheckersGame = lazy(() => import('./CheckersGame').then(m => ({ default: m.CheckersGame })));
+const DiceGame = lazy(() => import('./DiceGame').then(m => ({ default: m.DiceGame })));
+const ChessGame = lazy(() => import('./ChessGame').then(m => ({ default: m.ChessGame })));
+const CardGame = lazy(() => import('./CardGame').then(m => ({ default: m.CardGame })));
+const TicTacToeGame = lazy(() => import('./TicTacToeGame').then(m => ({ default: m.TicTacToeGame })));
+const PoolGame = lazy(() => import('./PoolGame').then(m => ({ default: m.PoolGame })));
 
-interface ErrorBoundaryState {
-    hasError: boolean;
-}
+// ─── Full-screen spinner (used inside Suspense) ───────────────────────────────
+const ViewLoader = () => (
+    <div className="min-h-screen bg-royal-950 flex items-center justify-center">
+        <Loader2 size={36} className="text-gold-500 animate-spin" />
+    </div>
+);
+
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+interface ErrorBoundaryProps { children?: ReactNode; onReset: () => void; }
+interface ErrorBoundaryState { hasError: boolean; }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps) {
@@ -56,18 +63,18 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
         this.state = { hasError: false };
     }
 
-    static getDerivedStateFromError(error: any): ErrorBoundaryState {
+    static getDerivedStateFromError(): ErrorBoundaryState {
         return { hasError: true };
     }
 
-    componentDidCatch(error: any, errorInfo: ErrorInfo) {
-        console.error("Game Critical Error:", error, errorInfo);
+    componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+        console.error('[GameErrorBoundary]', { error: error.message, stack: errorInfo.componentStack });
     }
 
     handleReset = () => {
         this.setState({ hasError: false });
         this.props.onReset();
-    }
+    };
 
     render() {
         if (this.state.hasError) {
@@ -89,61 +96,47 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     }
 }
 
-// --- Enhanced Reconnection Modal (For Opponent Disconnection) ---
-const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: any }) => {
-    const [timeLeft, setTimeLeft] = useState(timeout);
-
+// ─── Reconnection Modal (opponent disconnected) ────────────────────────────────
+const ReconnectionModal = ({ timeout, opponent }: { timeout: number; opponent?: any }) => {
+    const [timeLeft, setTimeLeft] = React.useState(timeout);
     useEffect(() => {
-        setTimeLeft(timeout); // Reset on mount or prop change
-        const timer = setInterval(() => {
-            setTimeLeft(prev => Math.max(0, prev - 1));
-        }, 1000);
+        setTimeLeft(timeout);
+        const timer = setInterval(() => setTimeLeft(prev => Math.max(0, prev - 1)), 1000);
         return () => clearInterval(timer);
     }, [timeout]);
 
     return (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/90 backdrop-blur-md">
             <motion.div
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
+                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
                 className="bg-royal-900 border border-red-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-red-900/50"
             >
-                {/* Progress Bar Background */}
                 <div className="absolute top-0 left-0 w-full h-1.5 bg-royal-800">
                     <motion.div
-                        initial={{ width: '100%' }}
-                        animate={{ width: '0%' }}
+                        initial={{ width: '100%' }} animate={{ width: '0%' }}
                         transition={{ duration: timeout, ease: 'linear' }}
                         className="h-full bg-gradient-to-r from-red-600 to-red-400"
                     />
                 </div>
-
                 <div className="relative mb-6 inline-block">
                     <div className="w-24 h-24 rounded-full border-4 border-red-500 bg-royal-950 overflow-hidden relative">
-                        <img src={opponent?.avatar || "https://i.pravatar.cc/150?u=opp"} className="w-full h-full object-cover opacity-70 grayscale" alt="Opponent" />
+                        <img src={opponent?.avatar || 'https://i.pravatar.cc/150?u=opp'} className="w-full h-full object-cover opacity-70 grayscale" alt="Opponent" />
                     </div>
                     <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full p-2 border border-red-500 shadow-lg animate-bounce">
                         <WifiOff size={24} className="text-red-500" />
                     </div>
                 </div>
-
                 <h2 className="text-xl font-display font-bold text-white mb-2">Opponent Offline</h2>
                 <p className="text-slate-300 text-sm mb-6">
-                    <span className="text-gold-400 font-bold">{opponent?.name || "Opponent"}</span> lost connection.
+                    <span className="text-gold-400 font-bold">{opponent?.name || 'Opponent'}</span> lost connection.
                 </p>
-
                 <div className="bg-red-500/10 rounded-xl p-4 border border-red-500/20 mb-6">
-                    <p className="text-red-300 text-xs font-bold uppercase tracking-wider mb-1">
-                        Waiting for Reconnect
-                    </p>
+                    <p className="text-red-300 text-xs font-bold uppercase tracking-wider mb-1">Waiting for Reconnect</p>
                     <div className="text-4xl font-mono font-bold text-white tabular-nums">
                         {Math.floor(timeLeft / 60)}:{Math.floor(timeLeft % 60).toString().padStart(2, '0')}
                     </div>
-                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
-                        If they do not return, you will win by default.
-                    </p>
+                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">If they do not return, you will win by default.</p>
                 </div>
-
                 <div className="flex gap-2 justify-center items-center">
                     <Loader2 size={16} className="text-slate-500 animate-spin" />
                     <span className="text-xs text-slate-500 font-mono">Syncing Game State...</span>
@@ -153,12 +146,11 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number, opponent?: 
     );
 };
 
-// --- Weak Network Modal (For Local Disconnection) ---
+// ─── Weak Network Modal ────────────────────────────────────────────────────────
 const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-xl">
         <motion.div
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
+            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
             className="bg-royal-900 border border-yellow-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-yellow-900/50"
         >
             <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-yellow-500/30">
@@ -166,10 +158,9 @@ const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => (
             </div>
             <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
             <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                Your device has lost connection to the server. <br />
+                Your device has lost connection to the server.<br />
                 <span className="text-yellow-400 font-bold">Please check your internet.</span>
             </p>
-
             <div className="space-y-3">
                 <button
                     onClick={() => window.location.reload()}
@@ -188,50 +179,23 @@ const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => (
     </div>
 );
 
-// Internal app content wrapper to access useTheme context
+// ─── Motion helper ─────────────────────────────────────────────────────────────
+const MV = ({ children, k }: { children: ReactNode; k: string }) => (
+    <motion.div key={k} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full">
+        {children}
+    </motion.div>
+);
+
+// ─── AppContent — the main routing/logic shell ─────────────────────────────────
 const AppContent = () => {
-    const [user, setUser] = useState<User | null>(null);
-    const [currentView, setView] = useState<ViewState>('landing');
-    const [activeTable, setActiveTable] = useState<Table | null>(null);
-    const [matchmakingConfig, setMatchmakingConfig] = useState<{ stake: number, gameType: string } | null>(null);
-    const [authLoading, setAuthLoading] = useState(true);
-
-    // Game End State
-    const [gameResult, setGameResult] = useState<{ result: 'win' | 'loss' | 'quit', amount: number, financials?: any, tournamentPot?: number } | null>(null);
-
-    // Rematch State
-    const [rematchStatus, setRematchStatus] = useState<'idle' | 'requested' | 'opponent_requested' | 'declined'>('idle');
-
-    // Disconnection State
-    const [opponentDisconnected, setOpponentDisconnected] = useState(false);
-    const [opponentTimeout, setOpponentTimeout] = useState(240); // 4 minutes
-
-    // State to handle game selection from Dashboard -> Lobby
-    const [preSelectedGame, setPreSelectedGame] = useState<string | null>(null);
-
-    // Challenge System State
-    const [incomingChallenge, setIncomingChallenge] = useState<Challenge | null>(null);
-
-    // Notification State
-    const [unreadForum, setUnreadForum] = useState(false);
-    const lastForumMsgId = useRef<string | null>(null);
-    const viewRef = useRef<ViewState>('landing');
-
-    // --- SOCKET.IO STATE ---
-    const [socket, setSocket] = useState<Socket | null>(null);
-    const [isConnected, setIsConnected] = useState(false);
-    const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
-    const [socketGame, setSocketGame] = useState<any>(null);
-    const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
-    const [connectionError, setConnectionError] = useState<string | null>(null);
-
-    // Connection Handling
-    const [bypassConnection, setBypassConnection] = useState(false);
-    const [connectionTime, setConnectionTime] = useState(0);
-
+    const { state, dispatch, viewRef, lastForumMsgId } = useAppState();
+    const { socket, isConnected, hasConnectedOnce, socketGame, setSocketGame, bypassConnection, setBypassConnection } = useSocket();
+    const toast = useToast();
     const { theme } = useTheme();
 
-    // Apply Theme CSS Variables
+    const { user, currentView, activeTable, matchmakingConfig, authLoading, gameResult, rematchStatus, opponentDisconnected, opponentTimeout, preSelectedGame, incomingChallenge, unreadForum } = state;
+
+    // ── Apply Theme CSS Variables ────────────────────────────────────────────
     useEffect(() => {
         const root = document.documentElement;
         if (theme === 'dark') {
@@ -249,335 +213,173 @@ const AppContent = () => {
         }
     }, [theme]);
 
+    // ── Scroll to top on view change ─────────────────────────────────────────
     useEffect(() => {
-        viewRef.current = currentView;
-        if (currentView === 'forum') {
-            setUnreadForum(false);
-        }
+        if (currentView === 'forum') dispatch({ type: 'SET_UNREAD_FORUM', payload: false });
+        const container = document.getElementById('main-scroll-container');
+        setTimeout(() => {
+            container ? container.scrollTo({ top: 0, behavior: 'instant' }) : window.scrollTo(0, 0);
+        }, 50);
+    }, [currentView, dispatch]);
 
-        const mainContainer = document.getElementById('main-scroll-container');
-        if (mainContainer) {
-            // Use a small timeout to ensure the scroll reset happens AFTER the DOM updates
-            // and the new view is rendered.
-            setTimeout(() => {
-                mainContainer.scrollTo({ top: 0, behavior: 'instant' });
-            }, 50);
-        } else {
-            window.scrollTo(0, 0);
-        }
-    }, [currentView]);
-
+    // ─── EFFECTS ────────────────────────────────────────────────────────────────
     useEffect(() => {
-        const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || 'https://katika-production.up.railway.app';
-        const timerInterval = setInterval(() => {
-            setConnectionTime(prev => prev + 1);
-        }, 1000);
-
-        const newSocket = io(SOCKET_URL, {
-            reconnectionAttempts: 10,
-            timeout: 20000,
-            transports: ['polling', 'websocket'],
-            autoConnect: true,
-        });
-
-        newSocket.on('connect', () => {
-            setIsConnected(true);
-            setHasConnectedOnce(true);
-            setBypassConnection(false);
-            setConnectionError(null);
-            clearInterval(timerInterval);
-        });
-
-        newSocket.on('disconnect', (reason) => setIsConnected(false));
-        newSocket.on('connect_error', (err) => setConnectionError(err.message));
-
-        setSocket(newSocket);
-
-        return () => {
-            clearInterval(timerInterval);
-            newSocket.close();
-        };
-    }, []);
-
-    useEffect(() => {
-        if (!socket) return;
-
-        const handleMatchFound = (gameState: any) => {
-            // T4 Fix: Mark the tournament match as active so the bracket shows the live dot.
-            if (gameState.tournamentMatchId) {
-                setTournamentMatchActive(gameState.tournamentMatchId)
-                    .catch(e => console.error('Failed to activate tournament match:', e));
-            }
-            setSocketGame(gameState);
-            setIsWaitingForSocketMatch(false);
-            setBypassConnection(false);
-            setOpponentDisconnected(false);
-            setGameResult(null);
-            setRematchStatus('idle');
-            setView('game');
-        };
-
-        const handleGameUpdate = (gameState: any) => {
-            if (viewRef.current !== 'game' && viewRef.current !== 'matchmaking') return;
-            setSocketGame((prev: any) => ({
-                ...(prev || {}),
-                ...gameState,
-                roomId: gameState.roomId || gameState.id || (prev ? prev.roomId : undefined),
-                id: gameState.id || gameState.roomId || (prev ? prev.id : undefined)
-            }));
-        };
-
-        const handleOpponentDisconnected = (data?: { timeoutSeconds?: number }) => {
-            setOpponentDisconnected(true);
-            setOpponentTimeout(data?.timeoutSeconds || 240);
-            setRematchStatus('declined');
-            playSFX('error');
-        };
-
-        const handleRematchStatus = ({ requestorId, status }: { requestorId: string, status: string }) => {
-            if (status === 'requested') {
-                if (requestorId !== user?.id) {
-                    setRematchStatus('opponent_requested');
-                    playSFX('notification');
-                }
-            } else if (status === 'declined') {
-                setRematchStatus('declined');
+        const handleEsc = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') {
+                dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
+                dispatch({ type: 'SET_GAME_RESULT', payload: null });
             }
         };
+        window.addEventListener('keydown', handleEsc);
+        return () => window.removeEventListener('keydown', handleEsc);
+    }, [dispatch]);
 
-        const handleGameOver = ({ winner, financials }: { winner: string, financials?: any }) => {
-            setOpponentDisconnected(false);
-
-            // T5 Fix: Report tournament bracket result from winner's client.
-            // This is the only reliable path for P2P games since handleGameEnd('win') is not called.
-            if (user && winner === user.id && socketGame?.tournamentMatchId) {
-                reportTournamentMatchResult(socketGame.tournamentMatchId, winner)
-                    .catch(e => console.error('Tournament result report failed:', e));
-            }
-
-            if (user && winner === user.id) {
-                setGameResult({
-                    result: 'win',
-                    amount: financials ? financials.winnings : 0,
-                    financials: financials
-                });
-            } else {
-                setGameResult({ result: 'loss', amount: 0 });
-            }
-        };
-
-        socket.on('match_found', handleMatchFound);
-        socket.on('waiting_for_opponent', () => setIsWaitingForSocketMatch(true));
-        socket.on('game_update', handleGameUpdate);
-        socket.on('opponent_disconnected', handleOpponentDisconnected);
-        socket.on('opponent_reconnected', () => { setOpponentDisconnected(false); playSFX('notification'); });
-        socket.on('rematch_status', handleRematchStatus);
-        socket.on('game_over', handleGameOver);
-
-        return () => {
-            socket.off('match_found', handleMatchFound);
-            socket.off('waiting_for_opponent');
-            socket.off('game_update', handleGameUpdate);
-            socket.off('opponent_disconnected', handleOpponentDisconnected);
-            socket.off('opponent_reconnected');
-            socket.off('rematch_status', handleRematchStatus);
-            socket.off('game_over', handleGameOver);
-        };
-    }, [socket, user]);
-
+    // ── Auth listener ────────────────────────────────────────────────────────
     useEffect(() => {
-        if (socket && isConnected && user) {
-            socket.emit('rejoin_game', { userProfile: user });
-        }
-    }, [socket, isConnected, user]);
+        let unsubUser: (() => void) | undefined;
+        let unsubChallenges: (() => void) | undefined;
+        let unsubForum: (() => void) | undefined;
 
-    useEffect(() => {
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            if (currentView === 'game' && socketGame && !gameResult) {
-                const message = "You have an active game!";
-                e.preventDefault();
-                e.returnValue = message;
-                return message;
-            }
-        };
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-    }, [currentView, socketGame, gameResult]);
-
-    useEffect(() => {
-        if (connectionTime >= 20 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
-            setBypassConnection(true);
-        }
-    }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
-
-    useEffect(() => {
-        let unsubscribeSnapshot: (() => void) | undefined;
-        let unsubscribeChallenges: (() => void) | undefined;
-        let unsubscribeForum: (() => void) | undefined;
-
-        const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+        const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
             if (firebaseUser) {
                 try {
                     const appUser = await syncUserProfile(firebaseUser);
-                    setUser(appUser);
+                    dispatch({ type: 'SET_USER', payload: appUser });
 
-                    unsubscribeSnapshot = subscribeToUser(appUser.id, (updatedUser) => {
-                        setUser(updatedUser);
-                    });
-
-                    unsubscribeChallenges = subscribeToIncomingChallenges(appUser.id, (challenge) => {
-                        setIncomingChallenge(challenge);
-                    });
-
-                    unsubscribeForum = subscribeToForum((posts) => {
+                    unsubUser = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));
+                    unsubChallenges = subscribeToIncomingChallenges(appUser.id, challenge => dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: challenge }));
+                    unsubForum = subscribeToForum(posts => {
                         if (posts.length > 0) {
                             const latestId = posts[0].id;
-                            if (lastForumMsgId.current && lastForumMsgId.current !== latestId) {
-                                if (viewRef.current !== 'forum') {
-                                    setUnreadForum(true);
-                                    playSFX('notification');
-                                }
+                            if (lastForumMsgId.current && lastForumMsgId.current !== latestId && viewRef.current !== 'forum') {
+                                dispatch({ type: 'SET_UNREAD_FORUM', payload: true });
+                                playSFX('notification');
                             }
                             lastForumMsgId.current = latestId;
                         }
                     });
-
                 } catch (error) {
-                    console.error("Profile sync failed:", error);
+                    console.error('[Auth] Profile sync failed:', error);
                 }
             } else {
-                if (unsubscribeSnapshot) unsubscribeSnapshot();
-                if (unsubscribeChallenges) unsubscribeChallenges();
-                if (unsubscribeForum) unsubscribeForum();
-                setUser(null);
+                unsubUser?.();
+                unsubChallenges?.();
+                unsubForum?.();
+                dispatch({ type: 'SET_USER', payload: null });
             }
-            setAuthLoading(false);
+            dispatch({ type: 'SET_AUTH_LOADING', payload: false });
         });
 
         return () => {
-            unsubscribeAuth();
-            if (unsubscribeSnapshot) unsubscribeSnapshot();
-            if (unsubscribeChallenges) unsubscribeChallenges();
-            if (unsubscribeForum) unsubscribeForum();
+            unsubAuth();
+            unsubUser?.();
+            unsubChallenges?.();
+            unsubForum?.();
         };
-    }, []);
+    }, [dispatch, lastForumMsgId, viewRef]);
 
+    // ── Auth-based navigation ─────────────────────────────────────────────────
     useEffect(() => {
         if (authLoading) return;
-
         if (user) {
-            if (currentView === 'landing' || currentView === 'auth') {
-                setView('dashboard');
-            }
+            if (currentView === 'landing' || currentView === 'auth') dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
         } else {
-            // Explicitly list all public views to prevent auto-redirect to landing
             const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
-            if (!publicViews.includes(currentView)) {
-                setView('landing');
+            if (!publicViews.includes(currentView)) dispatch({ type: 'SET_VIEW', payload: 'landing' });
+        }
+    }, [user, currentView, authLoading, dispatch]);
+
+    // ── Warn before closing mid-game ────────────────────────────────────────
+    useEffect(() => {
+        const handler = (e: BeforeUnloadEvent) => {
+            if (currentView === 'game' && socketGame && !gameResult) {
+                e.preventDefault();
+                e.returnValue = 'You have an active game!';
+                return e.returnValue;
             }
-        }
-    }, [user, currentView, authLoading]);
+        };
+        window.addEventListener('beforeunload', handler);
+        return () => window.removeEventListener('beforeunload', handler);
+    }, [currentView, socketGame, gameResult]);
 
-    const startMatchmaking = async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
+    // ── Matchmaking ───────────────────────────────────────────────────────────
+    const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
         if (!user) return;
-
         const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
-        if (!validGames.includes(gameType)) {
-            alert("This game is coming soon!");
-            return;
-        }
+        if (!validGames.includes(gameType)) { toast.info('This game is coming soon!'); return; }
 
         if ((!isConnected || bypassConnection) && stake !== -1) {
-            alert("Offline Mode active. P2P unavailable.");
+            toast.error('Offline mode active. P2P matchmaking unavailable.');
             return;
         }
+
         if (stake === -1) {
             try {
                 const gameId = await createBotMatch(user, gameType, difficulty);
                 const gameData = await getGame(gameId);
                 if (gameData) {
                     const table: Table = {
-                        id: gameData.id,
-                        gameType: gameData.gameType as any,
-                        stake: gameData.stake,
-                        players: 2,
-                        maxPlayers: 2,
-                        status: 'active',
-                        host: gameData.host,
-                        guest: gameData.guest
+                        id: gameData.id, gameType: gameData.gameType, stake: gameData.stake,
+                        players: 2, maxPlayers: 2, status: 'active',
+                        host: gameData.host, guest: gameData.guest
                     };
-                    setActiveTable(table);
-                    setView('game');
+                    dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
+                    dispatch({ type: 'SET_VIEW', payload: 'game' });
                 }
             } catch (error) {
-                console.error("Bot match failed:", error);
+                console.error('[App] Bot match failed:', error);
+                toast.error('Could not start bot match. Try again.');
             }
             return;
         }
+
         if (!socket) return;
+        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: { stake, gameType } });
+        dispatch({ type: 'SET_VIEW', payload: 'matchmaking' });
+        socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
+    }, [user, isConnected, bypassConnection, socket, dispatch, toast]);
 
-        setMatchmakingConfig({ stake, gameType });
-        setView('matchmaking');
-        socket.emit('join_game', {
-            stake: stake,
-            userProfile: user,
-            privateRoomId: specificGameId,
-            gameType
-        });
-    };
+    const cancelMatchmaking = useCallback(() => {
+        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
+        dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+    }, [dispatch]);
 
-    const cancelMatchmaking = () => {
-        setMatchmakingConfig(null);
-        setIsWaitingForSocketMatch(false);
-        setView('lobby');
-    };
-
-    const handleAcceptChallenge = async () => {
+    const handleAcceptChallenge = useCallback(async () => {
         if (!incomingChallenge || !user) return;
         const gameId = incomingChallenge.id;
         await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
         startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
-        setIncomingChallenge(null);
-    };
+        dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
+    }, [incomingChallenge, user, startMatchmaking, dispatch]);
 
-    const handleMatchFound = async (table: Table) => {
-        setActiveTable(table);
-        // Ensure tournament match status is updated to active so it doesn't get auto-forfeited
-        if (table.tournamentMatchId) {
-            setTournamentMatchActive(table.tournamentMatchId);
-        }
-        setView('game');
-    };
+    const handleMatchFound = useCallback((table: Table) => {
+        dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
+        if (table.tournamentMatchId) setTournamentMatchActive(table.tournamentMatchId);
+        dispatch({ type: 'SET_VIEW', payload: 'game' });
+    }, [dispatch]);
 
-    const constructTableFromSocket = (game: any): Table => {
+    const constructTableFromSocket = useCallback((game: SocketGameState): Table => {
         if (!user) return {} as Table;
-        const opponentId = game.players.find((id: string) => id !== user.id);
-        const hostProfile = game.profiles ? game.profiles[opponentId] : { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' };
+        const opponentId = game.players.find(id => id !== user.id) ?? '';
+        const hostProfile = game.profiles?.[opponentId] ?? { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' as const };
         return {
-            id: game.roomId || game.id,
-            gameType: game.gameType,
-            stake: game.stake,
-            players: 2,
-            maxPlayers: 2,
-            status: 'active',
+            id: game.roomId || game.id || '',
+            gameType: game.gameType as any,
+            stake: game.stake, players: 2, maxPlayers: 2, status: 'active',
             host: hostProfile,
-            tournamentMatchId: game.privateRoomId // Map privateRoomId to tournamentMatchId if applicable
+            tournamentMatchId: game.tournamentMatchId || game.privateRoomId
         };
-    };
+    }, [user]);
 
     const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
 
-    const handleGameEnd = async (result: 'win' | 'loss' | 'quit') => {
+    const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit') => {
         let tournamentPot = 0;
-
-        // Check if this was a tournament game using activeGameTable (which covers socket cases)
-        if (activeGameTable && activeGameTable.tournamentMatchId && user) {
-            // Fetch pot info for display
+        if (activeGameTable?.tournamentMatchId && user) {
             try {
-                const matchParts = activeGameTable.tournamentMatchId.split('-'); // m-{tourneyId}-...
-                if (matchParts.length > 1) {
-                    const tourneyId = matchParts[1];
-                    const tDoc = await getDoc(doc(db, 'tournaments', tourneyId));
+                const parts = activeGameTable.tournamentMatchId.split('-');
+                if (parts.length > 1) {
+                    const tDoc = await getDoc(doc(db, 'tournaments', parts[1]));
                     if (tDoc.exists()) {
                         const tData = tDoc.data() as Tournament;
                         tournamentPot = tData.type === 'fixed'
@@ -585,107 +387,93 @@ const AppContent = () => {
                             : (tData.prizePool || 0) + (tData.entryFee * tData.participants.length * 0.9);
                     }
                 }
-            } catch (e) { console.error("Error fetching pot", e); }
-
+            } catch (e) { console.error('[App] Error fetching tournament pot:', e); }
             if (result === 'win') {
-                // Report win to backend to advance bracket
                 await reportTournamentMatchResult(activeGameTable.tournamentMatchId, user.id);
             }
         }
+        dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
+    }, [activeGameTable, user, dispatch]);
 
-        setGameResult({ result, amount: 0, tournamentPot });
-    };
-
-    const finalizeGameEnd = () => {
+    const finalizeGameEnd = useCallback(() => {
         if (socket && socketGame) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
-
-        // Use activeGameTable to check if it was a tournament
-        if (activeGameTable?.tournamentMatchId) {
-            setView('tournaments');
-            setActiveTable(null);
-            setGameResult(null);
-            setSocketGame(null);
-            return;
-        }
-
-        // Clean state reset — navigate to lobby without page reload
+        const isTournament = !!activeGameTable?.tournamentMatchId;
         setSocketGame(null);
-        setActiveTable(null);
-        setGameResult(null);
-        setRematchStatus('idle');
-        setOpponentDisconnected(false);
-        setView('lobby');
-    };
+        dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
+        dispatch({ type: 'SET_GAME_RESULT', payload: null });
+        dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
+        dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
+        dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
+    }, [socket, socketGame, activeGameTable, setSocketGame, dispatch]);
 
-    const handleRematchRequest = () => {
+    const handleRematchRequest = useCallback(() => {
         if (!user || !socket || !socketGame) return;
-        const stake = socketGame.stake || 0;
-        if (user.balance < stake) {
-            alert(`Insufficient funds for rematch. You need ${stake} FCFA.`);
+        if (user.balance < (socketGame.stake || 0)) {
+            toast.error(`Insufficient funds for rematch. You need ${socketGame.stake} FCFA.`);
             return;
         }
-        setRematchStatus('requested');
-        socket.emit('game_action', {
-            roomId: socketGame.roomId,
-            action: { type: 'REMATCH_REQUEST' }
-        });
-    };
+        dispatch({ type: 'SET_REMATCH_STATUS', payload: 'requested' });
+        socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_REQUEST' } });
+    }, [user, socket, socketGame, toast, dispatch]);
 
-    const handleLogout = async () => {
+    const handleLogout = useCallback(async () => {
         await logout();
-        setUser(null);
-        setView('landing');
-    };
+        dispatch({ type: 'SET_USER', payload: null });
+        dispatch({ type: 'SET_VIEW', payload: 'landing' });
+    }, [dispatch]);
 
-    const handleDashboardQuickMatch = (gameId?: string) => {
-        if (gameId) setPreSelectedGame(gameId);
-        else setPreSelectedGame(null);
-        setView('lobby');
-    };
+    const handleDashboardQuickMatch = useCallback((gameId?: string) => {
+        dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: gameId || null });
+        dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+    }, [dispatch]);
 
-    // Tournament Logic Integration
-    const handleTournamentMatchJoin = (gameType: string, tournamentMatchId: string) => {
+    const handleTournamentMatchJoin = useCallback((gameType: string, tournamentMatchId: string) => {
         if (!user || !socket) return;
-
-        // We start matchmaking but pass the tournament match ID as a private room ID
-        // The server will use this ID to match players specifically for this bracket slot
         startMatchmaking(0, gameType, tournamentMatchId);
-    };
+    }, [user, socket, startMatchmaking]);
 
+    const setView = useCallback((view: ViewState) => dispatch({ type: 'SET_VIEW', payload: view }), [dispatch]);
+
+    // ── Find opponent for reconnection modal ─────────────────────────────────
+    let opponentProfile = null;
+    if (socketGame && user && socketGame.profiles) {
+        const oppId = socketGame.players.find(id => id !== user.id);
+        if (oppId) opponentProfile = socketGame.profiles[oppId];
+    }
+
+    // ── Loading screens ───────────────────────────────────────────────────────
     if (authLoading) {
         return (
             <div className="min-h-screen bg-royal-950 flex items-center justify-center">
-                <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin"></div>
+                <div className="w-10 h-10 border-4 border-gold-500 border-t-transparent rounded-full animate-spin" />
             </div>
         );
     }
 
-    // Initial Connection Screen (Only shown if never connected)
     if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
         return (
-            <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center">
-                <Loader2 size={48} className="text-gold-500 animate-spin mb-4" />
-                <h2 className="text-xl font-bold text-white mb-2">Connecting to Vantage Network...</h2>
+            <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center gap-4">
+                <Loader2 size={48} className="text-gold-500 animate-spin" />
+                <h2 className="text-xl font-bold text-white">Connecting to Vantage Network...</h2>
                 <div className="flex flex-col gap-3">
                     <button
-                        onClick={() => { setConnectionError(null); socket?.connect(); }}
+                        onClick={() => { socket?.connect(); }}
                         className="px-6 py-2 bg-royal-800 border border-white/10 rounded-lg text-white font-bold hover:bg-royal-700 transition-colors flex items-center justify-center gap-2"
+                        aria-label="Retry connection"
                     >
                         <RefreshCw size={16} /> Retry Connection
                     </button>
-                    <button onClick={() => setBypassConnection(true)} className="text-white/50 hover:text-white text-sm underline mt-2">Play Offline</button>
+                    <button
+                        onClick={() => setBypassConnection(true)}
+                        className="text-white/50 hover:text-white text-sm underline mt-2"
+                    >
+                        Play Offline
+                    </button>
                 </div>
             </div>
         );
-    }
-
-    // Find opponent profile for reconnection modal
-    let opponentProfile = null;
-    if (socketGame && user && socketGame.profiles) {
-        const oppId = socketGame.players.find((id: string) => id !== user.id);
-        if (oppId) opponentProfile = socketGame.profiles[oppId];
     }
 
     return (
@@ -695,73 +483,98 @@ const AppContent = () => {
             )}
 
             <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
-                <GameErrorBoundary onReset={() => { user ? setView('dashboard') : setView('landing'); window.location.reload(); }}>
-                    <AnimatePresence mode="wait">
-                        {currentView === 'landing' && <motion.div key="landing" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></motion.div>}
-                        {currentView === 'auth' && <motion.div key="auth" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AuthScreen onAuthenticated={(u) => { setUser(u || null); }} onNavigate={setView} /></motion.div>}
-                        {currentView === 'dashboard' && user && <motion.div key="dashboard" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></motion.div>}
-                        {currentView === 'lobby' && user && <motion.div key="lobby" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => setPreSelectedGame(null)} /></motion.div>}
-                        {currentView === 'matchmaking' && matchmakingConfig && user && <motion.div key="matchmaking" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} /></motion.div>}
-                        {currentView === 'tournaments' && user && <motion.div key="tournaments" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} /></motion.div>}
-
-                        {currentView === 'game' && user && activeGameTable && (
-                            <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
-                                {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                    activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                        activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                            activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                    activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} /> :
-                                                        activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                            <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
-                            </motion.div>
-                        )}
-
-                        {currentView === 'profile' && user && <motion.div key="profile" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Profile user={user} onLogout={handleLogout} onUpdateProfile={(u) => setUser({ ...user, ...u })} onNavigate={setView} /></motion.div>}
-                        {currentView === 'finance' && user && <motion.div key="finance" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Finance user={user} onTopUp={() => { }} /></motion.div>}
-                        {currentView === 'how-it-works' && <motion.div key="how-it-works" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></motion.div>}
-                        {currentView === 'admin' && user?.isAdmin && <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><AdminDashboard user={user} /></motion.div>}
-                        {currentView === 'help-center' && <motion.div key="help-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
-                        {currentView === 'report-bug' && <motion.div key="report-bug" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><ReportBug onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
-                        {currentView === 'terms' && <motion.div key="terms" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
-                        {currentView === 'privacy' && <motion.div key="privacy" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} /></motion.div>}
-                        {currentView === 'forum' && user && <motion.div key="forum" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full"><Forum user={user} /></motion.div>}
-                    </AnimatePresence>
+                <GameErrorBoundary onReset={() => { dispatch({ type: 'RESET_GAME_STATE' }); dispatch({ type: 'SET_VIEW', payload: user ? 'dashboard' : 'landing' }); }}>
+                    <Suspense fallback={<ViewLoader />}>
+                        <AnimatePresence mode="wait">
+                            {currentView === 'landing' && <MV k="landing">    <LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></MV>}
+                            {currentView === 'auth' && <MV k="auth">       <AuthScreen onAuthenticated={u => dispatch({ type: 'SET_USER', payload: u || null })} onNavigate={setView} /></MV>}
+                            {currentView === 'dashboard' && user && <MV k="dashboard">  <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></MV>}
+                            {currentView === 'lobby' && user && <MV k="lobby">      <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
+                            {currentView === 'matchmaking' && matchmakingConfig && user && (
+                                <MV k="matchmaking">
+                                    <MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} />
+                                </MV>
+                            )}
+                            {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} /></MV>}
+                            {currentView === 'game' && user && activeGameTable && (
+                                <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
+                                    {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                        activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                            activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                    activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                        activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} /> :
+                                                            activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
+                                </motion.div>
+                            )}
+                            {currentView === 'profile' && user && <MV k="profile">     <Profile user={user} onLogout={handleLogout} onUpdateProfile={u => dispatch({ type: 'UPDATE_USER', payload: u })} onNavigate={setView} /></MV>}
+                            {currentView === 'finance' && user && <MV k="finance">     <Finance user={user} onTopUp={() => { }} /></MV>}
+                            {currentView === 'how-it-works' && <MV k="how-it-works"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></MV>}
+                            {currentView === 'admin' && user?.isAdmin && <MV k="admin"><AdminDashboard user={user} /></MV>}
+                            {currentView === 'help-center' && <MV k="help-center"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></MV>}
+                            {currentView === 'report-bug' && <MV k="report-bug"> <ReportBug onBack={() => setView(user ? 'profile' : 'landing')} /></MV>}
+                            {currentView === 'terms' && <MV k="terms">      <TermsOfService onBack={() => setView(user ? 'profile' : 'landing')} /></MV>}
+                            {currentView === 'privacy' && <MV k="privacy">    <PrivacyPolicy onBack={() => setView(user ? 'profile' : 'landing')} /></MV>}
+                            {currentView === 'forum' && user && <MV k="forum">       <Forum user={user} /></MV>}
+                            {!['landing', 'auth', 'dashboard', 'lobby', 'matchmaking', 'game', 'profile', 'finance', 'how-it-works', 'admin', 'help-center', 'report-bug', 'terms', 'privacy', 'forum', 'tournaments', 'settings'].includes(currentView) && (
+                                <MV k="not-found">
+                                    <div className="min-h-screen flex flex-col items-center justify-center text-center p-8">
+                                        <AlertTriangle size={48} className="text-gold-500 mb-4" />
+                                        <h2 className="text-2xl font-bold text-white mb-2">Page Not Found</h2>
+                                        <button onClick={() => setView(user ? 'dashboard' : 'landing')} className="mt-4 px-6 py-3 bg-gold-500 text-royal-950 font-bold rounded-xl">Go Home</button>
+                                    </div>
+                                </MV>
+                            )}
+                        </AnimatePresence>
+                    </Suspense>
                 </GameErrorBoundary>
             </main>
 
             <AnimatePresence>
-                {/* Show when the opponent is the one disconnected */}
                 {opponentDisconnected && <ReconnectionModal timeout={opponentTimeout} opponent={opponentProfile} />}
-
-                {/* Show when I am the one disconnected (Local Failure) */}
-                {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { setConnectionError(null); socket?.connect(); }} />}
-
-                {/* Tournament-aware Result Overlay */}
-                {gameResult && <GameResultOverlay
-                    result={gameResult.result}
-                    amount={gameResult.amount}
-                    financials={gameResult.financials}
-                    onContinue={finalizeGameEnd}
-                    onRematch={socketGame && isConnected ? handleRematchRequest : undefined}
-                    rematchStatus={rematchStatus}
-                    stake={socketGame?.stake}
-                    userBalance={user?.balance}
-                    isTournament={!!activeGameTable?.tournamentMatchId}
-                    tournamentPot={gameResult.tournamentPot}
-                />}
-
-                {incomingChallenge && <ChallengeRequestModal challenge={incomingChallenge} onAccept={handleAcceptChallenge} onDecline={async () => { if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined'); setIncomingChallenge(null); }} />}
+                {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { socket?.connect(); }} />}
+                {gameResult && (
+                    <GameResultOverlay
+                        result={gameResult.result}
+                        amount={gameResult.amount}
+                        financials={gameResult.financials}
+                        onContinue={finalizeGameEnd}
+                        onRematch={socketGame && isConnected ? handleRematchRequest : undefined}
+                        rematchStatus={rematchStatus}
+                        stake={socketGame?.stake}
+                        userBalance={user?.balance}
+                        isTournament={!!activeGameTable?.tournamentMatchId}
+                        tournamentPot={gameResult.tournamentPot}
+                    />
+                )}
+                {incomingChallenge && (
+                    <ChallengeRequestModal
+                        challenge={incomingChallenge}
+                        onAccept={handleAcceptChallenge}
+                        onDecline={async () => {
+                            if (incomingChallenge) await respondToChallenge(incomingChallenge.id, 'declined');
+                            dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
+                        }}
+                    />
+                )}
             </AnimatePresence>
         </div>
     );
 };
 
+// ─── Root export — full provider stack ────────────────────────────────────────
 export default function App() {
     return (
         <LanguageProvider>
             <ThemeProvider>
-                <AppContent />
+                <AppStateProvider>
+                    <SocketProvider>
+                        <ToastProvider>
+                            <AppContent />
+                        </ToastProvider>
+                    </SocketProvider>
+                </AppStateProvider>
             </ThemeProvider>
         </LanguageProvider>
     );

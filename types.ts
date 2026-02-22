@@ -1,6 +1,51 @@
 
 export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings' | 'tournaments';
 
+/** Map of userId -> PlayerProfile as sent by the server in socket payloads */
+export type PlayerProfileMap = Record<string, PlayerProfile>;
+
+/** A chat message sent over the socket */
+export interface GameChatMessage {
+  id: string;
+  senderId: string;
+  message: string;
+  timestamp: number;
+}
+
+/** The full game state object sent from the server over socket.io */
+export interface SocketGameState {
+  id?: string;
+  roomId: string;
+  players: string[];
+  gameType: string;
+  stake: number;
+  turn: string;
+  status?: 'active' | 'completed' | 'draw';
+  winner?: string;
+  gameState: Record<string, unknown>;
+  profiles: PlayerProfileMap;
+  chat?: GameChatMessage[];
+  /** Set when this is a tournament match room */
+  tournamentMatchId?: string;
+  /** Legacy alias — may be populated instead of tournamentMatchId */
+  privateRoomId?: string;
+}
+
+/** Union type for all game action payloads sent from client to server */
+export type GameAction =
+  | { type: 'FORFEIT' }
+  | { type: 'CHAT'; message: string }
+  | { type: 'TIMEOUT_CLAIM' }
+  | { type: 'REMATCH_REQUEST' }
+  | { type: 'REMATCH_DECLINE' }
+  | { type: 'ROLL' }
+  | { type: 'MOVE'; index?: number; newState?: Record<string, unknown> }
+  | { type: 'DRAW_ROUND' }
+  | { type: 'MOVE_PIECE'; pieces: unknown[]; bonusTurn?: boolean }
+  | { type: 'PLAY'; card: { id: string; suit: string; rank: string }; suit: string }
+  | { type: 'DRAW'; passTurn?: boolean };
+
+
 export type ProfileTab = 'overview' | 'history' | 'settings';
 
 export interface User {
