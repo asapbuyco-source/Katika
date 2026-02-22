@@ -38,7 +38,7 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(cors({
     origin: (origin, callback) => {
         // Allow requests with no origin (like mobile apps or curl) or matching FRONTEND_ORIGIN
@@ -59,12 +59,30 @@ const sanitize = (text) => String(text).replace(/<[^>]*>?/gm, '').substring(0, 5
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
-        origin: FRONTEND_ORIGIN,
+        origin: FRONTEND_ORIGIN === '*' ? true : FRONTEND_ORIGIN,
         methods: ["GET", "POST"],
         credentials: true
     },
     transports: ['polling', 'websocket'],
     pingTimeout: 60000,
+});
+
+// Socket.IO connection rate limiting
+const connectionsByIP = new Map();
+io.use((socket, next) => {
+    const ip = socket.handshake.address;
+    const count = connectionsByIP.get(ip) || 0;
+    if (count >= 10) {
+        console.warn(`Socket rate limit exceeded for IP: ${ip}`);
+        return next(new Error('Too many connections'));
+    }
+    connectionsByIP.set(ip, count + 1);
+    setTimeout(() => {
+        const current = connectionsByIP.get(ip) || 1;
+        if (current <= 1) connectionsByIP.delete(ip);
+        else connectionsByIP.set(ip, current - 1);
+    }, 60000);
+    next();
 });
 
 // --- HEALTH CHECK (required for Railway) ---
@@ -134,6 +152,11 @@ app.get('/api/pay/status/:transId', async (req, res) => {
 
 // --- ADMIN SERVER STATUS ---
 app.get('/api/admin/server-status', (req, res) => {
+    // Simple shared-secret auth — set ADMIN_SECRET in Railway env vars
+    const adminSecret = process.env.ADMIN_SECRET;
+    if (adminSecret && req.headers['x-admin-secret'] !== adminSecret) {
+        return res.status(403).json({ error: 'Forbidden' });
+    }
     try {
         const status = {
             uptime: Math.floor(process.uptime()),
@@ -260,7 +283,7 @@ const createInitialGameState = (gameType, p1, p2) => {
             const deck = createDeck();
             return {
                 ...common,
-                deck: deck.slice(14),
+                deck: deck.slice(15),
                 hands: { [p1]: deck.slice(0, 7), [p2]: deck.slice(7, 14) },
                 discardPile: [deck[14]],
                 activeSuit: deck[14].suit,
@@ -561,7 +584,8 @@ io.on('connection', (socket) => {
                             room.gameState.currentRound++;
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
-                            room.turn = room.gameState.currentRound % 2 !== 0 ? p1 : p2;
+                            // Alternate who rolls first each round
+                            room.turn = p1;
                             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                         }
                     }, 3000);
@@ -609,7 +633,9 @@ io.on('connection', (socket) => {
                         io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
                         setTimeout(() => {
                             room.gameState.board = Array(9).fill(null);
-                            room.status = 'active'; // Reset status from draw
+                            room.status = 'active';
+                            // Alternate who goes first after a draw
+                            room.turn = room.players.find(id => id !== room.turn);
                             io.to(roomId).emit('game_update', { ...room, roomId });
                         }, 3000);
                     }
@@ -622,6 +648,8 @@ io.on('connection', (socket) => {
             setTimeout(() => {
                 room.gameState.board = Array(9).fill(null);
                 room.status = 'active';
+                // Alternate who goes first after a draw
+                room.turn = room.players.find(id => id !== room.turn);
                 io.to(roomId).emit('game_update', { ...room, roomId });
             }, 3000);
         }
@@ -637,6 +665,8 @@ io.on('connection', (socket) => {
             }
             else if (action.type === 'MOVE_PIECE') {
                 if (room.turn !== userId) return;
+                // Basic validation: ensure no piece count tampering
+                if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
                 room.gameState.pieces = action.pieces;
                 room.gameState.diceRolled = false;
                 if (!action.bonusTurn) {
@@ -746,10 +776,12 @@ httpServer.listen(PORT, () => {
 });
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-    console.log('SIGTERM received. Closing server...');
+const gracefulShutdown = (signal) => {
+    console.log(`${signal} received. Closing server...`);
     httpServer.close(() => {
         console.log('Server closed. Exiting.');
         process.exit(0);
     });
-});
+};
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
