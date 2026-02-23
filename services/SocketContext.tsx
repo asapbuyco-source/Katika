@@ -9,7 +9,7 @@ import React, {
 import { io, Socket } from 'socket.io-client';
 import { SocketGameState } from '../types';
 import { useAppState } from './AppContext';
-import { setTournamentMatchActive, reportTournamentMatchResult } from './firebase';
+import { setTournamentMatchActive, reportTournamentMatchResult, addUserTransaction } from './firebase';
 import { playSFX } from './sound';
 
 // ─── Context Shape ─────────────────────────────────────────────────────────────
@@ -139,9 +139,20 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             }
 
             if (state.user && winner === state.user.id) {
+                const winnings = financials?.winnings ?? 0;
+                // Bug D fix: Write payout to Firebase immediately on game_over, not waiting for
+                // the overlay 'Continue' click. This prevents fund loss on disconnect/refresh.
+                if (winnings > 0 && !state.user.id.startsWith('guest-') && currentGame?.stake) {
+                    addUserTransaction(state.user.id, {
+                        type: 'winnings',
+                        amount: winnings,
+                        status: 'completed',
+                        date: new Date().toISOString()
+                    }).catch(e => console.error('[SocketContext] Failed to record winnings:', e));
+                }
                 dispatch({
                     type: 'SET_GAME_RESULT',
-                    payload: { result: 'win', amount: financials?.winnings ?? 0, financials }
+                    payload: { result: 'win', amount: winnings, financials }
                 });
             } else {
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'loss', amount: 0 } });

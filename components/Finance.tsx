@@ -12,7 +12,7 @@ const motion = originalMotion as any;
 
 interface FinanceProps {
     user: User;
-    onTopUp: () => void;
+    onTopUp: (newBalance?: number) => void;
 }
 
 export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
@@ -90,7 +90,9 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                         });
                     }
 
-                    onTopUp(); // Refresh balance in parent
+                    // Pass the new balance so parent can update state immediately
+                    const newBalance = user.balance + depositAmount;
+                    onTopUp(newBalance);
                     setShowSuccess(true);
                     setPaymentLink(null);
                     setTransId(null);
@@ -222,8 +224,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                 key={tab}
                                 onClick={() => { setActiveTab(tab as any); cancelPayment(); }}
                                 className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all capitalize ${activeTab === tab
-                                        ? 'bg-royal-800 text-white shadow-lg'
-                                        : 'text-slate-500 hover:text-slate-300'
+                                    ? 'bg-royal-800 text-white shadow-lg'
+                                    : 'text-slate-500 hover:text-slate-300'
                                     }`}
                             >
                                 {tab === 'deposit' && t('deposit')}

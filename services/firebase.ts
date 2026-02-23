@@ -196,18 +196,19 @@ export const getUserTransactions = async (userId: string): Promise<Transaction[]
 };
 
 export const addUserTransaction = async (userId: string, transaction: Omit<Transaction, 'id'>) => {
-    await addDoc(collection(db, "users", userId, "transactions"), {
-        ...transaction,
-        timestamp: serverTimestamp(),
-        date: new Date().toLocaleString()
-    });
-
     const userRef = doc(db, "users", userId);
-    await runTransaction(db, async (transactionDb) => {
-        const sfDoc = await transactionDb.get(userRef);
-        if (!sfDoc.exists()) return;
+    // Atomic: write the transaction record and update balance in a single Firestore transaction
+    await runTransaction(db, async (tx) => {
+        const sfDoc = await tx.get(userRef);
+        if (!sfDoc.exists()) throw new Error(`User ${userId} not found`);
         const newBalance = (sfDoc.data().balance || 0) + transaction.amount;
-        transactionDb.update(userRef, { balance: newBalance });
+        tx.update(userRef, { balance: newBalance });
+        const txRef = doc(collection(db, "users", userId, "transactions"));
+        tx.set(txRef, {
+            ...transaction,
+            timestamp: serverTimestamp(),
+            date: new Date().toLocaleString()
+        });
     });
 };
 
@@ -356,6 +357,19 @@ export const respondToChallenge = async (challengeId: string, status: 'accepted'
 };
 
 export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
+    // Bug E fix: Verify both players can afford the stake before creating the game
+    if (challenge.stake > 0) {
+        const receiverDoc = await getDoc(doc(db, "users", receiver.id));
+        if (!receiverDoc.exists() || (receiverDoc.data() as User).balance < challenge.stake) {
+            throw new Error('Insufficient funds to accept this challenge.');
+        }
+        if (challenge.sender.id) {
+            const senderDoc = await getDoc(doc(db, "users", challenge.sender.id));
+            if (!senderDoc.exists() || (senderDoc.data() as User).balance < challenge.stake) {
+                throw new Error('Challenge sender has insufficient funds.');
+            }
+        }
+    }
     const newGame = {
         gameType: challenge.gameType,
         stake: challenge.stake,

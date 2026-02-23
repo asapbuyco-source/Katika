@@ -13,7 +13,8 @@ import {
     auth, syncUserProfile, logout,
     subscribeToUser, subscribeToIncomingChallenges,
     respondToChallenge, getGame, subscribeToForum,
-    reportTournamentMatchResult, setTournamentMatchActive, createBotMatch, db
+    reportTournamentMatchResult, setTournamentMatchActive,
+    createBotMatch, createChallengeGame, db
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -347,11 +348,17 @@ const AppContent = () => {
 
     const handleAcceptChallenge = useCallback(async () => {
         if (!incomingChallenge || !user) return;
-        const gameId = incomingChallenge.id;
-        await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
-        startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
+        try {
+            // Create the actual game room first, then use its ID to join via socket
+            const gameId = await createChallengeGame(incomingChallenge, user);
+            await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
+            startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
+        } catch (e) {
+            console.error('[App] Failed to create challenge game:', e);
+            toast.error('Could not accept challenge. Please try again.');
+        }
         dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
-    }, [incomingChallenge, user, startMatchmaking, dispatch]);
+    }, [incomingChallenge, user, startMatchmaking, dispatch, toast]);
 
     const handleMatchFound = useCallback((table: Table) => {
         dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
@@ -391,9 +398,9 @@ const AppContent = () => {
                     const tDoc = await getDoc(doc(db, 'tournaments', parts[1]));
                     if (tDoc.exists()) {
                         const tData = tDoc.data() as Tournament;
-                        tournamentPot = tData.type === 'fixed'
-                            ? tData.prizePool
-                            : (tData.prizePool || 0) + (tData.entryFee * tData.participants.length * 0.9);
+                        // Dynamic tournaments store the net prizePool directly (entry fees minus 10% platform fee).
+                        // Fixed tournaments use house-funded prizePool. Never double-count.
+                        tournamentPot = tData.prizePool || 0;
                     }
                 }
             } catch (e) { console.error('[App] Error fetching tournament pot:', e); }
@@ -521,7 +528,7 @@ const AppContent = () => {
                                 </motion.div>
                             )}
                             {currentView === 'profile' && user && <MV k="profile">     <Profile user={user} onLogout={handleLogout} onUpdateProfile={u => dispatch({ type: 'UPDATE_USER', payload: u })} onNavigate={setView} /></MV>}
-                            {currentView === 'finance' && user && <MV k="finance">     <Finance user={user} onTopUp={() => { }} /></MV>}
+                            {currentView === 'finance' && user && <MV k="finance">     <Finance user={user} onTopUp={(newBalance?: number) => { if (newBalance !== undefined) dispatch({ type: 'UPDATE_USER', payload: { balance: newBalance } }); }} /></MV>}
                             {currentView === 'how-it-works' && <MV k="how-it-works"><HowItWorks onBack={() => setView('landing')} onLogin={() => setView('auth')} /></MV>}
                             {currentView === 'admin' && user?.isAdmin && <MV k="admin"><AdminDashboard user={user} /></MV>}
                             {currentView === 'help-center' && <MV k="help-center"><HelpCenter onBack={() => setView(user ? 'profile' : 'landing')} /></MV>}

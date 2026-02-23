@@ -529,6 +529,7 @@ io.on('connection', (socket) => {
                 room.status = 'active';
                 room.winner = null;
                 room.rematchVotes.clear();
+                room.turn = room.players[0]; // Always reset to P1 for fairness
                 room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
                 // Keep chat history
 
@@ -729,8 +730,8 @@ io.on('connection', (socket) => {
                 if (room.gameState.deck.length > 0) {
                     const card = room.gameState.deck.pop();
                     room.gameState.hands[userId].push(card);
-                    // Shuffle discard back if empty
-                    if (room.gameState.deck.length === 0) {
+                    // Shuffle discard back into deck if now empty, keep top card as new discard
+                    if (room.gameState.deck.length === 0 && room.gameState.discardPile.length > 1) {
                         const top = room.gameState.discardPile.pop();
                         room.gameState.deck = room.gameState.discardPile.sort(() => Math.random() - 0.5);
                         room.gameState.discardPile = [top];
@@ -738,6 +739,10 @@ io.on('connection', (socket) => {
                     if (action.passTurn) {
                         room.turn = room.players.find(id => id !== userId);
                     }
+                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                } else {
+                    // Both deck and discard fully exhausted — pass turn to prevent deadlock
+                    room.turn = room.players.find(id => id !== userId);
                     io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                 }
             }
