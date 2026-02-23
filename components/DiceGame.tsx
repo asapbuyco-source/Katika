@@ -11,11 +11,11 @@ import { Socket } from 'socket.io-client';
 const motion = originalMotion as any;
 
 interface DiceGameProps {
-  table: Table;
-  user: AppUser;
-  onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
-  socket?: Socket | null;
-  socketGame?: any;
+    table: Table;
+    user: AppUser;
+    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    socket?: Socket | null;
+    socketGame?: any;
 }
 
 const TURN_TIME_LIMIT = 15; // Seconds
@@ -65,8 +65,8 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
             transition={rolling ? { duration: 0.2, repeat: Infinity } : { duration: 0.4, type: 'spring', bounce: 0.5 }}
             className={`
                 w-20 h-20 md:w-24 md:h-24 rounded-2xl shadow-[0_10px_20px_rgba(0,0,0,0.5)] flex items-center justify-center p-2 border-2 relative
-                ${isMe 
-                    ? 'bg-gradient-to-br from-amber-100 to-amber-400 border-amber-500' 
+                ${isMe
+                    ? 'bg-gradient-to-br from-amber-100 to-amber-400 border-amber-500'
                     : 'bg-gradient-to-br from-red-100 to-red-400 border-red-500'}
             `}
         >
@@ -88,542 +88,542 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 };
 
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
-  const isP2P = !!socket && !!socketGame;
-  const opponentId = isP2P && Array.isArray(socketGame?.players) 
-      ? socketGame.players.find((id: string) => id !== user.id) 
-      : 'bot';
+    const isP2P = !!socket && !!socketGame;
+    const opponentId = isP2P && Array.isArray(socketGame?.players)
+        ? socketGame.players.find((id: string) => id !== user.id)
+        : 'bot';
 
-  const [scores, setScores] = useState({ me: 0, opp: 0 });
-  const [round, setRound] = useState(1);
-  const [phase, setPhase] = useState<'waiting' | 'rolling' | 'scored'>('waiting');
-  
-  // Use Refs for dice values to ensure stability in timeouts
-  const myDiceRef = useRef([1, 1]);
-  const [myDice, setMyDice] = useState([1, 1]);
-  
-  const oppDiceRef = useRef([1, 1]);
-  const [oppDice, setOppDice] = useState([1, 1]);
-  
-  const [roundWinner, setRoundWinner] = useState<'me' | 'opp' | 'tie' | null>(null);
-  const [showForfeitModal, setShowForfeitModal] = useState(false);
-  const [showRulesModal, setShowRulesModal] = useState(false);
-  const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
-  
-  const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
-  const [isMyTurn, setIsMyTurn] = useState(true);
-  const [isProcessing, setIsProcessing] = useState(false);
+    const [scores, setScores] = useState({ me: 0, opp: 0 });
+    const [round, setRound] = useState(1);
+    const [phase, setPhase] = useState<'waiting' | 'rolling' | 'scored'>('waiting');
 
-  const opponentName = table.host?.id === user.id && table.guest ? table.guest.name : (table.host?.name || "Opponent");
-  const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
+    // Use Refs for dice values to ensure stability in timeouts
+    const myDiceRef = useRef([1, 1]);
+    const [myDice, setMyDice] = useState([1, 1]);
 
-  const prevRoundState = useRef<string>('');
+    const oppDiceRef = useRef([1, 1]);
+    const [oppDice, setOppDice] = useState([1, 1]);
 
-  const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
-    setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
-  };
+    const [roundWinner, setRoundWinner] = useState<'me' | 'opp' | 'tie' | null>(null);
+    const [showForfeitModal, setShowForfeitModal] = useState(false);
+    const [showRulesModal, setShowRulesModal] = useState(false);
+    const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
 
-  const handleQuit = () => {
-      if (isP2P && socket) {
-          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
-      }
-      onGameEnd('quit');
-  };
+    const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
+    const [isMyTurn, setIsMyTurn] = useState(true);
+    const [isProcessing, setIsProcessing] = useState(false);
 
-  // Helper to update both state and ref
-  const updateMyDice = (vals: number[]) => {
-      myDiceRef.current = vals;
-      setMyDice(vals);
-  };
-  const updateOppDice = (vals: number[]) => {
-      oppDiceRef.current = vals;
-      setOppDice(vals);
-  };
+    const opponentName = table.host?.id === user.id && table.guest ? table.guest.name : (table.host?.name || "Opponent");
+    const opponentAvatar = table.host?.id === user.id && table.guest ? table.guest.avatar : (table.host?.avatar || "https://i.pravatar.cc/150");
 
-  // Improved Sync with Socket State
-  useEffect(() => {
-      if (isP2P && socketGame) {
-          const amITurn = socketGame.turn === user.id;
-          setIsMyTurn(amITurn);
-          
-          const gs = socketGame.gameState || {}; 
+    const prevRoundState = useRef<string>('');
 
-          if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
-              setScores({
-                  me: gs.scores[user.id] || 0,
-                  opp: gs.scores[opponentId] || 0
-              });
-          }
-          
-          if (gs.currentRound && gs.currentRound !== round) {
-              setRound(gs.currentRound);
-          }
+    const addLog = (msg: string, status: 'secure' | 'alert' | 'scanning' = 'secure') => {
+        setRefereeLog({ id: Date.now().toString(), message: msg, status, timestamp: Date.now() });
+    };
 
-          let hasRolledSelf = false;
+    const handleQuit = () => {
+        if (isP2P && socket) {
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+        }
+        onGameEnd('quit');
+    };
 
-          if (gs.roundRolls) {
-              if (gs.roundRolls[user.id] && JSON.stringify(gs.roundRolls[user.id]) !== JSON.stringify(myDice)) {
-                  updateMyDice(gs.roundRolls[user.id]);
-              }
-              if (gs.roundRolls[opponentId] && JSON.stringify(gs.roundRolls[opponentId]) !== JSON.stringify(oppDice)) {
-                  updateOppDice(gs.roundRolls[opponentId]);
-              }
-              // Check if I have already rolled this round
-              if (gs.roundRolls[user.id]) {
-                  hasRolledSelf = true;
-              }
-          } else {
-              // Reset dice visual if new round (roundRolls empty)
-              // Only if we are not currently rolling (to avoid visual glitch mid-transition)
-              if (phase !== 'rolling') {
-                  updateMyDice([1,1]);
-                  updateOppDice([1,1]);
-              }
-          }
+    // Helper to update both state and ref
+    const updateMyDice = (vals: number[]) => {
+        myDiceRef.current = vals;
+        setMyDice(vals);
+    };
+    const updateOppDice = (vals: number[]) => {
+        oppDiceRef.current = vals;
+        setOppDice(vals);
+    };
 
-          // Stop rolling animation if we have our dice results
-          if (phase === 'rolling' && hasRolledSelf) {
-              setPhase('waiting'); 
-          }
+    // Improved Sync with Socket State
+    useEffect(() => {
+        if (isP2P && socketGame) {
+            const amITurn = socketGame.turn === user.id;
+            setIsMyTurn(amITurn);
 
-          if (gs.roundState === 'scored') {
-              setPhase('scored');
-              
-              if (prevRoundState.current !== 'scored') {
-                  const myD = gs.roundRolls?.[user.id] || [0,0];
-                  const oppD = gs.roundRolls?.[opponentId] || [0,0];
-                  const myTotal = myD[0] + myD[1];
-                  const oppTotal = oppD[0] + oppD[1];
+            const gs = socketGame.gameState || {};
 
-                  if (myTotal > oppTotal) {
-                      setRoundWinner('me');
-                      playSFX('win');
-                  } else if (oppTotal > myTotal) {
-                      setRoundWinner('opp');
-                      playSFX('loss');
-                  } else {
-                      setRoundWinner('tie');
-                  }
-              }
-          } else {
-              // Standard turn switching
-              if (phase === 'rolling' && !amITurn && !hasRolledSelf) {
-                  setPhase('waiting');
-              }
-              
-              // Reset from scored to waiting for next round
-              if (phase === 'scored' && gs.roundState === 'waiting') {
-                  setPhase('waiting');
-                  setRoundWinner(null);
-                  addLog(`Round ${gs.currentRound} Started`);
-                  setTimeLeft(TURN_TIME_LIMIT);
-                  // Ensure dice are reset visually
-                  updateMyDice([1,1]);
-                  updateOppDice([1,1]);
-              }
-          }
-          prevRoundState.current = gs.roundState;
-          
-          if (socketGame.winner) {
-              onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
-          }
-      }
-  }, [socketGame, user.id, opponentId, isP2P]);
+            if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
+                setScores({
+                    me: gs.scores[user.id] || 0,
+                    opp: gs.scores[opponentId] || 0
+                });
+            }
 
-  useEffect(() => {
-      if (phase !== 'waiting') return;
+            if (gs.currentRound && gs.currentRound !== round) {
+                setRound(gs.currentRound);
+            }
 
-      setTimeLeft(TURN_TIME_LIMIT);
-      let timeoutId: any;
+            let hasRolledSelf = false;
 
-      const timer = setInterval(() => {
-          setTimeLeft(prev => {
-              if (prev <= 1) {
-                  clearInterval(timer);
-                  timeoutId = setTimeout(() => handleTimeout(), 0);
-                  return 0;
-              }
-              return prev - 1;
-          });
-      }, 1000);
+            if (gs.roundRolls) {
+                if (gs.roundRolls[user.id] && JSON.stringify(gs.roundRolls[user.id]) !== JSON.stringify(myDice)) {
+                    updateMyDice(gs.roundRolls[user.id]);
+                }
+                if (gs.roundRolls[opponentId] && JSON.stringify(gs.roundRolls[opponentId]) !== JSON.stringify(oppDice)) {
+                    updateOppDice(gs.roundRolls[opponentId]);
+                }
+                // Check if I have already rolled this round
+                if (gs.roundRolls[user.id]) {
+                    hasRolledSelf = true;
+                }
+            } else {
+                // Reset dice visual if new round (roundRolls empty)
+                // Only if we are not currently rolling (to avoid visual glitch mid-transition)
+                if (phase !== 'rolling') {
+                    updateMyDice([1, 1]);
+                    updateOppDice([1, 1]);
+                }
+            }
 
-      return () => {
-          clearInterval(timer);
-          if (timeoutId) clearTimeout(timeoutId);
-      };
-  }, [isMyTurn, round, phase]);
+            // Stop rolling animation if we have our dice results
+            if (phase === 'rolling' && hasRolledSelf) {
+                setPhase('waiting');
+            }
 
-  const handleTimeout = () => {
-      if (phase !== 'waiting') return;
-      
-      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
-      
-      // Only timeout if it's my turn AND I haven't rolled yet
-      if (isMyTurn && !hasRolled) {
-          playSFX('error');
-          addLog("Auto-roll triggered", "alert");
-          roll();
-      } else if (!isP2P) {
-          botPlay(); 
-      }
-  };
+            if (gs.roundState === 'scored') {
+                setPhase('scored');
 
-  const roll = () => {
-      if (!isMyTurn || phase !== 'waiting' || isProcessing) return;
-      
-      playSFX('dice');
-      
-      if (isP2P && socket) {
-          setPhase('rolling');
-          setIsProcessing(true);
-          socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
-          setTimeout(() => setIsProcessing(false), 500);
-      } else {
-          setPhase('rolling');
-          setTimeout(() => {
-              const d1 = Math.ceil(Math.random() * 6);
-              const d2 = Math.ceil(Math.random() * 6);
-              updateMyDice([d1, d2]);
-              setPhase('waiting'); 
-              setIsMyTurn(false);
-              setTimeout(botPlay, 1500); 
-          }, 1000);
-      }
-  };
+                if (prevRoundState.current !== 'scored') {
+                    const myD = gs.roundRolls?.[user.id] || [0, 0];
+                    const oppD = gs.roundRolls?.[opponentId] || [0, 0];
+                    const myTotal = myD[0] + myD[1];
+                    const oppTotal = oppD[0] + oppD[1];
 
-  const botPlay = () => {
-      setPhase('rolling');
-      playSFX('dice');
-      setTimeout(() => {
-          const d1 = Math.ceil(Math.random() * 6);
-          const d2 = Math.ceil(Math.random() * 6);
-          updateOppDice([d1, d2]);
-          // Use Ref values to ensure we aren't using stale closure state
-          evaluateRoundLocal(myDiceRef.current, [d1, d2]);
-      }, 1000);
-  };
+                    if (myTotal > oppTotal) {
+                        setRoundWinner('me');
+                        playSFX('win');
+                    } else if (oppTotal > myTotal) {
+                        setRoundWinner('opp');
+                        playSFX('loss');
+                    } else {
+                        setRoundWinner('tie');
+                    }
+                }
+            } else {
+                // Standard turn switching
+                if (phase === 'rolling' && !amITurn && !hasRolledSelf) {
+                    setPhase('waiting');
+                }
 
-  const evaluateRoundLocal = (pDice: number[], oDice: number[]) => {
-      const pTotal = pDice[0] + pDice[1];
-      const oTotal = oDice[0] + oDice[1];
-      setPhase('scored');
-      
-      if (pTotal > oTotal) {
-          setScores(s => ({ ...s, me: s.me + 1 }));
-          setRoundWinner('me');
-          playSFX('win');
-      } else if (oTotal > pTotal) {
-          setScores(s => ({ ...s, opp: s.opp + 1 }));
-          setRoundWinner('opp');
-          playSFX('loss');
-      } else {
-          setRoundWinner('tie');
-      }
-  };
+                // Reset from scored to waiting for next round
+                if (phase === 'scored' && gs.roundState === 'waiting') {
+                    setPhase('waiting');
+                    setRoundWinner(null);
+                    addLog(`Round ${gs.currentRound} Started`);
+                    setTimeLeft(TURN_TIME_LIMIT);
+                    // Ensure dice are reset visually
+                    updateMyDice([1, 1]);
+                    updateOppDice([1, 1]);
+                }
+            }
+            prevRoundState.current = gs.roundState;
 
-  const nextRoundLocal = () => {
-      if (scores.me >= 3 || scores.opp >= 3) {
-          onGameEnd(scores.me >= 3 ? 'win' : 'loss');
-      } else {
-          setRound(r => r + 1);
-          setIsMyTurn(true);
-          setPhase('waiting');
-          setRoundWinner(null);
-          setTimeLeft(TURN_TIME_LIMIT);
-      }
-  };
+            // In P2P mode, SocketContext's 'game_over' handler dispatches the result.
+            // Calling onGameEnd here too would cause a double result dispatch.
+            if (socketGame.winner && !isP2P) {
+                onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
+            }
+        }
+    }, [socketGame, user.id, opponentId, isP2P]);
 
-  const handleSwipe = (event: any, info: any) => {
-      const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
-      if (info.offset.y < -50 && isMyTurn && phase === 'waiting' && !hasRolled) {
-          roll();
-      }
-  };
+    useEffect(() => {
+        if (phase !== 'waiting') return;
 
-  const hasRolledServer = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+        setTimeLeft(TURN_TIME_LIMIT);
+        let timeoutId: any;
 
-  return (
-    <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-between p-4 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
-        <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
+        const timer = setInterval(() => {
+            setTimeLeft(prev => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    timeoutId = setTimeout(() => handleTimeout(), 0);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
 
-        {/* FORFEIT MODAL */}
-        <AnimatePresence>
-          {showForfeitModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div 
-                    initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                    onClick={() => setShowForfeitModal(false)}
-                    className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-                  />
-                  <motion.div 
-                    initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                    className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
-                  >
-                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
-                      <div className="flex flex-col items-center text-center mb-6">
-                          <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
-                              <AlertTriangle className="text-red-500" size={32} />
-                          </div>
-                          <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
-                          <p className="text-sm text-slate-400">
-                              Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
-                          </p>
-                      </div>
-                      <div className="flex gap-3">
-                          <button 
+        return () => {
+            clearInterval(timer);
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [isMyTurn, round, phase]);
+
+    const handleTimeout = () => {
+        if (phase !== 'waiting') return;
+
+        const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+
+        // Only timeout if it's my turn AND I haven't rolled yet
+        if (isMyTurn && !hasRolled) {
+            playSFX('error');
+            addLog("Auto-roll triggered", "alert");
+            roll();
+        } else if (!isP2P) {
+            botPlay();
+        }
+    };
+
+    const roll = () => {
+        if (!isMyTurn || phase !== 'waiting' || isProcessing) return;
+
+        playSFX('dice');
+
+        if (isP2P && socket) {
+            setPhase('rolling');
+            setIsProcessing(true);
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
+            setTimeout(() => setIsProcessing(false), 500);
+        } else {
+            setPhase('rolling');
+            setTimeout(() => {
+                const d1 = Math.ceil(Math.random() * 6);
+                const d2 = Math.ceil(Math.random() * 6);
+                updateMyDice([d1, d2]);
+                setPhase('waiting');
+                setIsMyTurn(false);
+                setTimeout(botPlay, 1500);
+            }, 1000);
+        }
+    };
+
+    const botPlay = () => {
+        setPhase('rolling');
+        playSFX('dice');
+        setTimeout(() => {
+            const d1 = Math.ceil(Math.random() * 6);
+            const d2 = Math.ceil(Math.random() * 6);
+            updateOppDice([d1, d2]);
+            // Use Ref values to ensure we aren't using stale closure state
+            evaluateRoundLocal(myDiceRef.current, [d1, d2]);
+        }, 1000);
+    };
+
+    const evaluateRoundLocal = (pDice: number[], oDice: number[]) => {
+        const pTotal = pDice[0] + pDice[1];
+        const oTotal = oDice[0] + oDice[1];
+        setPhase('scored');
+
+        if (pTotal > oTotal) {
+            setScores(s => ({ ...s, me: s.me + 1 }));
+            setRoundWinner('me');
+            playSFX('win');
+        } else if (oTotal > pTotal) {
+            setScores(s => ({ ...s, opp: s.opp + 1 }));
+            setRoundWinner('opp');
+            playSFX('loss');
+        } else {
+            setRoundWinner('tie');
+        }
+    };
+
+    const nextRoundLocal = () => {
+        if (scores.me >= 3 || scores.opp >= 3) {
+            onGameEnd(scores.me >= 3 ? 'win' : 'loss');
+        } else {
+            setRound(r => r + 1);
+            setIsMyTurn(true);
+            setPhase('waiting');
+            setRoundWinner(null);
+            setTimeLeft(TURN_TIME_LIMIT);
+        }
+    };
+
+    const handleSwipe = (event: any, info: any) => {
+        const hasRolled = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+        if (info.offset.y < -50 && isMyTurn && phase === 'waiting' && !hasRolled) {
+            roll();
+        }
+    };
+
+    const hasRolledServer = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
+
+    return (
+        <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-between p-4 relative overflow-hidden">
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
+            <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
+
+            {/* FORFEIT MODAL */}
+            <AnimatePresence>
+                {showForfeitModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                             onClick={() => setShowForfeitModal(false)}
-                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
-                          >
-                              Stay
-                          </button>
-                          <button 
-                            onClick={handleQuit}
-                            className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
-                          >
-                              Forfeit
-                          </button>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-       </AnimatePresence>
-
-       {/* Rules Modal */}
-       <AnimatePresence>
-          {showRulesModal && (
-              <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
-                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowRulesModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
-                  <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
-                      <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
-                          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                              <BookOpen size={20} className="text-gold-400"/> Dice Duel Rules
-                          </h2>
-                          <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white">
-                              <X size={20}/>
-                          </button>
-                      </div>
-                      <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
-                          <section>
-                              <h3 className="text-white font-bold mb-1">Objective</h3>
-                              <p>Be the first player to reach 3 points (win 3 rounds).</p>
-                          </section>
-                          <section>
-                              <h3 className="text-white font-bold mb-1">Gameplay</h3>
-                              <ul className="list-disc pl-4 space-y-1">
-                                  <li>Each round, both players roll two dice.</li>
-                                  <li>The player with the higher total sum wins the round.</li>
-                                  <li>In case of a tie, no points are awarded, and the round is replayed or skipped depending on game mode.</li>
-                              </ul>
-                          </section>
-                          <section>
-                              <h3 className="text-white font-bold mb-1">Controls</h3>
-                              <p>Swipe up on the dice area or tap the "ROLL DICE" button when it is your turn.</p>
-                          </section>
-                      </div>
-                  </motion.div>
-              </div>
-          )}
-       </AnimatePresence>
-
-        {/* --- HEADER --- */}
-        <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
-            <div className="flex items-center gap-2">
-                <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
-                    <ArrowLeft size={20} />
-                </button>
-                <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
-                    <BookOpen size={20} />
-                </button>
-            </div>
-            <div className="flex flex-col items-center">
-                <div className="text-gold-400 font-bold text-xs uppercase tracking-widest mb-1 flex items-center gap-2">
-                    Round {round}
-                </div>
-                <div className="bg-black/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 flex items-center gap-4">
-                    <div className="flex flex-col items-center">
-                        <span className={`font-bold text-2xl ${scores.me > scores.opp ? 'text-green-400' : 'text-white'}`}>{scores.me}</span>
-                        <span className="text-[8px] uppercase text-slate-500 font-bold">YOU</span>
-                    </div>
-                    <div className="h-8 w-px bg-white/10"></div>
-                    <div className="flex flex-col items-center">
-                        <span className={`font-bold text-2xl ${scores.opp > scores.me ? 'text-red-400' : 'text-white'}`}>{scores.opp}</span>
-                        <span className="text-[8px] uppercase text-slate-500 font-bold">OPP</span>
-                    </div>
-                </div>
-            </div>
-            <div className="w-32 hidden md:block">
-                 <AIReferee externalLog={refereeLog} />
-            </div>
-        </div>
-
-        {/* --- TURN INDICATOR --- */}
-        <div className="mt-6 flex justify-center w-full relative z-20">
-            <motion.div 
-                initial={{ scale: 0.9, opacity: 0 }}
-                animate={{ scale: 1, opacity: 1 }}
-                key={isMyTurn ? 'my-turn' : 'opp-turn'}
-                className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${
-                    isMyTurn 
-                    ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20' 
-                    : 'bg-royal-800 text-slate-400 border border-white/10'
-                }`}
-            >
-                {isMyTurn 
-                    ? (hasRolledServer ? "Waiting for Result..." : "Your Turn") 
-                    : "Opponent's Turn"}
-            </motion.div>
-        </div>
-
-        {/* --- ARENA --- */}
-        <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-4 gap-8">
-            <div className="relative">
-                <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
-                    <div className="flex items-center gap-3">
-                        <div className={`relative ${!isMyTurn ? 'ring-4 ring-red-500/50 rounded-full' : ''}`}>
-                            <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
-                            {!isMyTurn && phase === 'rolling' && (
-                                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
-                            )}
-                        </div>
-                        <div className="text-red-200 font-bold text-sm">{opponentName}</div>
-                    </div>
-
-                    <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
-                        <div className="flex justify-center gap-6">
-                            <Die2D value={oppDice[0]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
-                            <Die2D value={oppDice[1]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
-                        </div>
-                        <div className="absolute -right-4 top-1/2 -translate-y-1/2">
-                            {(socketGame?.gameState?.roundRolls?.[opponentId] || (!isP2P && phase === 'scored')) && (
-                                <motion.div 
-                                    initial={{ scale: 0 }} animate={{ scale: 1 }}
-                                    className="w-12 h-12 rounded-full bg-royal-800 border-2 border-red-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
+                            className="relative bg-royal-900 border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl overflow-hidden"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
+                            <div className="flex flex-col items-center text-center mb-6">
+                                <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mb-4 border border-red-500/20">
+                                    <AlertTriangle className="text-red-500" size={32} />
+                                </div>
+                                <h2 className="text-xl font-bold text-white mb-2">Forfeit Match?</h2>
+                                <p className="text-sm text-slate-400">
+                                    Leaving now will result in an <span className="text-red-400 font-bold">immediate loss</span>.
+                                </p>
+                            </div>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setShowForfeitModal(false)}
+                                    className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-slate-300 font-bold rounded-xl border border-white/10 transition-colors"
                                 >
-                                    {oppDice[0] + oppDice[1]}
+                                    Stay
+                                </button>
+                                <button
+                                    onClick={handleQuit}
+                                    className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl shadow-lg shadow-red-500/20 transition-colors"
+                                >
+                                    Forfeit
+                                </button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Rules Modal */}
+            <AnimatePresence>
+                {showRulesModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowRulesModal(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                        <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-royal-900 border border-white/10 rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col max-h-[80vh]">
+                            <div className="flex justify-between items-center mb-4 pb-4 border-b border-white/10">
+                                <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                                    <BookOpen size={20} className="text-gold-400" /> Dice Duel Rules
+                                </h2>
+                                <button onClick={() => setShowRulesModal(false)} className="text-slate-400 hover:text-white">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="overflow-y-auto space-y-4 text-sm text-slate-300 pr-2 custom-scrollbar">
+                                <section>
+                                    <h3 className="text-white font-bold mb-1">Objective</h3>
+                                    <p>Be the first player to reach 3 points (win 3 rounds).</p>
+                                </section>
+                                <section>
+                                    <h3 className="text-white font-bold mb-1">Gameplay</h3>
+                                    <ul className="list-disc pl-4 space-y-1">
+                                        <li>Each round, both players roll two dice.</li>
+                                        <li>The player with the higher total sum wins the round.</li>
+                                        <li>In case of a tie, no points are awarded, and the round is replayed or skipped depending on game mode.</li>
+                                    </ul>
+                                </section>
+                                <section>
+                                    <h3 className="text-white font-bold mb-1">Controls</h3>
+                                    <p>Swipe up on the dice area or tap the "ROLL DICE" button when it is your turn.</p>
+                                </section>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* --- HEADER --- */}
+            <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
+                <div className="flex items-center gap-2">
+                    <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
+                        <ArrowLeft size={20} />
+                    </button>
+                    <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
+                        <BookOpen size={20} />
+                    </button>
+                </div>
+                <div className="flex flex-col items-center">
+                    <div className="text-gold-400 font-bold text-xs uppercase tracking-widest mb-1 flex items-center gap-2">
+                        Round {round}
+                    </div>
+                    <div className="bg-black/40 backdrop-blur-md px-6 py-2 rounded-full border border-white/10 flex items-center gap-4">
+                        <div className="flex flex-col items-center">
+                            <span className={`font-bold text-2xl ${scores.me > scores.opp ? 'text-green-400' : 'text-white'}`}>{scores.me}</span>
+                            <span className="text-[8px] uppercase text-slate-500 font-bold">YOU</span>
+                        </div>
+                        <div className="h-8 w-px bg-white/10"></div>
+                        <div className="flex flex-col items-center">
+                            <span className={`font-bold text-2xl ${scores.opp > scores.me ? 'text-red-400' : 'text-white'}`}>{scores.opp}</span>
+                            <span className="text-[8px] uppercase text-slate-500 font-bold">OPP</span>
+                        </div>
+                    </div>
+                </div>
+                <div className="w-32 hidden md:block">
+                    <AIReferee externalLog={refereeLog} />
+                </div>
+            </div>
+
+            {/* --- TURN INDICATOR --- */}
+            <div className="mt-6 flex justify-center w-full relative z-20">
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    key={isMyTurn ? 'my-turn' : 'opp-turn'}
+                    className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${isMyTurn
+                            ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20'
+                            : 'bg-royal-800 text-slate-400 border border-white/10'
+                        }`}
+                >
+                    {isMyTurn
+                        ? (hasRolledServer ? "Waiting for Result..." : "Your Turn")
+                        : "Opponent's Turn"}
+                </motion.div>
+            </div>
+
+            {/* --- ARENA --- */}
+            <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-4 gap-8">
+                <div className="relative">
+                    <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
+                        <div className="flex items-center gap-3">
+                            <div className={`relative ${!isMyTurn ? 'ring-4 ring-red-500/50 rounded-full' : ''}`}>
+                                <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
+                                {!isMyTurn && phase === 'rolling' && (
+                                    <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
+                                )}
+                            </div>
+                            <div className="text-red-200 font-bold text-sm">{opponentName}</div>
+                        </div>
+
+                        <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
+                            <div className="flex justify-center gap-6">
+                                <Die2D value={oppDice[0]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
+                                <Die2D value={oppDice[1]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
+                            </div>
+                            <div className="absolute -right-4 top-1/2 -translate-y-1/2">
+                                {(socketGame?.gameState?.roundRolls?.[opponentId] || (!isP2P && phase === 'scored')) && (
+                                    <motion.div
+                                        initial={{ scale: 0 }} animate={{ scale: 1 }}
+                                        className="w-12 h-12 rounded-full bg-royal-800 border-2 border-red-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
+                                    >
+                                        {oppDice[0] + oppDice[1]}
+                                    </motion.div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <motion.div
+                    className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
+                    onPanEnd={handleSwipe}
+                    onTouchEnd={(e: React.TouchEvent) => {
+                        // Simple swipe logic for touch
+                        if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
+                            roll();
+                        }
+                    }}
+                >
+                    <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
+                        {isMyTurn && phase === 'waiting' && !hasRolledServer && (
+                            <motion.div
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className="absolute -top-8 left-1/2 -translate-x-1/2 text-gold-400 text-xs font-bold flex flex-col items-center gap-1 animate-bounce"
+                            >
+                                <Hand className="rotate-180" size={16} />
+                                SWIPE UP TO ROLL
+                            </motion.div>
+                        )}
+
+                        <div className="flex justify-center gap-6">
+                            <Die2D value={myDice[0]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
+                            <Die2D value={myDice[1]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
+                        </div>
+
+                        <div className="absolute -right-4 top-1/2 -translate-y-1/2">
+                            {/* Show sum if I have rolled (even if waiting for opponent) */}
+                            {(hasRolledServer || (!isP2P && phase === 'scored')) && (
+                                <motion.div
+                                    initial={{ scale: 0 }} animate={{ scale: 1 }}
+                                    className="w-12 h-12 rounded-full bg-royal-800 border-2 border-gold-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
+                                >
+                                    {myDice[0] + myDice[1]}
                                 </motion.div>
                             )}
                         </div>
                     </div>
-                </div>
+
+                    <div className="flex items-center gap-3">
+                        <div className={`relative ${isMyTurn ? 'ring-4 ring-gold-500/50 rounded-full' : ''}`}>
+                            <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
+                            {isMyTurn && phase === 'rolling' && (
+                                <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
+                            )}
+                        </div>
+                        <div className="text-gold-200 font-bold text-sm">You</div>
+                    </div>
+                </motion.div>
             </div>
 
-            <motion.div 
-                className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
-                onPanEnd={handleSwipe}
-                onTouchEnd={(e: React.TouchEvent) => {
-                    // Simple swipe logic for touch
-                    if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
-                       roll();
-                    }
-                }}
-            >
-                <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
-                    {isMyTurn && phase === 'waiting' && !hasRolledServer && (
-                        <motion.div 
-                            initial={{ opacity: 0, y: 10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="absolute -top-8 left-1/2 -translate-x-1/2 text-gold-400 text-xs font-bold flex flex-col items-center gap-1 animate-bounce"
+            {/* --- CONTROLS --- */}
+            <div className="w-full max-w-md pb-6 relative z-20 h-24 flex items-end justify-center">
+                <AnimatePresence mode="wait">
+                    {phase === 'waiting' && isMyTurn && !hasRolledServer ? (
+                        <motion.button
+                            key="roll"
+                            initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
+                            onClick={roll}
+                            className="w-full py-4 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black text-xl rounded-2xl shadow-[0_0_40px_rgba(251,191,36,0.4)] transition-all transform active:scale-95 flex items-center justify-center gap-3 border-t border-white/20"
                         >
-                            <Hand className="rotate-180" size={16} />
-                            SWIPE UP TO ROLL
+                            <Box size={24} strokeWidth={3} /> ROLL DICE ({timeLeft}s)
+                        </motion.button>
+                    ) : phase === 'scored' && !isP2P ? (
+                        <motion.button
+                            key="next"
+                            initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
+                            onClick={nextRoundLocal}
+                            className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black text-xl rounded-2xl shadow-lg transition-all transform active:scale-95 flex items-center justify-center gap-3"
+                        >
+                            {scores.me >= 3 || scores.opp >= 3 ? 'FINISH MATCH' : 'NEXT ROUND'} <ArrowLeft className="rotate-180" strokeWidth={3} />
+                        </motion.button>
+                    ) : (
+                        <motion.div
+                            key="status"
+                            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            className="w-full py-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-center gap-2 text-slate-400 font-bold backdrop-blur-sm"
+                        >
+                            {phase === 'rolling' ? <RefreshCw className="animate-spin" size={20} /> : <Clock className="animate-pulse" size={20} />}
+                            {phase === 'rolling' ? 'Rolling...' :
+                                hasRolledServer ? 'Waiting for result...' :
+                                    isP2P && phase === 'scored' ? 'Starting Next Round...' :
+                                        `Waiting for ${opponentName}...`}
                         </motion.div>
                     )}
+                </AnimatePresence>
+            </div>
 
-                    <div className="flex justify-center gap-6">
-                        <Die2D value={myDice[0]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
-                        <Die2D value={myDice[1]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
+            {/* ROUND RESULT */}
+            <AnimatePresence>
+                {phase === 'scored' && roundWinner && (
+                    <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+                        <motion.div
+                            initial={{ scale: 0.5, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 1.5, opacity: 0 }}
+                            className={`px-8 py-4 rounded-3xl border-4 shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 ${roundWinner === 'me'
+                                    ? 'bg-green-500/80 border-green-400 text-white'
+                                    : roundWinner === 'opp'
+                                        ? 'bg-red-600/80 border-red-500 text-white'
+                                        : 'bg-slate-600/80 border-slate-400 text-white'
+                                }`}
+                        >
+                            {roundWinner === 'me' && <CheckCircle2 size={48} className="drop-shadow-md" />}
+                            {roundWinner === 'opp' && <XCircle size={48} className="drop-shadow-md" />}
+                            {roundWinner === 'tie' && <RefreshCw size={48} className="drop-shadow-md" />}
+
+                            <h2 className="text-3xl font-black uppercase italic tracking-tighter drop-shadow-lg">
+                                {roundWinner === 'me' ? "Round Won!" : roundWinner === 'opp' ? "Round Lost" : "Draw"}
+                            </h2>
+                            {roundWinner === 'me' && <p className="text-sm font-bold opacity-90">+1 Point</p>}
+                        </motion.div>
                     </div>
-
-                    <div className="absolute -right-4 top-1/2 -translate-y-1/2">
-                        {/* Show sum if I have rolled (even if waiting for opponent) */}
-                        {(hasRolledServer || (!isP2P && phase === 'scored')) && (
-                            <motion.div 
-                                initial={{ scale: 0 }} animate={{ scale: 1 }}
-                                className="w-12 h-12 rounded-full bg-royal-800 border-2 border-gold-500 flex items-center justify-center text-white font-black text-xl shadow-lg"
-                            >
-                                {myDice[0] + myDice[1]}
-                            </motion.div>
-                        )}
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-3">
-                    <div className={`relative ${isMyTurn ? 'ring-4 ring-gold-500/50 rounded-full' : ''}`}>
-                        <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
-                        {isMyTurn && phase === 'rolling' && (
-                            <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
-                        )}
-                    </div>
-                    <div className="text-gold-200 font-bold text-sm">You</div>
-                </div>
-            </motion.div>
-        </div>
-
-        {/* --- CONTROLS --- */}
-        <div className="w-full max-w-md pb-6 relative z-20 h-24 flex items-end justify-center">
-            <AnimatePresence mode="wait">
-                {phase === 'waiting' && isMyTurn && !hasRolledServer ? (
-                    <motion.button 
-                        key="roll"
-                        initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-                        onClick={roll}
-                        className="w-full py-4 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black text-xl rounded-2xl shadow-[0_0_40px_rgba(251,191,36,0.4)] transition-all transform active:scale-95 flex items-center justify-center gap-3 border-t border-white/20"
-                    >
-                        <Box size={24} strokeWidth={3} /> ROLL DICE ({timeLeft}s)
-                    </motion.button>
-                ) : phase === 'scored' && !isP2P ? (
-                    <motion.button 
-                        key="next"
-                        initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-                        onClick={nextRoundLocal}
-                        className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black text-xl rounded-2xl shadow-lg transition-all transform active:scale-95 flex items-center justify-center gap-3"
-                    >
-                        {scores.me >= 3 || scores.opp >= 3 ? 'FINISH MATCH' : 'NEXT ROUND'} <ArrowLeft className="rotate-180" strokeWidth={3} />
-                    </motion.button>
-                ) : (
-                    <motion.div 
-                        key="status"
-                        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                        className="w-full py-4 bg-white/5 rounded-2xl border border-white/10 flex items-center justify-center gap-2 text-slate-400 font-bold backdrop-blur-sm"
-                    >
-                        {phase === 'rolling' ? <RefreshCw className="animate-spin" size={20} /> : <Clock className="animate-pulse" size={20} />}
-                        {phase === 'rolling' ? 'Rolling...' : 
-                         hasRolledServer ? 'Waiting for result...' :
-                         isP2P && phase === 'scored' ? 'Starting Next Round...' : 
-                         `Waiting for ${opponentName}...`}
-                    </motion.div>
                 )}
             </AnimatePresence>
         </div>
-
-        {/* ROUND RESULT */}
-        <AnimatePresence>
-            {phase === 'scored' && roundWinner && (
-                <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
-                    <motion.div
-                        initial={{ scale: 0.5, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        exit={{ scale: 1.5, opacity: 0 }}
-                        className={`px-8 py-4 rounded-3xl border-4 shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 ${
-                            roundWinner === 'me' 
-                            ? 'bg-green-500/80 border-green-400 text-white' 
-                            : roundWinner === 'opp' 
-                            ? 'bg-red-600/80 border-red-500 text-white'
-                            : 'bg-slate-600/80 border-slate-400 text-white'
-                        }`}
-                    >
-                        {roundWinner === 'me' && <CheckCircle2 size={48} className="drop-shadow-md" />}
-                        {roundWinner === 'opp' && <XCircle size={48} className="drop-shadow-md" />}
-                        {roundWinner === 'tie' && <RefreshCw size={48} className="drop-shadow-md" />}
-                        
-                        <h2 className="text-3xl font-black uppercase italic tracking-tighter drop-shadow-lg">
-                            {roundWinner === 'me' ? "Round Won!" : roundWinner === 'opp' ? "Round Lost" : "Draw"}
-                        </h2>
-                        {roundWinner === 'me' && <p className="text-sm font-bold opacity-90">+1 Point</p>}
-                    </motion.div>
-                </div>
-            )}
-        </AnimatePresence>
-    </div>
-  );
+    );
 };

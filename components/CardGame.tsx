@@ -93,7 +93,9 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
             if (socketGame.turn) setTurn(socketGame.turn === user.id ? 'me' : 'opp');
             if (socketGame.gameState && socketGame.gameState.deck) setDeckSize(socketGame.gameState.deck.length);
 
-            if (socketGame.winner) {
+            // In P2P mode, SocketContext's 'game_over' handler dispatches the result.
+            // Calling onGameEnd here too would cause a double result dispatch.
+            if (socketGame.winner && !isP2P) {
                 onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
             }
         }

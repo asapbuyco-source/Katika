@@ -111,10 +111,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
         case 'RESET_GAME_STATE':
             return {
                 ...state,
+                currentView: 'lobby',
                 gameResult: null,
                 rematchStatus: 'idle',
                 opponentDisconnected: false,
                 activeTable: null,
+                matchmakingConfig: null,
             };
         default:
             return state;

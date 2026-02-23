@@ -170,9 +170,9 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
     }, [socket, state.user, dispatch, viewRef]);
 
-    // ── Rejoin on reconnect ────────────────────────────────────────────────────
+    // ── Rejoin on reconnect (only when there's an active game to rejoin) ──────
     useEffect(() => {
-        if (socket && isConnected && state.user) {
+        if (socket && isConnected && state.user && socketGameRef.current) {
             socket.emit('rejoin_game', { userProfile: state.user });
         }
     }, [socket, isConnected, state.user]);

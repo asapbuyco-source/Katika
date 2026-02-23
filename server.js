@@ -502,8 +502,13 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // TIMEOUT_CLAIM (the caller claiming the timeout is the winner)
+        // TIMEOUT_CLAIM (the caller claiming the timeout — they must NOT be the current turn holder)
         if (action.type === 'TIMEOUT_CLAIM') {
+            // Validate: only the player waiting (not the current turn holder) can claim a timeout
+            if (room.turn === userId) {
+                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim timeout on their own turn.`);
+                return;
+            }
             endGame(roomId, userId, 'Time Expired (Claimed)');
             return;
         }
@@ -587,7 +592,7 @@ io.on('connection', (socket) => {
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
                             // Alternate who rolls first each round
-                            room.turn = p1;
+                            room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
                             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                         }
                     }, 3000);

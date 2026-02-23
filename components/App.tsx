@@ -302,6 +302,7 @@ const AppContent = () => {
         return () => window.removeEventListener('beforeunload', handler);
     }, [currentView, socketGame, gameResult]);
 
+
     // ── Matchmaking ───────────────────────────────────────────────────────────
     const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
         if (!user) return;
@@ -373,6 +374,14 @@ const AppContent = () => {
 
     const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
 
+    // ── Safety guard: if view is 'game' but no table exists (e.g. after page
+    // refresh or stale state), redirect to lobby immediately ───────────────
+    useEffect(() => {
+        if (currentView === 'game' && !activeGameTable && !gameResult) {
+            dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+        }
+    }, [currentView, activeGameTable, gameResult, dispatch]);
+
     const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit') => {
         let tournamentPot = 0;
         if (activeGameTable?.tournamentMatchId && user) {
@@ -400,12 +409,15 @@ const AppContent = () => {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
         const isTournament = !!activeGameTable?.tournamentMatchId;
+        // Navigate FIRST to prevent blank screen (game view with no table)
+        dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
+        // Then clear all game state
         setSocketGame(null);
         dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
         dispatch({ type: 'SET_GAME_RESULT', payload: null });
         dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
         dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
-        dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
+        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
     }, [socket, socketGame, activeGameTable, setSocketGame, dispatch]);
 
     const handleRematchRequest = useCallback(() => {
