@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 8080;
 const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
-const FRONTEND_ORIGIN = process.env.FRONTEND_URL || '*';
+const FRONTEND_ORIGIN = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
 
 const app = express();
 
