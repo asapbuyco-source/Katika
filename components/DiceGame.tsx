@@ -465,8 +465,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                     animate={{ scale: 1, opacity: 1 }}
                     key={isMyTurn ? 'my-turn' : 'opp-turn'}
                     className={`px-8 py-2 rounded-full font-black text-sm uppercase tracking-widest shadow-lg transition-all duration-300 ${isMyTurn
-                            ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20'
-                            : 'bg-royal-800 text-slate-400 border border-white/10'
+                        ? 'bg-gold-500 text-royal-950 scale-110 shadow-gold-500/20'
+                        : 'bg-royal-800 text-slate-400 border border-white/10'
                         }`}
                 >
                     {isMyTurn
@@ -511,9 +511,15 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 <motion.div
                     className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                     onPanEnd={handleSwipe}
+                    onTouchStart={(e: React.TouchEvent) => {
+                        (window as any).diceTouchStart = e.touches[0].clientY;
+                    }}
                     onTouchEnd={(e: React.TouchEvent) => {
-                        // Simple swipe logic for touch
-                        if (isMyTurn && phase === 'waiting' && !hasRolledServer) {
+                        const startY = (window as any).diceTouchStart;
+                        const endY = e.changedTouches[0].clientY;
+                        const isSwipeUp = startY && (startY - endY > 50); // 50px threshold for swipe up
+
+                        if (isMyTurn && phase === 'waiting' && !hasRolledServer && isSwipeUp) {
                             roll();
                         }
                     }}
@@ -606,10 +612,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                             animate={{ scale: 1, opacity: 1 }}
                             exit={{ scale: 1.5, opacity: 0 }}
                             className={`px-8 py-4 rounded-3xl border-4 shadow-2xl backdrop-blur-md flex flex-col items-center gap-2 ${roundWinner === 'me'
-                                    ? 'bg-green-500/80 border-green-400 text-white'
-                                    : roundWinner === 'opp'
-                                        ? 'bg-red-600/80 border-red-500 text-white'
-                                        : 'bg-slate-600/80 border-slate-400 text-white'
+                                ? 'bg-green-500/80 border-green-400 text-white'
+                                : roundWinner === 'opp'
+                                    ? 'bg-red-600/80 border-red-500 text-white'
+                                    : 'bg-slate-600/80 border-slate-400 text-white'
                                 }`}
                         >
                             {roundWinner === 'me' && <CheckCircle2 size={48} className="drop-shadow-md" />}

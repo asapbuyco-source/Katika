@@ -180,7 +180,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (socketGame.gameState && socketGame.gameState.turn) {
                 setTurn(socketGame.gameState.turn === user.id ? 'me' : 'opponent');
             }
-            if (socketGame.winner) {
+            if (socketGame.winner && !isP2P) {
                 setIsGameOver(true);
                 if (socketGame.winner === user.id) onGameEnd('win');
                 else onGameEnd('loss');
@@ -429,7 +429,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (oppPieces.length === 0 || oppMoves.length === 0) {
             winner = turn === 'me' ? user.id : 'bot';
             setIsGameOver(true);
-            onGameEnd(winner === user.id ? 'win' : 'loss');
+            if (!isP2P) onGameEnd(winner === user.id ? 'win' : 'loss');
         }
 
         if (isP2P && socket && socketGame) {

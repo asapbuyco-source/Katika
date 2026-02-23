@@ -172,10 +172,10 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
     // ── Rejoin on reconnect (only when there's an active game to rejoin) ──────
     useEffect(() => {
-        if (socket && isConnected && state.user && socketGameRef.current) {
+        if (socket && isConnected && state.user && socketGameRef.current && viewRef.current === 'game') {
             socket.emit('rejoin_game', { userProfile: state.user });
         }
-    }, [socket, isConnected, state.user]);
+    }, [socket, isConnected, state.user, viewRef]);
 
     // ── Auto-bypass if connection takes too long ───────────────────────────────
     useEffect(() => {

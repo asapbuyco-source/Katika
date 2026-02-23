@@ -676,6 +676,20 @@ io.on('connection', (socket) => {
                 if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
                 room.gameState.pieces = action.pieces;
                 room.gameState.diceRolled = false;
+
+                // Winner detection: 4 pieces at finishing step (56)
+                const redWin = action.pieces.filter(p => p.color === 'Red' && p.step === 56).length === 4;
+                const yellowWin = action.pieces.filter(p => p.color === 'Yellow' && p.step === 56).length === 4;
+
+                if (redWin) {
+                    endGame(roomId, room.players[0], 'Ludo Victory');
+                    return;
+                }
+                if (yellowWin) {
+                    endGame(roomId, room.players[1], 'Ludo Victory');
+                    return;
+                }
+
                 if (!action.bonusTurn) {
                     room.turn = room.players.find(id => id !== userId);
                 }
