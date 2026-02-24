@@ -80,7 +80,7 @@ export interface Challenge {
 
 export interface Transaction {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'tournament_entry';
+  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'stake_loss' | 'tournament_entry';
   amount: number;
   date: string;
   status: 'completed' | 'pending' | 'failed';

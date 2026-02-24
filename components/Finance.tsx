@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, addUserTransaction } from '../services/firebase';
+import { getUserTransactions, creditDepositIdempotent } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -82,15 +82,13 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
 
                     if (!user.id.startsWith('guest-')) {
-                        await addUserTransaction(user.id, {
-                            type: 'deposit',
-                            amount: depositAmount, // Credit only the base amount
-                            status: 'completed',
-                            date: new Date().toISOString()
-                        });
+                        // Bug F4 fix: creditDepositIdempotent prevents double-crediting if the
+                        // polling fires multiple times before the first Firestore write completes.
+                        // It uses a set-once sentinel doc in processed_payments/{transId}.
+                        await creditDepositIdempotent(user.id, response.transId, depositAmount);
                     }
 
-                    // Pass the new balance so parent can update state immediately
+                    // Pass the credited balance so the parent updates the in-memory user state
                     const newBalance = user.balance + depositAmount;
                     onTopUp(newBalance);
                     setShowSuccess(true);

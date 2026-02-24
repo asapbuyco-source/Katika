@@ -21,7 +21,7 @@ export interface AppState {
 
     // Game End
     gameResult: {
-        result: 'win' | 'loss' | 'quit';
+        result: 'win' | 'loss' | 'quit' | 'draw';
         amount: number;
         financials?: any;
         tournamentPot?: number;

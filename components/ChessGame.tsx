@@ -261,7 +261,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 });
             }
 
-            if (socketGame.winner && !isP2P) {
+            // Bug B fix: condition was inverted — in P2P games (!isP2P === false)
+            // so the winner was NEVER declared through this path. Fixed to `isP2P`.
+            if (socketGame.winner && isP2P) {
                 setIsGameOver(true);
                 if (socketGame.winner === user.id) onGameEnd('win');
                 else onGameEnd('loss');
@@ -281,25 +283,33 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         return () => clearInterval(interval);
     }, [game, isGameOver]);
 
-    const checkGameOver = (currentGamState: Chess) => {
+    const checkGameOver = useCallback((currentGamState: Chess) => {
+        // Bug A fix: read from stateRef so this callback never captures a stale
+        // myColor / isP2P value (it is called from inside executeMove which has
+        // an empty dependency array).
+        const { myColor: currentColor, isP2P: currentIsP2P } = stateRef.current;
         if (currentGamState.isGameOver()) {
             setIsGameOver(true);
             if (currentGamState.isCheckmate()) {
                 const winnerColor = currentGamState.turn() === 'w' ? 'b' : 'w';
-                const isWinner = winnerColor === myColor;
+                const isWinner = winnerColor === currentColor;
                 playSFX(isWinner ? 'win' : 'loss');
-                if (!isP2P) onGameEnd(isWinner ? 'win' : 'loss');
+                if (!currentIsP2P) onGameEnd(isWinner ? 'win' : 'loss');
             } else {
-                if (!isP2P) onGameEnd('quit');
+                if (!currentIsP2P) onGameEnd('quit');
             }
         }
-    };
+    }, [onGameEnd]);
 
     // Stable Move Execution
     const executeMove = useCallback(async (from: Square, to: Square, promotion?: string) => {
-        const { game, isP2P, socket, socketGame, timeRemaining } = stateRef.current;
+        const { game: currentGame, isP2P, socket, socketGame, timeRemaining } = stateRef.current;
 
         try {
+            // Bug 4 fix: clone the game before mutating so the shared stateRef is
+            // never left in a partially-moved state if the move attempt throws.
+            const game = new Chess();
+            game.loadPgn(currentGame.pgn());
             const moveAttempt = { from, to, promotion: promotion || 'q' };
             const move = game.move(moveAttempt);
 
@@ -531,8 +541,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     initial={{ scale: 0.9 }}
                     animate={{ scale: 1 }}
                     className={`px-6 py-2 rounded-full font-bold text-sm uppercase tracking-widest shadow-lg border transition-colors duration-300 ${game.turn() === myColor
-                            ? 'bg-gold-500 text-royal-950 border-gold-400'
-                            : 'bg-royal-800 text-slate-400 border-white/10'
+                        ? 'bg-gold-500 text-royal-950 border-gold-400'
+                        : 'bg-royal-800 text-slate-400 border-white/10'
                         }`}
                 >
                     {game.turn() === myColor ? "Your Turn" : "Opponent's Turn"}

@@ -138,24 +138,41 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                     .catch(e => console.error('Tournament result report failed:', e));
             }
 
+            const stake = currentGame?.stake ?? 0;
+            const isRealUser = state.user && !state.user.id.startsWith('guest-');
+
+            // Bug F1 complete fix: Debit stake from BOTH players at game end.
+            // Stakes are not held/escrowed at match start, so we settle here.
+            // Only runs when there is a decisive winner (draws skip this — both keep stakes).
+            if (winner && stake > 0 && isRealUser) {
+                addUserTransaction(state.user!.id, {
+                    type: 'stake_loss',
+                    amount: -stake,
+                    status: 'completed',
+                    date: new Date().toISOString()
+                }).catch(e => console.error('[SocketContext] Stake debit failed:', e));
+            }
+
             if (state.user && winner === state.user.id) {
                 const winnings = financials?.winnings ?? 0;
-                // Bug D fix: Write payout to Firebase immediately on game_over, not waiting for
-                // the overlay 'Continue' click. This prevents fund loss on disconnect/refresh.
-                if (winnings > 0 && !state.user.id.startsWith('guest-') && currentGame?.stake) {
+                // Credit winnings immediately on game_over (Bug D fix) so funds aren't lost on disconnect.
+                if (winnings > 0 && isRealUser) {
                     addUserTransaction(state.user.id, {
                         type: 'winnings',
                         amount: winnings,
                         status: 'completed',
                         date: new Date().toISOString()
-                    }).catch(e => console.error('[SocketContext] Failed to record winnings:', e));
+                    }).catch(e => console.error('[SocketContext] Winnings credit failed:', e));
                 }
                 dispatch({
                     type: 'SET_GAME_RESULT',
                     payload: { result: 'win', amount: winnings, financials }
                 });
-            } else {
+            } else if (winner) {
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'loss', amount: 0 } });
+            } else {
+                // Draw — no winner, no stake deduction (guard above skips it)
+                dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'draw', amount: 0 } });
             }
         };
 

@@ -1,4 +1,5 @@
 import express from 'express';
+import { Chess } from 'chess.js';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -610,11 +611,60 @@ io.on('connection', (socket) => {
             if (room.turn !== userId && room.gameType !== 'Cards') return;
 
             if (action.newState) {
+                // --- Bug C fix: Server-side chess move validation ---
+                // Prevents clients from sending forged PGN/FEN to cheat.
+                if (room.gameType === 'Chess' && action.newState.pgn !== undefined) {
+                    try {
+                        // Reconstruct the authoritative server-side board state
+                        const serverGame = new Chess();
+                        if (room.gameState.pgn) serverGame.loadPgn(room.gameState.pgn);
+                        const serverMoveCount = serverGame.history().length;
+
+                        // Reconstruct the client's proposed new state
+                        const clientGame = new Chess();
+                        clientGame.loadPgn(action.newState.pgn);
+                        const clientMoveCount = clientGame.history().length;
+
+                        // Rule 1: The proposed history must have exactly one more move
+                        if (clientMoveCount !== serverMoveCount + 1) {
+                            console.warn(`[Chess][${roomId}] Invalid PGN advance from ${userId}: expected ${serverMoveCount + 1} moves, got ${clientMoveCount}. Rejected.`);
+                            return;
+                        }
+
+                        // Rule 2: The resulting FEN from the server-reconstructed game
+                        // must match what the client claims
+                        if (action.newState.fen && clientGame.fen() !== action.newState.fen) {
+                            console.warn(`[Chess][${roomId}] FEN mismatch from ${userId}. Rejected.`);
+                            return;
+                        }
+
+                        // Valid — check for server-side game over
+                        if (clientGame.isCheckmate()) {
+                            // The player whose turn it is AFTER the move is the one in checkmate (loser).
+                            // The winner is the one who just moved (= userId).
+                            endGame(roomId, userId, 'Checkmate');
+                            return;
+                        }
+                        if (clientGame.isGameOver()) {
+                            // Draw / stalemate — no winner, just end the game
+                            // For now, treat draws as a loss for both (no payout edge case)
+                            endGame(roomId, null, 'Draw');
+                            return;
+                        }
+                    } catch (e) {
+                        console.warn(`[Chess][${roomId}] PGN validation error from ${userId}:`, e.message);
+                        return;
+                    }
+                }
+                // --- End chess validation ---
+
                 room.gameState = { ...room.gameState, ...action.newState };
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
                 if (action.newState.turn) room.turn = action.newState.turn;
 
-                if (action.newState.winner) {
+                // action.newState.winner is now only a fallback (non-Chess games or
+                // legacy clients); Chess games end via the validated path above.
+                if (action.newState.winner && room.gameType !== 'Chess') {
                     endGame(roomId, action.newState.winner, 'Checkmate / Win Condition');
                     return;
                 }

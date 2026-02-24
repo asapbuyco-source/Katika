@@ -202,6 +202,10 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
         const sfDoc = await tx.get(userRef);
         if (!sfDoc.exists()) throw new Error(`User ${userId} not found`);
         const newBalance = (sfDoc.data().balance || 0) + transaction.amount;
+        // Bug F3 lightweight fix: prevent the balance from going below zero.
+        // This atomically blocks losing a stake you can't afford, even if the
+        // client bypasses the Lobby balance check.
+        if (newBalance < 0) throw new Error('INSUFFICIENT_FUNDS');
         tx.update(userRef, { balance: newBalance });
         const txRef = doc(collection(db, "users", userId, "transactions"));
         tx.set(txRef, {
@@ -210,6 +214,64 @@ export const addUserTransaction = async (userId: string, transaction: Omit<Trans
             date: new Date().toLocaleString()
         });
     });
+};
+
+/**
+ * Bug F4 fix: Idempotent deposit crediting.
+ * Uses a `processed_payments/{transId}` sentinel document inside a Firestore
+ * transaction to guarantee a given Fapshi transId is only credited ONCE,
+ * even if the client polling fires multiple times before the first write completes.
+ *
+ * @returns true if the deposit was newly credited, false if already processed (no-op duplicate).
+ * @throws if Firestore fails for a reason other than a duplicate.
+ */
+export const creditDepositIdempotent = async (
+    userId: string,
+    transId: string,
+    amount: number
+): Promise<boolean> => {
+    const paymentRef = doc(db, 'processed_payments', transId);
+    const userRef = doc(db, 'users', userId);
+    try {
+        await runTransaction(db, async (tx) => {
+            // --- Guard: abort if this transId was already processed ---
+            const paymentSnap = await tx.get(paymentRef);
+            if (paymentSnap.exists()) throw new Error('ALREADY_PROCESSED');
+
+            const userSnap = await tx.get(userRef);
+            if (!userSnap.exists()) throw new Error(`User ${userId} not found`);
+
+            const newBalance = (userSnap.data().balance || 0) + amount;
+
+            // Update user balance
+            tx.update(userRef, { balance: newBalance });
+
+            // Write idempotency sentinel (set-once; prevents all future duplicates)
+            tx.set(paymentRef, {
+                userId,
+                amount,
+                processedAt: serverTimestamp()
+            });
+
+            // Write transaction record
+            const txRef = doc(collection(db, 'users', userId, 'transactions'));
+            tx.set(txRef, {
+                type: 'deposit',
+                amount,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: serverTimestamp(),
+                transId
+            });
+        });
+        return true;
+    } catch (e: any) {
+        if (e?.message === 'ALREADY_PROCESSED') {
+            // Duplicate poll — silently succeed (money was already credited)
+            return false;
+        }
+        throw e;
+    }
 };
 
 export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
