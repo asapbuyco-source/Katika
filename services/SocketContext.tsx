@@ -48,6 +48,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const socketGameRef = useRef<SocketGameState | null>(null);
     socketGameRef.current = socketGame;
 
+    // Bug C3 fix: keep a ref to state.user so handlers always access the latest user
+    // without needing to re-register every time the balance changes.
+    const userRef = useRef(state.user);
+    userRef.current = state.user;
+
     // ── Initialize Socket ──────────────────────────────────────────────────────
     useEffect(() => {
         const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
@@ -121,7 +126,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
 
         const handleRematchStatus = ({ requestorId, status }: { requestorId: string; status: string }) => {
-            if (status === 'requested' && requestorId !== state.user?.id) {
+            if (status === 'requested' && requestorId !== userRef.current?.id) {
                 dispatch({ type: 'SET_REMATCH_STATUS', payload: 'opponent_requested' });
                 playSFX('notification');
             } else if (status === 'declined') {
@@ -132,20 +137,21 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const handleGameOver = ({ winner, financials }: { winner: string; financials?: any }) => {
             dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
             const currentGame = socketGameRef.current;
+            const currentUser = userRef.current; // always fresh, never stale
 
-            if (state.user && winner === state.user.id && currentGame?.tournamentMatchId) {
+            if (currentUser && winner === currentUser.id && currentGame?.tournamentMatchId) {
                 reportTournamentMatchResult(currentGame.tournamentMatchId, winner)
                     .catch(e => console.error('Tournament result report failed:', e));
             }
 
             const stake = currentGame?.stake ?? 0;
-            const isRealUser = state.user && !state.user.id.startsWith('guest-');
+            const isRealUser = currentUser && !currentUser.id.startsWith('guest-');
 
             // Bug F1 complete fix: Debit stake from BOTH players at game end.
             // Stakes are not held/escrowed at match start, so we settle here.
             // Only runs when there is a decisive winner (draws skip this — both keep stakes).
             if (winner && stake > 0 && isRealUser) {
-                addUserTransaction(state.user!.id, {
+                addUserTransaction(currentUser!.id, {
                     type: 'stake_loss',
                     amount: -stake,
                     status: 'completed',
@@ -153,11 +159,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 }).catch(e => console.error('[SocketContext] Stake debit failed:', e));
             }
 
-            if (state.user && winner === state.user.id) {
+            if (currentUser && winner === currentUser.id) {
                 const winnings = financials?.winnings ?? 0;
                 // Credit winnings immediately on game_over (Bug D fix) so funds aren't lost on disconnect.
                 if (winnings > 0 && isRealUser) {
-                    addUserTransaction(state.user.id, {
+                    addUserTransaction(currentUser.id, {
                         type: 'winnings',
                         amount: winnings,
                         status: 'completed',
@@ -196,7 +202,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             socket.off('rematch_status', handleRematchStatus);
             socket.off('game_over', handleGameOver);
         };
-    }, [socket, state.user, dispatch, viewRef]);
+    }, [socket, dispatch, viewRef]); // state.user removed — userRef.current is used instead (Bug C3 fix)
 
     // ── Rejoin on reconnect (only when there's an active game to rejoin) ──────
     useEffect(() => {

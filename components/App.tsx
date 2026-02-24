@@ -224,16 +224,9 @@ const AppContent = () => {
     }, [currentView, dispatch]);
 
     // ─── EFFECTS ────────────────────────────────────────────────────────────────
-    useEffect(() => {
-        const handleEsc = (e: KeyboardEvent) => {
-            if (e.key === 'Escape') {
-                dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
-                dispatch({ type: 'SET_GAME_RESULT', payload: null });
-            }
-        };
-        window.addEventListener('keydown', handleEsc);
-        return () => window.removeEventListener('keydown', handleEsc);
-    }, [dispatch]);
+    // Escape key handler removed (Bug M1 fix): it was clearing
+    // SET_GAME_RESULT without calling finalizeGameEnd, leaving the
+    // app stuck in 'game' view with no active game.
 
     // ── Auth listener ────────────────────────────────────────────────────────
     useEffect(() => {
@@ -389,7 +382,7 @@ const AppContent = () => {
         }
     }, [currentView, activeGameTable, gameResult, dispatch]);
 
-    const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit') => {
+    const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit' | 'draw') => {
         let tournamentPot = 0;
         if (activeGameTable?.tournamentMatchId && user) {
             try {

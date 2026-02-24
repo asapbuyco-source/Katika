@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, creditDepositIdempotent } from '../services/firebase';
+import { getUserTransactions, creditDepositIdempotent, addUserTransaction } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -25,6 +25,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
     const [paymentLink, setPaymentLink] = useState<string | null>(null);
     const [transId, setTransId] = useState<string | null>(null);
     const [showSuccess, setShowSuccess] = useState(false);
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const pollIntervalRef = useRef<number | null>(null);
 
     // Real Data State
@@ -51,7 +52,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         if (!amount) return;
         const depositAmount = parseInt(amount);
         if (depositAmount < 100) {
-            alert("Minimum deposit is 100 FCFA");
+            setErrorMsg('Minimum deposit is 100 FCFA.');
             return;
         }
 
@@ -60,6 +61,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         const totalToPay = depositAmount + fee;
 
         setIsLoading(true);
+        setErrorMsg(null);
 
         const response = await initiateFapshiPayment(totalToPay, user);
 
@@ -88,9 +90,9 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                         await creditDepositIdempotent(user.id, response.transId, depositAmount);
                     }
 
-                    // Pass the credited balance so the parent updates the in-memory user state
-                    const newBalance = user.balance + depositAmount;
-                    onTopUp(newBalance);
+                    // Let the live subscribeToUser listener in App.tsx pick up the real Firestore balance.
+                    // Passing no argument avoids using a stale closure value (Bug C2 fix).
+                    onTopUp();
                     setShowSuccess(true);
                     setPaymentLink(null);
                     setTransId(null);
@@ -103,7 +105,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                     setTimeout(() => setShowSuccess(false), 3000);
                 } else if (status === 'FAILED' || status === 'EXPIRED') {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-                    alert("Payment Failed or Expired. Please try again.");
+                    setErrorMsg('Payment failed or expired. Please try again.');
                     setPaymentLink(null);
                     setTransId(null);
                 }
@@ -115,32 +117,31 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
             }, 300000);
 
         } else {
-            alert("Failed to initiate payment. Please check your connection.");
+            setErrorMsg('Failed to initiate payment. Please check your connection.');
         }
     };
 
     const handleWithdraw = async () => {
-        if (!amount || !phone) return;
-        if (Number(amount) > user.balance) return;
+        if (!amount || !phone) { setErrorMsg('Please fill in the amount and phone number.'); return; }
+        if (Number(amount) > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); return; }
 
         setIsLoading(true);
+        setErrorMsg(null);
         cancelPayment();
 
-        // Withdrawals are usually manual or require a different API call
-        // For now, we record the request
         setTimeout(async () => {
             setIsLoading(false);
             if (!user.id.startsWith('guest-')) {
                 await addUserTransaction(user.id, {
                     type: 'withdrawal',
                     amount: -Number(amount),
-                    status: 'pending', // Pending manual review or auto-process
+                    status: 'pending',
                     date: new Date().toISOString()
                 });
             }
-            alert('Withdrawal request submitted for ' + phone);
+            setShowSuccess(true);
+            setTimeout(() => setShowSuccess(false), 3000);
             setAmount('');
-            // Refresh transactions
             const history = await getUserTransactions(user.id);
             setTransactions(history);
         }, 1500);
@@ -170,7 +171,23 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                         className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-royal-950 px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
                     >
                         <CheckCircle size={20} />
-                        Deposit Successful! Balance Updated.
+                        Request Submitted! Balance Updated.
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
+            {/* ERROR BANNER (L2 fix: replaces native alert()) */}
+            <AnimatePresence>
+                {errorMsg && (
+                    <motion.div
+                        initial={{ y: -50, opacity: 0 }}
+                        animate={{ y: 20, opacity: 1 }}
+                        exit={{ y: -50, opacity: 0 }}
+                        className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-red-500 text-white px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2 cursor-pointer"
+                        onClick={() => setErrorMsg(null)}
+                    >
+                        <Info size={20} />
+                        {errorMsg}
                     </motion.div>
                 )}
             </AnimatePresence>

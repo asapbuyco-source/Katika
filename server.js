@@ -202,7 +202,7 @@ const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
 
 // --- HELPER FUNCTIONS ---
-const generateRoomId = () => `room_${Math.random().toString(36).substr(2, 9)}`;
+const generateRoomId = () => `room_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
 const calculatePayouts = (stake) => {
     const totalPot = stake * 2;
@@ -269,7 +269,8 @@ const createInitialGameState = (gameType, p1, p2) => {
             return {
                 ...common,
                 board: Array(9).fill(null),
-                status: 'active'
+                status: 'active',
+                drawCount: 0  // M5 fix: track consecutive draws to prevent infinite staked loops
             };
         case 'Ludo':
             const pieces = [];
@@ -688,6 +689,12 @@ io.on('connection', (socket) => {
                         endGame(roomId, winner, 'Line Complete');
                         return;
                     } else if (!board.includes(null)) {
+                        // Bug M5 fix: track consecutive draws; end the match after 3
+                        room.gameState.drawCount = (room.gameState.drawCount || 0) + 1;
+                        if (room.gameState.drawCount >= 3) {
+                            endGame(roomId, null, 'Three Consecutive Draws');
+                            return;
+                        }
                         io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
                         setTimeout(() => {
                             room.gameState.board = Array(9).fill(null);
@@ -702,11 +709,15 @@ io.on('connection', (socket) => {
             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
         }
         else if (room.gameType === 'TicTacToe' && action.type === 'DRAW_ROUND') {
+            room.gameState.drawCount = (room.gameState.drawCount || 0) + 1;
+            if (room.gameState.drawCount >= 3) {
+                endGame(roomId, null, 'Three Consecutive Draws');
+                return;
+            }
             io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
             setTimeout(() => {
                 room.gameState.board = Array(9).fill(null);
                 room.status = 'active';
-                // Alternate who goes first after a draw
                 room.turn = room.players.find(id => id !== room.turn);
                 io.to(roomId).emit('game_update', { ...room, roomId });
             }, 3000);
@@ -725,6 +736,23 @@ io.on('connection', (socket) => {
                 if (room.turn !== userId) return;
                 // Basic validation: ensure no piece count tampering
                 if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
+
+                // Bug M3 fix: validate that no piece moved more steps than the dice roll
+                const diceVal = room.gameState.diceValue || 0;
+                const prevPieces = room.gameState.pieces;
+                const movedTooFar = action.pieces.some((p, i) => {
+                    const prev = prevPieces[i];
+                    // Only validate pieces the current player owns
+                    if (p.owner !== userId) return false;
+                    const stepDiff = p.step - prev.step;
+                    // Allow moving backward only to home (-1), or forward by at most diceVal
+                    return stepDiff > diceVal;
+                });
+                if (movedTooFar) {
+                    console.warn(`[Ludo][${roomId}] Piece moved further than dice value (${diceVal}) from ${userId}. Rejected.`);
+                    return;
+                }
+
                 room.gameState.pieces = action.pieces;
                 room.gameState.diceRolled = false;
 
@@ -757,6 +785,18 @@ io.on('connection', (socket) => {
                 const cardIndex = hand.findIndex(c => c.id === action.card.id);
 
                 if (cardIndex > -1) {
+                    // Bug M6 fix: validate card legality before accepting the play
+                    const topCard = room.gameState.discardPile[room.gameState.discardPile.length - 1];
+                    const activeSuit = room.gameState.activeSuit;
+                    const isPlayable = action.card.suit === activeSuit
+                        || action.card.rank === topCard?.rank
+                        || action.card.rank === '8'; // 8s are wild
+                    if (!isPlayable) {
+                        console.warn(`[Cards][${roomId}] Illegal play by ${userId}: ${action.card.id} on ${activeSuit}/${topCard?.rank}. Rejected.`);
+                        socket.emit('invalid_move', { message: 'Card does not match active suit or rank' });
+                        return;
+                    }
+
                     // Remove from hand
                     hand.splice(cardIndex, 1);
                     // Add to discard
