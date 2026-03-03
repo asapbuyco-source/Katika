@@ -6,6 +6,8 @@ import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
+import admin from 'firebase-admin';
+
 
 // --- CONFIGURATION & VALIDATION ---
 const requiredEnv = ['FAPSHI_API_KEY', 'FAPSHI_USER_TOKEN'];
@@ -22,6 +24,31 @@ const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
 const FRONTEND_ORIGIN = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
+
+// --- FIREBASE ADMIN INITIALIZATION ---
+try {
+    const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
+    if (serviceAccountStr) {
+        let serviceAccount;
+        try {
+            serviceAccount = JSON.parse(serviceAccountStr);
+        } catch (e) {
+            // If it's not JSON, assume it's a file path
+            serviceAccount = serviceAccountStr;
+        }
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+        console.log("Firebase Admin initialized successfully.");
+    } else {
+        console.warn("WARNING: FIREBASE_SERVICE_ACCOUNT not set. Tournament logic will be limited.");
+    }
+} catch (e) {
+    console.error("Firebase Admin initialization error:", e);
+}
+
+const db = admin.apps.length > 0 ? admin.firestore() : null;
+
 
 const app = express();
 
@@ -98,35 +125,292 @@ app.post('/api/pay/initiate', async (req, res) => {
         if (!amount || typeof amount !== 'number' || amount <= 0 || !Number.isInteger(amount)) {
             return res.status(400).json({ error: 'Invalid amount. Must be a positive integer in FCFA.' });
         }
-        if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
-            return res.status(400).json({ error: 'Invalid userId.' });
-        }
-        // Enforce a sensible minimum (Fapshi minimum is 100 FCFA)
-        if (amount < 100) {
-            return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
-        }
-        // Enforce a maximum to prevent accidental large charges
-        if (amount > 1_000_000) {
-            return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
+    } catch (e) {
+        console.error('Payment initiation error:', e);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// --- TOURNAMENT OPERATIONS (SERVER-SIDE) ---
+app.post('/api/tournaments/register', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+
+    const { tournamentId, userId } = req.body;
+    if (!tournamentId || !userId) return res.status(400).json({ error: 'Missing tournamentId or userId' });
+
+    try {
+        const tRef = db.collection("tournaments").doc(tournamentId);
+        const userRef = db.collection("users").doc(userId);
+
+        const result = await db.runTransaction(async (transaction) => {
+            const tDoc = await transaction.get(tRef);
+            if (!tDoc.exists) throw new Error("Tournament does not exist");
+
+            const tData = tDoc.data();
+            if (tData.status !== 'registration') throw new Error("Tournament not in registration phase");
+            if (tData.participants.length >= tData.maxPlayers) throw new Error("Tournament full");
+            if (tData.participants.includes(userId)) throw new Error("Already registered");
+
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists) throw new Error("User not found");
+
+            const userData = userDoc.data();
+            if (userData.balance < tData.entryFee) throw new Error("Insufficient funds");
+
+            // Update user balance
+            transaction.update(userRef, { balance: userData.balance - tData.entryFee });
+
+            // Record transaction
+            const txRef = userRef.collection("transactions").doc();
+            transaction.set(txRef, {
+                type: 'tournament_entry',
+                amount: -tData.entryFee,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+
+            // Update tournament
+            if (tData.type === 'fixed') {
+                transaction.update(tRef, { participants: admin.firestore.FieldValue.arrayUnion(userId) });
+            } else {
+                const platformFee = Math.floor(tData.entryFee * 0.10);
+                const netContribution = tData.entryFee - platformFee;
+                transaction.update(tRef, {
+                    participants: admin.firestore.FieldValue.arrayUnion(userId),
+                    prizePool: (tData.prizePool || 0) + netContribution
+                });
+            }
+            return true;
+        });
+
+        res.json({ success: true });
+    } catch (e) {
+        console.error("Tournament registration failed:", e.message);
+        res.status(400).json({ error: e.message });
+    }
+});
+
+// Helper for starting tournament logic
+const startTournamentLogic = async (tournamentId) => {
+    if (!db) return;
+    const tRef = db.collection("tournaments").doc(tournamentId);
+
+    try {
+        const tDoc = await tRef.get();
+        if (!tDoc.exists) return;
+        const tData = tDoc.data();
+        if (tData.status !== 'registration') return;
+
+        console.log(`Starting tournament: ${tData.name} (${tournamentId})`);
+
+        const participants = [...tData.participants];
+        // Shuffle
+        for (let i = participants.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [participants[i], participants[j]] = [participants[j], participants[i]];
         }
 
-        const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
-        const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
-            method: 'POST',
-            headers: {
-                'apiuser': FAPSHI_USER_TOKEN,
-                'apikey': FAPSHI_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ amount, email, userId, redirectUrl })
-        });
-        const data = await response.json();
-        if (!response.ok) return res.status(response.status).json(data);
-        res.json(data);
+        const batch = db.batch();
+        const matchesRef = db.collection("tournament_matches");
+        let matchCount = 0;
+        const round = 1;
+
+        const playerProfiles = await Promise.all(participants.map(async (uid) => {
+            const uSnap = await db.collection('users').doc(uid).get();
+            return uSnap.exists ? uSnap.data() : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
+        }));
+
+        while (playerProfiles.length > 0) {
+            const p1 = playerProfiles.pop();
+            const p2 = playerProfiles.pop();
+
+            const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
+            const matchRef = matchesRef.doc(matchId);
+
+            const matchData = {
+                id: matchId,
+                tournamentId,
+                round,
+                matchIndex: matchCount,
+                player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
+                player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
+                winnerId: p2 ? null : p1?.id,
+                status: p2 ? 'scheduled' : 'completed',
+                startTime: tData.startTime,
+                nextMatchId: null
+            };
+
+            batch.set(matchRef, matchData);
+            matchCount++;
+        }
+
+        batch.update(tRef, { status: 'active', participants: participants });
+        await batch.commit();
+
+        // Initial bye check
+        await checkAndAdvanceTournamentLogic(tournamentId, 1);
     } catch (err) {
-        console.error('Fapshi initiate proxy error:', err);
-        res.status(500).json({ error: 'Payment initiation failed' });
+        console.error(`Error starting tournament ${tournamentId}:`, err);
     }
+};
+
+const checkAndAdvanceTournamentLogic = async (tournamentId, round) => {
+    if (!db) return;
+    const matchesSnap = await db.collection("tournament_matches")
+        .where("tournamentId", "==", tournamentId)
+        .where("round", "==", round)
+        .get();
+
+    const matches = matchesSnap.docs.map(d => d.data());
+    if (matches.length === 0 || !matches.every(m => m.status === 'completed')) return;
+
+    // Advance round logic (ported from firebase.ts)
+    // ... Simplified for scheduler safety
+    console.log(`Advancing tournament ${tournamentId} to next round from R${round}`);
+
+    matches.sort((a, b) => a.matchIndex - b.matchIndex);
+    const winners = matches.map(m => m.winnerId).filter(Boolean);
+
+    if (winners.length === 1 && matches.length === 1) {
+        // Final winner
+        await db.runTransaction(async (tx) => {
+            const tRef = db.collection("tournaments").doc(tournamentId);
+            const tDoc = await tx.get(tRef);
+            if (!tDoc.exists || tDoc.data().status === 'completed') return;
+
+            const tData = tDoc.data();
+            const winnerId = winners[0];
+            const userRef = db.collection("users").doc(winnerId);
+            const userDoc = await tx.get(userRef);
+
+            if (userDoc.exists) {
+                const prize = tData.prizePool || 0;
+                tx.update(userRef, { balance: (userDoc.data().balance || 0) + prize });
+                tx.set(userRef.collection("transactions").doc(), {
+                    type: 'winnings',
+                    amount: prize,
+                    status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    note: `Tournament Win: ${tData.name}`
+                });
+            }
+            tx.update(tRef, { status: 'completed', winnerId: winnerId });
+        });
+        return;
+    }
+
+    const batch = db.batch();
+    let nextMatchCount = 0;
+    for (let i = 0; i < winners.length; i += 2) {
+        const p1Id = winners[i];
+        const p2Id = winners[i + 1];
+
+        const p1Doc = await db.collection("users").doc(p1Id).get();
+        const p1 = p1Doc.exists ? p1Doc.data() : { id: p1Id, name: 'Unknown' };
+
+        let p2 = null;
+        if (p2Id) {
+            const p2Doc = await db.collection("users").doc(p2Id).get();
+            p2 = p2Doc.exists ? p2Doc.data() : { id: p2Id, name: 'Unknown' };
+        }
+
+        const newMatchId = `m-${tournamentId}-r${round + 1}-${nextMatchCount}`;
+        batch.set(db.collection("tournament_matches").doc(newMatchId), {
+            id: newMatchId,
+            tournamentId,
+            round: round + 1,
+            matchIndex: nextMatchCount,
+            player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier },
+            player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier } : null,
+            winnerId: p2Id ? null : p1Id,
+            status: p2Id ? 'scheduled' : 'completed',
+            startTime: new Date(Date.now() + 60000).toISOString()
+        });
+        nextMatchCount++;
+    }
+    await batch.commit();
+};
+
+// --- BACKGROUND SCHEDULER ---
+const startTournamentScheduler = () => {
+    if (!db) return;
+    console.log("Tournament scheduler started.");
+    setInterval(async () => {
+        try {
+            const now = new Date().toISOString();
+            const snapshot = await db.collection("tournaments")
+                .where("status", "==", "registration")
+                .where("startTime", "<=", now)
+                .get();
+
+            for (const doc of snapshot.docs) {
+                await startTournamentLogic(doc.id);
+            }
+
+            // Also check timeouts for active tournaments
+            const activeTourneys = await db.collection("tournaments").where("status", "==", "active").get();
+            for (const tDoc of activeTourneys.docs) {
+                // Simplified timeout check: port logic from firebase.ts checkTournamentTimeouts
+                const matches = await db.collection("tournament_matches")
+                    .where("tournamentId", "==", tDoc.id)
+                    .where("status", "==", "scheduled")
+                    .get();
+
+                const curTime = new Date();
+                for (const mDoc of matches.docs) {
+                    const m = mDoc.data();
+                    const start = new Date(m.startTime);
+                    if ((curTime.getTime() - start.getTime()) / 60000 > 5) { // 5 min timeout
+                        console.log(`Timeout for match ${m.id}`);
+                        const winnerId = m.player1?.id || m.player2?.id;
+                        if (winnerId) {
+                            await db.collection("tournament_matches").doc(m.id).update({
+                                winnerId,
+                                status: 'completed'
+                            });
+                            await checkAndAdvanceTournamentLogic(tDoc.id, m.round);
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("Scheduler error:", err);
+        }
+    }, 60000); // Pulse every minute
+};
+
+if (db) startTournamentScheduler();
+if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+    return res.status(400).json({ error: 'Invalid userId.' });
+}
+// Enforce a sensible minimum (Fapshi minimum is 100 FCFA)
+if (amount < 100) {
+    return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
+}
+// Enforce a maximum to prevent accidental large charges
+if (amount > 1_000_000) {
+    return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
+}
+
+const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
+const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+    method: 'POST',
+    headers: {
+        'apiuser': FAPSHI_USER_TOKEN,
+        'apikey': FAPSHI_API_KEY,
+        'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({ amount, email, userId, redirectUrl })
+});
+const data = await response.json();
+if (!response.ok) return res.status(response.status).json(data);
+res.json(data);
+    } catch (err) {
+    console.error('Fapshi initiate proxy error:', err);
+    res.status(500).json({ error: 'Payment initiation failed' });
+}
 });
 
 app.get('/api/pay/status/:transId', async (req, res) => {

@@ -726,46 +726,23 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
 };
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
-    const tRef = doc(db, "tournaments", tournamentId);
     try {
-        await runTransaction(db, async (transaction) => {
-            const tDoc = await transaction.get(tRef);
-            if (!tDoc.exists()) throw "Tournament does not exist";
-
-            const tData = tDoc.data() as Tournament;
-            if (tData.status !== 'registration') throw "Tournament not in registration phase";
-            if (tData.participants.length >= tData.maxPlayers) throw "Tournament full";
-            if (tData.participants.includes(user.id)) throw "Already registered";
-
-            const userRef = doc(db, "users", user.id);
-            const userDoc = await transaction.get(userRef);
-            if (!userDoc.exists()) throw "User not found";
-
-            const userData = userDoc.data() as User;
-            if (userData.balance < tData.entryFee) throw "Insufficient funds";
-
-            transaction.update(userRef, { balance: userData.balance - tData.entryFee });
-
-            const newTxRef = doc(collection(db, "users", user.id, "transactions"));
-            transaction.set(newTxRef, {
-                type: 'tournament_entry',
-                amount: -tData.entryFee,
-                status: 'completed',
-                date: new Date().toISOString(),
-                timestamp: serverTimestamp()
-            });
-
-            if (tData.type === 'fixed') {
-                transaction.update(tRef, { participants: [...tData.participants, user.id] });
-            } else {
-                const platformFee = Math.floor(tData.entryFee * 0.10);
-                const netContribution = tData.entryFee - platformFee;
-                transaction.update(tRef, {
-                    participants: [...tData.participants, user.id],
-                    prizePool: (tData.prizePool || 0) + netContribution
-                });
-            }
+        const response = await fetch(`${import.meta.env.VITE_SOCKET_URL}/api/tournaments/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                tournamentId,
+                userId: user.id
+            })
         });
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || 'Registration failed');
+        }
+
         return true;
     } catch (e) {
         console.error("Tournament registration failed:", e);
