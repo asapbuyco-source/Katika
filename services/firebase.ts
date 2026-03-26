@@ -734,10 +734,12 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
 
 export const registerForTournament = async (tournamentId: string, user: User) => {
     try {
+        const token = await auth.currentUser?.getIdToken();
         const response = await fetch(`${import.meta.env.VITE_SOCKET_URL}/api/tournaments/register`, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
                 tournamentId,

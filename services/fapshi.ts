@@ -1,5 +1,6 @@
 
 import { User } from '../types';
+import { auth } from './firebase';
 
 // All Fapshi calls go through the server-side proxy so API keys never reach the browser.
 // The proxy lives at /api/pay/* on the same backend as the Socket.IO server.
@@ -12,9 +13,13 @@ export interface PaymentResponse {
 
 export const initiateFapshiPayment = async (amount: number, user: User): Promise<PaymentResponse | null> => {
     try {
+        const token = await auth.currentUser?.getIdToken();
         const response = await fetch(`${PROXY_BASE}/api/pay/initiate`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}` 
+            },
             body: JSON.stringify({
                 amount,
                 userId: user.id,

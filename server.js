@@ -113,11 +113,28 @@ io.use((socket, next) => {
     next();
 });
 
+// --- AUTHENTICATION MIDDLEWARE ---
+const verifyAuth = async (req, res, next) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Unauthorized: No token provided' });
+        }
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        req.user = decodedToken;
+        next();
+    } catch (error) {
+        console.error('Auth verification failed:', error);
+        res.status(403).json({ error: 'Unauthorized: Invalid or expired token' });
+    }
+};
+
 // --- HEALTH CHECK (required for Railway) ---
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
 // --- FAPSHI PAYMENT PROXY (keeps API keys server-side) ---
-app.post('/api/pay/initiate', async (req, res) => {
+app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
     try {
         const { amount, userId, redirectUrl } = req.body;
 
@@ -127,6 +144,10 @@ app.post('/api/pay/initiate', async (req, res) => {
         }
         if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
             return res.status(400).json({ error: 'Invalid userId.' });
+        }
+        // CRITICAL VULNERABILITY FIX: Prevent ID spoofing
+        if (req.user.uid !== userId) {
+            return res.status(403).json({ error: 'Forbidden: Cannot initiate payment for another user' });
         }
         if (amount < 100) {
             return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
@@ -155,7 +176,7 @@ app.post('/api/pay/initiate', async (req, res) => {
 });
 
 // --- FAPSHI PAYOUT (REAL WITHDRAWAL) ---
-app.post('/api/pay/disburse', async (req, res) => {
+app.post('/api/pay/disburse', verifyAuth, async (req, res) => {
     try {
         const { amount, phone, userId } = req.body;
 
@@ -173,6 +194,10 @@ app.post('/api/pay/disburse', async (req, res) => {
         }
         if (!userId || typeof userId !== 'string') {
             return res.status(400).json({ error: 'Invalid userId.' });
+        }
+        // CRITICAL VULNERABILITY FIX: Prevent draining other users' balances
+        if (req.user.uid !== userId) {
+            return res.status(403).json({ error: 'Forbidden: Cannot withdraw from another user' });
         }
 
         // Verify user has sufficient balance via Firebase Admin before calling Fapshi
@@ -225,11 +250,16 @@ app.post('/api/pay/disburse', async (req, res) => {
 });
 
 // --- TOURNAMENT OPERATIONS (SERVER-SIDE) ---
-app.post('/api/tournaments/register', async (req, res) => {
+app.post('/api/tournaments/register', verifyAuth, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database service unavailable' });
 
     const { tournamentId, userId } = req.body;
     if (!tournamentId || !userId) return res.status(400).json({ error: 'Missing tournamentId or userId' });
+
+    // CRITICAL VULNERABILITY FIX: Prevent registering other users (balance drain)
+    if (req.user.uid !== userId) {
+        return res.status(403).json({ error: 'Forbidden: Cannot register another user' });
+    }
 
     try {
         const tRef = db.collection("tournaments").doc(tournamentId);

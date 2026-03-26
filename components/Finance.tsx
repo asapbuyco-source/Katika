@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, creditDepositIdempotent } from '../services/firebase';
+import { getUserTransactions, creditDepositIdempotent, auth } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -138,10 +138,14 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         setErrorMsg(null);
 
         try {
+            const token = await auth.currentUser?.getIdToken();
             const PROXY_BASE = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
             const response = await fetch(`${PROXY_BASE}/api/pay/disburse`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}` 
+                },
                 body: JSON.stringify({ amount: withdrawAmount, phone: phone.replace(/\s/g, ''), userId: user.id })
             });
             const data = await response.json();
