@@ -139,7 +139,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
         try {
             const token = await auth.currentUser?.getIdToken();
-            const PROXY_BASE = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+            const rawUrl = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+            const PROXY_BASE = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
             const response = await fetch(`${PROXY_BASE}/api/pay/disburse`, {
                 method: 'POST',
                 headers: { 

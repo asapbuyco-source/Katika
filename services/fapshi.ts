@@ -4,7 +4,8 @@ import { auth } from './firebase';
 
 // All Fapshi calls go through the server-side proxy so API keys never reach the browser.
 // The proxy lives at /api/pay/* on the same backend as the Socket.IO server.
-const PROXY_BASE = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+const rawUrl = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+const PROXY_BASE = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
 
 export interface PaymentResponse {
     link: string;

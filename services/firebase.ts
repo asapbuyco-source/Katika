@@ -49,6 +49,11 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+const getApiUrl = () => {
+    const rawUrl = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    return rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+};
+
 const googleProvider = new GoogleAuthProvider();
 
 // ... (keep auth/user/transaction/game functions as is until Tournaments section) ...
@@ -538,7 +543,7 @@ export const startTournament = async (tournamentId: string) => {
     // Delegate entirely to the server, which owns all tournament bracket logic.
     // This prevents the race condition between client-side Firestore writes and
     // the server's scheduler / checkAndAdvanceTournamentLogic function.
-    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const SOCKET_URL = getApiUrl();
     const token = await auth.currentUser?.getIdToken();
     if (!token) throw new Error('Not authenticated');
     const res = await fetch(`${SOCKET_URL}/api/tournaments/start`, {
@@ -616,7 +621,7 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
 
 export const reportTournamentMatchResult = async (matchId: string, winnerId: string) => {
     // Delegate to server API, which handles Firestore update + bracket advancement atomically.
-    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const SOCKET_URL = getApiUrl();
     const token = await auth.currentUser?.getIdToken();
     if (!token) throw new Error('Not authenticated');
     const res = await fetch(`${SOCKET_URL}/api/tournaments/force-result`, {
@@ -735,7 +740,7 @@ const checkAndAdvanceTournament = async (tournamentId: string, round: number) =>
 export const registerForTournament = async (tournamentId: string, user: User) => {
     try {
         const token = await auth.currentUser?.getIdToken();
-        const response = await fetch(`${import.meta.env.VITE_SOCKET_URL}/api/tournaments/register`, {
+        const response = await fetch(`${getApiUrl()}/api/tournaments/register`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
