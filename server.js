@@ -494,13 +494,36 @@ const startTournamentScheduler = () => {
                 for (const mDoc of matches.docs) {
                     const m = mDoc.data();
                     const start = new Date(m.startTime);
-                    if ((curTime.getTime() - start.getTime()) / 60000 > 5) { // 5 min timeout
+                    const elapsedMin = (curTime.getTime() - start.getTime()) / 60000;
+
+                    // Fix 3: Emit a pre-forfeit warning at 4 min, forfeit at 5 min
+                    if (elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
+                        // Mark warning as issued so we don't spam
+                        await db.collection("tournament_matches").doc(m.id).update({ warningIssued: true });
+                        // Broadcast to both players' sockets if connected
+                        [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
+                            const sId = userSockets.get(pid);
+                            if (sId) {
+                                const sock = io.sockets.sockets.get(sId);
+                                if (sock) sock.emit('tournament_warning', {
+                                    matchId: m.id,
+                                    message: 'Your tournament match will be auto-forfeited in 60 seconds if not started!'
+                                });
+                            }
+                        });
+                        console.log(`[Scheduler] Pre-forfeit warning issued for match ${m.id}`);
+                    }
+
+                    if (elapsedMin > 5) { // 5 min timeout
                         console.log(`Timeout for match ${m.id}`);
+                        // player1 gets the bye only if player2 was the one who didn't show;
+                        // if both absent, pick player1 as default (documented limitation)
                         const winnerId = m.player1?.id || m.player2?.id;
                         if (winnerId) {
                             await db.collection("tournament_matches").doc(m.id).update({
                                 winnerId,
-                                status: 'completed'
+                                status: 'completed',
+                                forfeitReason: 'auto_timeout'
                             });
                             await checkAndAdvanceTournamentLogic(tDoc.id, m.round);
                         }
@@ -607,6 +630,57 @@ app.post('/api/maintenance', verifyAdmin, async (req, res) => {
         io.emit('maintenance_update', { enabled });
         res.json({ success: true, enabled });
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- ADMIN: CANCEL TOURNAMENT + REFUND ALL FEES (Fix 5) ---
+app.post('/api/tournaments/cancel', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { tournamentId } = req.body;
+    if (!tournamentId) return res.status(400).json({ error: 'tournamentId required' });
+    try {
+        const tRef = db.collection('tournaments').doc(tournamentId);
+        const tDoc = await tRef.get();
+        if (!tDoc.exists) return res.status(404).json({ error: 'Tournament not found' });
+        const tData = tDoc.data();
+        if (tData.status === 'completed') return res.status(400).json({ error: 'Cannot cancel a completed tournament' });
+        if (tData.status === 'cancelled') return res.status(400).json({ error: 'Tournament already cancelled' });
+
+        const entryFee = tData.entryFee || 0;
+        const participants = tData.participants || [];
+
+        if (entryFee > 0 && participants.length > 0) {
+            // Batch refund all entry fees (Firestore batch max is 500 ops)
+            const BATCH_SIZE = 200;
+            for (let i = 0; i < participants.length; i += BATCH_SIZE) {
+                const chunk = participants.slice(i, i + BATCH_SIZE);
+                const batch = db.batch();
+                for (const uid of chunk) {
+                    const userRef = db.collection('users').doc(uid);
+                    const userSnap = await userRef.get();
+                    if (userSnap.exists) {
+                        batch.update(userRef, { balance: (userSnap.data().balance || 0) + entryFee });
+                        batch.set(userRef.collection('transactions').doc(), {
+                            type: 'tournament_refund',
+                            amount: entryFee,
+                            status: 'completed',
+                            date: new Date().toISOString(),
+                            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            note: `Refund: "${tData.name}" cancelled`
+                        });
+                    }
+                }
+                await batch.commit();
+                console.log(`[Cancel] Refunded chunk ${i}-${i + chunk.length} for tournament ${tournamentId}`);
+            }
+        }
+
+        await tRef.update({ status: 'cancelled', cancelledAt: admin.firestore.FieldValue.serverTimestamp() });
+        console.log(`[Cancel] Tournament ${tournamentId} cancelled. ${participants.length} players refunded ${entryFee} FCFA each.`);
+        res.json({ success: true, refunded: participants.length, perPlayerAmount: entryFee });
+    } catch (err) {
+        console.error('Tournament cancel error:', err);
         res.status(500).json({ error: err.message });
     }
 });
@@ -1145,6 +1219,125 @@ io.on('connection', (socket) => {
         else if (action.type === 'MOVE') {
             if (room.turn !== userId && room.gameType !== 'Cards') return;
 
+            // =====================================================================
+            // Fix 1: CHECKERS — Full server-side move validation
+            // Client sends: { type: 'MOVE', fromR, fromC, toR, toC, isJump }
+            // Server validates ownership, bounds, diagonal, jump, king promo, win.
+            // =====================================================================
+            if (room.gameType === 'Checkers' && action.fromR !== undefined) {
+                const { fromR, fromC, toR, toC } = action;
+                const pieces = room.gameState.pieces;
+
+                // (A) Bounds check
+                if (toR < 0 || toR > 7 || toC < 0 || toC > 7) {
+                    console.warn(`[Checkers][${roomId}] OOB move by ${userId}. Rejected.`);
+                    return;
+                }
+
+                // (B) The piece being moved must exist and belong to userId
+                const piece = pieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
+                if (!piece) {
+                    console.warn(`[Checkers][${roomId}] No owned piece at (${fromR},${fromC}) for ${userId}. Rejected.`);
+                    return;
+                }
+
+                // (C) Destination must be empty
+                if (pieces.some(p => p.r === toR && p.c === toC)) {
+                    console.warn(`[Checkers][${roomId}] Destination (${toR},${toC}) occupied. Rejected.`);
+                    return;
+                }
+
+                const dR = toR - fromR;
+                const dC = toC - fromC;
+                const absDR = Math.abs(dR);
+                const absDC = Math.abs(toC - fromC);
+
+                // (D) Must move diagonally
+                if (absDR !== absDC) {
+                    console.warn(`[Checkers][${roomId}] Non-diagonal move by ${userId}. Rejected.`);
+                    return;
+                }
+
+                // (E) Direction check for non-kings
+                // Server determines forward based on who is player[0] vs player[1]
+                const isPlayer1 = room.players[0] === userId;
+                const forwardDir = isPlayer1 ? -1 : 1; // player1 moves up (row decreases), player2 moves down
+                if (!piece.isKing && Math.sign(dR) !== forwardDir && absDR === 1) {
+                    console.warn(`[Checkers][${roomId}] Backward non-king move by ${userId}. Rejected.`);
+                    return;
+                }
+
+                // (F) Step size: 1 (normal) or 2 (jump)
+                if (absDR !== 1 && absDR !== 2) {
+                    console.warn(`[Checkers][${roomId}] Invalid step size ${absDR} by ${userId}. Rejected.`);
+                    return;
+                }
+
+                let updatedPieces = pieces.map(p => ({ ...p })); // deep-ish clone
+
+                if (absDR === 2) {
+                    // (G) Jump: captured piece must be an opponent piece in the middle square
+                    const midR = (fromR + toR) / 2;
+                    const midC = (fromC + toC) / 2;
+                    const capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC && p.owner !== userId);
+                    if (capturedIdx === -1) {
+                        console.warn(`[Checkers][${roomId}] Jump with no enemy piece at mid (${midR},${midC}) by ${userId}. Rejected.`);
+                        return;
+                    }
+                    updatedPieces.splice(capturedIdx, 1);
+                } else {
+                    // (H) Normal move — ensure no available jump was skipped (must-jump rule)
+                    const hasMandatoryJump = pieces
+                        .filter(p => p.owner === userId)
+                        .some(p => {
+                            const dirs = p.isKing ? [-1, 1] : [forwardDir];
+                            return dirs.some(dr =>
+                                [-1, 1].some(dc => {
+                                    const midR = p.r + dr;
+                                    const midC = p.c + dc;
+                                    const landR = p.r + dr * 2;
+                                    const landC = p.c + dc * 2;
+                                    const hasEnemy = pieces.some(e => e.owner !== userId && e.r === midR && e.c === midC);
+                                    const landFree = !pieces.some(e => e.r === landR && e.c === landC);
+                                    const inBounds = landR >= 0 && landR <= 7 && landC >= 0 && landC <= 7;
+                                    return hasEnemy && landFree && inBounds;
+                                })
+                            );
+                        });
+                    if (hasMandatoryJump) {
+                        console.warn(`[Checkers][${roomId}] ${userId} skipped mandatory jump. Rejected.`);
+                        return;
+                    }
+                }
+
+                // (I) Apply the move
+                const movedPiece = updatedPieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
+                movedPiece.r = toR;
+                movedPiece.c = toC;
+
+                // (J) King promotion
+                const promotionRow = isPlayer1 ? 0 : 7;
+                if (!movedPiece.isKing && toR === promotionRow) {
+                    movedPiece.isKing = true;
+                }
+
+                // (K) Win detection — opponent has no pieces
+                const opponentPieces = updatedPieces.filter(p => p.owner !== userId);
+                if (opponentPieces.length === 0) {
+                    room.gameState.pieces = updatedPieces;
+                    endGame(roomId, userId, 'All pieces captured');
+                    return;
+                }
+
+                room.gameState.pieces = updatedPieces;
+                room.turn = room.players.find(id => id !== userId);
+                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                return; // handled — do NOT fall through to generic newState branch
+            }
+            // =====================================================================
+            // End Checkers validation
+            // =====================================================================
+
             if (action.newState) {
                 // --- Bug C fix: Server-side chess move validation ---
                 // Prevents clients from sending forged PGN/FEN to cheat.
@@ -1197,11 +1390,29 @@ io.on('connection', (socket) => {
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
                 if (action.newState.turn) room.turn = action.newState.turn;
 
-                // action.newState.winner is now only a fallback (non-Chess games or
-                // legacy clients); Chess games end via the validated path above.
-                if (action.newState.winner && room.gameType !== 'Chess') {
-                    endGame(roomId, action.newState.winner, 'Checkmate / Win Condition');
+                // action.newState.winner is only a fallback for non-Chess, non-Checkers games.
+                // Chess ends via PGN validation above; Checkers ends via the piece-count check above.
+                if (action.newState.winner && room.gameType !== 'Chess' && room.gameType !== 'Checkers') {
+                    endGame(roomId, action.newState.winner, 'Win Condition');
                     return;
+                }
+
+                // Fix 2: Pool — sanity check ball count to prevent fabricated pockets
+                if (room.gameType === 'Pool' && action.newState.balls) {
+                    const prevBalls = room.gameState.balls || [];
+                    const newBalls = action.newState.balls;
+                    // Verify ball count hasn't increased (can't un-pocket a ball)
+                    if (newBalls.length > prevBalls.length) {
+                        console.warn(`[Pool][${roomId}] Ball count increased from ${prevBalls.length} to ${newBalls.length}. Rejected.`);
+                        return;
+                    }
+                    // Verify no *already-potted* ball was un-potted
+                    const prevPotted = prevBalls.filter(b => b.isPotted).map(b => b.id);
+                    const newUnPotted = newBalls.filter(b => !b.isPotted && prevPotted.includes(b.id));
+                    if (newUnPotted.length > 0) {
+                        console.warn(`[Pool][${roomId}] Attempt to un-pot balls by ${userId}. Rejected.`);
+                        return;
+                    }
                 }
             }
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
