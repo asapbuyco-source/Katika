@@ -271,6 +271,23 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         }
     }, [socketGame, user.id, isP2P]);
 
+    // --- SOCKET GAME_OVER LISTENER ---
+    useEffect(() => {
+        if (!isP2P || !socket) return;
+        
+        const handleGameOver = (data: any) => {
+            setIsGameOver(true);
+            if (data.winner === user.id) onGameEnd('win');
+            else if (data.winner) onGameEnd('loss');
+            else onGameEnd('quit'); // Draw or other
+        };
+
+        socket.on('game_over', handleGameOver);
+        return () => {
+            socket.off('game_over', handleGameOver);
+        };
+    }, [isP2P, socket, user.id, onGameEnd]);
+
     useEffect(() => {
         if (isGameOver) return;
         const interval = setInterval(() => {

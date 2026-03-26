@@ -963,26 +963,40 @@ io.on('connection', (socket) => {
 
         console.log(`Matchmaking request: ${userProfile.name} for ${gameType} (${stake})`);
 
-        // Check if reconnecting to active room
+        // Check if reconnecting to active or recently-completed room
         for (const [roomId, room] of rooms.entries()) {
-            if (room.players.includes(userId) && room.status === 'active') {
-                socket.join(roomId);
+            if (room.players.includes(userId)) {
+                if (room.status === 'completed') {
+                    // Game already ended — tell the client who won so they see the result
+                    socket.join(roomId);
+                    socket.emit('game_over', {
+                        winner: room.winner,
+                        reason: 'Reconnected after game ended'
+                    });
+                    console.log(`User ${userId} reconnected to completed room ${roomId}, winner: ${room.winner}`);
+                    return;
+                }
 
-                // Notify others that I'm back
-                socket.to(roomId).emit('opponent_reconnected', { userId });
+                if (room.status === 'active') {
+                    socket.join(roomId);
 
-                socket.emit('match_found', {
-                    roomId,
-                    players: room.players,
-                    gameType: room.gameType,
-                    stake: room.stake,
-                    gameState: room.gameState,
-                    turn: room.turn,
-                    profiles: room.profiles,
-                    chat: room.chat
-                });
-                console.log(`User ${userId} reconnected to ${roomId}`);
-                return;
+                    // Notify others that I'm back
+                    socket.to(roomId).emit('opponent_reconnected', { userId });
+
+                    socket.emit('match_found', {
+                        roomId,
+                        players: room.players,
+                        gameType: room.gameType,
+                        stake: room.stake,
+                        gameState: room.gameState,
+                        turn: room.turn,
+                        profiles: room.profiles,
+                        chat: room.chat,
+                        winner: room.winner || null
+                    });
+                    console.log(`User ${userId} reconnected to ${roomId}`);
+                    return;
+                }
             }
         }
 
@@ -1328,16 +1342,38 @@ io.on('connection', (socket) => {
                     movedPiece.isKing = true;
                 }
 
-                // (K) Win detection — opponent has no pieces
-                const opponentPieces = updatedPieces.filter(p => p.owner !== userId);
-                if (opponentPieces.length === 0) {
+                // (K) Win detection — opponent has no pieces OR no legal moves (stalemate)
+                const opponentId = room.players.find(id => id !== userId);
+                const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
+
+                const opponentHasLegalMove = opponentPieces.some(p => {
+                    const isOppPlayer1 = room.players[0] === opponentId;
+                    const oppFwdDir = isOppPlayer1 ? -1 : 1;
+                    const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[oppFwdDir,-1],[oppFwdDir,1]];
+                    const pieceMap = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
+                    return dirs.some(([dr, dc]) => {
+                        const mr = p.r + dr, mc = p.c + dc;
+                        const jr = p.r + dr * 2, jc = p.c + dc * 2;
+                        // Check jump
+                        if (jr >= 0 && jr <= 7 && jc >= 0 && jc <= 7 && !pieceMap.has(`${jr},${jc}`)) {
+                            const mid = pieceMap.get(`${mr},${mc}`);
+                            if (mid && mid.owner !== opponentId) return true;
+                        }
+                        // Check normal move
+                        if (mr >= 0 && mr <= 7 && mc >= 0 && mc <= 7 && !pieceMap.has(`${mr},${mc}`)) return true;
+                        return false;
+                    });
+                });
+
+                if (opponentPieces.length === 0 || !opponentHasLegalMove) {
                     room.gameState.pieces = updatedPieces;
-                    endGame(roomId, userId, 'All pieces captured');
+                    const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
+                    endGame(roomId, userId, reason);
                     return;
                 }
 
                 room.gameState.pieces = updatedPieces;
-                room.turn = room.players.find(id => id !== userId);
+                room.turn = opponentId;
                 io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                 return; // handled — do NOT fall through to generic newState branch
             }

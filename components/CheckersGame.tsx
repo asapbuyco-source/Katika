@@ -222,6 +222,23 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         }
     }, [socketGame, user.id, isP2P, isBotGame]);
 
+    // --- SOCKET GAME_OVER LISTENER ---
+    useEffect(() => {
+        if (!isP2P || !socket) return;
+        
+        const handleGameOver = (data: any) => {
+            setIsGameOver(true);
+            if (data.winner === user.id) onGameEnd('win');
+            else if (data.winner) onGameEnd('loss');
+            else onGameEnd('quit'); // Draw or other
+        };
+
+        socket.on('game_over', handleGameOver);
+        return () => {
+            socket.off('game_over', handleGameOver);
+        };
+    }, [isP2P, socket, user.id, onGameEnd]);
+
     // --- LIDRAUGHTS SYNC ---
     useEffect(() => {
         if (lidraughtsId && !isGameOver) {
