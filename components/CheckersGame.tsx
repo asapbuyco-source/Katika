@@ -180,7 +180,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (socketGame.gameState && socketGame.gameState.turn) {
                 setTurn(socketGame.gameState.turn === user.id ? 'me' : 'opponent');
             }
-            if (socketGame.winner && !isP2P) {
+            if (socketGame.winner && isP2P) {
                 setIsGameOver(true);
                 if (socketGame.winner === user.id) onGameEnd('win');
                 else onGameEnd('loss');
@@ -425,9 +425,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         const { moves: oppMoves } = getGlobalValidMoves(nextTurn, nextPieces);
         const oppPieces = nextPieces.filter(p => p.player === nextTurn);
 
-        let winner = null;
+        let winner: string | null = null;
         if (oppPieces.length === 0 || oppMoves.length === 0) {
-            winner = turn === 'me' ? user.id : 'bot';
+            // Use actual user IDs (not 'bot') so server-side settlement works correctly
+            const opponentActualId = isP2P && socketGame
+                ? (socketGame.players.find((uid: string) => uid !== user.id) || null)
+                : null;
+            winner = turn === 'me' ? user.id : (opponentActualId || user.id);
             setIsGameOver(true);
             if (!isP2P) onGameEnd(winner === user.id ? 'win' : 'loss');
         }

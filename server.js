@@ -125,9 +125,102 @@ app.post('/api/pay/initiate', async (req, res) => {
         if (!amount || typeof amount !== 'number' || amount <= 0 || !Number.isInteger(amount)) {
             return res.status(400).json({ error: 'Invalid amount. Must be a positive integer in FCFA.' });
         }
-    } catch (e) {
-        console.error('Payment initiation error:', e);
-        res.status(500).json({ error: 'Internal server error' });
+        if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
+            return res.status(400).json({ error: 'Invalid userId.' });
+        }
+        if (amount < 100) {
+            return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
+        }
+        if (amount > 1_000_000) {
+            return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
+        }
+
+        const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
+        const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+            method: 'POST',
+            headers: {
+                'apiuser': FAPSHI_USER_TOKEN,
+                'apikey': FAPSHI_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ amount, email, userId, redirectUrl })
+        });
+        const data = await response.json();
+        if (!response.ok) return res.status(response.status).json(data);
+        res.json(data);
+    } catch (err) {
+        console.error('Fapshi initiate proxy error:', err);
+        res.status(500).json({ error: 'Payment initiation failed' });
+    }
+});
+
+// --- FAPSHI PAYOUT (REAL WITHDRAWAL) ---
+app.post('/api/pay/disburse', async (req, res) => {
+    try {
+        const { amount, phone, userId } = req.body;
+
+        if (!amount || typeof amount !== 'number' || !Number.isInteger(amount)) {
+            return res.status(400).json({ error: 'Invalid amount.' });
+        }
+        if (amount < 1000) {
+            return res.status(400).json({ error: 'Minimum withdrawal is 1,000 FCFA.' });
+        }
+        if (amount > 500_000) {
+            return res.status(400).json({ error: 'Maximum withdrawal is 500,000 FCFA per transaction.' });
+        }
+        if (!phone || typeof phone !== 'string' || !/^6\d{8}$/.test(phone.replace(/\s/g, ''))) {
+            return res.status(400).json({ error: 'Invalid Cameroon phone number (must start with 6, 9 digits total).' });
+        }
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({ error: 'Invalid userId.' });
+        }
+
+        // Verify user has sufficient balance via Firebase Admin before calling Fapshi
+        if (db) {
+            const userSnap = await db.collection('users').doc(userId).get();
+            if (!userSnap.exists) return res.status(404).json({ error: 'User not found.' });
+            const balance = userSnap.data().balance || 0;
+            if (balance < amount) return res.status(400).json({ error: 'Insufficient balance.' });
+        }
+
+        const cleanPhone = phone.replace(/\s/g, '');
+        const response = await fetch(`${FAPSHI_BASE_URL}/payout`, {
+            method: 'POST',
+            headers: {
+                'apiuser': FAPSHI_USER_TOKEN,
+                'apikey': FAPSHI_API_KEY,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' })
+        });
+        const data = await response.json();
+        if (!response.ok) return res.status(response.status).json(data);
+
+        // Atomically debit user balance and record transaction
+        if (db) {
+            const userRef = db.collection('users').doc(userId);
+            await db.runTransaction(async (tx) => {
+                const userDoc = await tx.get(userRef);
+                if (!userDoc.exists) throw new Error('User not found');
+                const newBalance = (userDoc.data().balance || 0) - amount;
+                if (newBalance < 0) throw new Error('Insufficient balance');
+                tx.update(userRef, { balance: newBalance });
+                tx.set(userRef.collection('transactions').doc(), {
+                    type: 'withdrawal',
+                    amount: -amount,
+                    status: 'completed',
+                    phone: cleanPhone,
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    transId: data.transId || null
+                });
+            });
+        }
+
+        res.json({ success: true, transId: data.transId });
+    } catch (err) {
+        console.error('Fapshi disburse proxy error:', err);
+        res.status(500).json({ error: err.message || 'Withdrawal failed' });
     }
 });
 
@@ -265,8 +358,17 @@ const checkAndAdvanceTournamentLogic = async (tournamentId, round) => {
     const matches = matchesSnap.docs.map(d => d.data());
     if (matches.length === 0 || !matches.every(m => m.status === 'completed')) return;
 
-    // Advance round logic (ported from firebase.ts)
-    // ... Simplified for scheduler safety
+    // Guard: prevent duplicate next-round creation (race between scheduler and admin API)
+    const nextRoundSnap = await db.collection("tournament_matches")
+        .where("tournamentId", "==", tournamentId)
+        .where("round", "==", round + 1)
+        .limit(1)
+        .get();
+    if (!nextRoundSnap.empty) {
+        console.log(`[Tournament] ${tournamentId} round ${round + 1} already exists, skipping advance.`);
+        return;
+    }
+
     console.log(`Advancing tournament ${tournamentId} to next round from R${round}`);
 
     matches.sort((a, b) => a.matchIndex - b.matchIndex);
@@ -382,35 +484,101 @@ const startTournamentScheduler = () => {
 };
 
 if (db) startTournamentScheduler();
-if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
-    return res.status(400).json({ error: 'Invalid userId.' });
-}
-// Enforce a sensible minimum (Fapshi minimum is 100 FCFA)
-if (amount < 100) {
-    return res.status(400).json({ error: 'Minimum deposit amount is 100 FCFA.' });
-}
-// Enforce a maximum to prevent accidental large charges
-if (amount > 1_000_000) {
-    return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
-}
 
-const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
-const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
-    method: 'POST',
-    headers: {
-        'apiuser': FAPSHI_USER_TOKEN,
-        'apikey': FAPSHI_API_KEY,
-        'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ amount, email, userId, redirectUrl })
-});
-const data = await response.json();
-if (!response.ok) return res.status(response.status).json(data);
-res.json(data);
+// --- ADMIN MIDDLEWARE: Verify Firebase ID Token + isAdmin flag ---
+const verifyAdmin = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ error: 'Authorization required' });
+    }
+    const token = authHeader.slice(7);
+    if (!admin.apps.length || !db) {
+        return res.status(503).json({ error: 'Auth service unavailable' });
+    }
+    try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        const userSnap = await db.collection('users').doc(decoded.uid).get();
+        if (!userSnap.exists || !userSnap.data().isAdmin) {
+            return res.status(403).json({ error: 'Forbidden: Admin access required' });
+        }
+        req.adminUid = decoded.uid;
+        next();
+    } catch (e) {
+        return res.status(401).json({ error: 'Invalid or expired token' });
+    }
+};
+
+// --- ADMIN: BAN / UNBAN USER ---
+app.post('/api/admin/ban-user', verifyAdmin, async (req, res) => {
+    const { userId, ban } = req.body;
+    if (!userId || typeof ban !== 'boolean') {
+        return res.status(400).json({ error: 'userId and ban (boolean) are required' });
+    }
+    try {
+        await db.collection('users').doc(userId).update({ isBanned: ban });
+        // If banning, disconnect active socket immediately
+        if (ban) {
+            const socketId = userSockets.get(userId);
+            if (socketId) {
+                const sock = io.sockets.sockets.get(socketId);
+                if (sock) sock.disconnect(true);
+            }
+        }
+        res.json({ success: true });
     } catch (err) {
-    console.error('Fapshi initiate proxy error:', err);
-    res.status(500).json({ error: 'Payment initiation failed' });
-}
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- ADMIN: START TOURNAMENT ---
+app.post('/api/tournaments/start', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { tournamentId } = req.body;
+    if (!tournamentId) return res.status(400).json({ error: 'tournamentId required' });
+    try {
+        await startTournamentLogic(tournamentId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Tournament start error:', err);
+        res.status(500).json({ error: err.message || 'Failed to start tournament' });
+    }
+});
+
+// --- ADMIN: FORCE TOURNAMENT MATCH RESULT ---
+app.post('/api/tournaments/force-result', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { matchId, winnerId } = req.body;
+    if (!matchId || !winnerId) return res.status(400).json({ error: 'matchId and winnerId required' });
+    try {
+        const mRef = db.collection('tournament_matches').doc(matchId);
+        const mSnap = await mRef.get();
+        if (!mSnap.exists) return res.status(404).json({ error: 'Match not found' });
+        const mData = mSnap.data();
+        if (mData.status === 'completed') return res.status(400).json({ error: 'Match already completed' });
+        await mRef.update({ winnerId, status: 'completed' });
+        await checkAndAdvanceTournamentLogic(mData.tournamentId, mData.round);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Force result error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- ADMIN: TOGGLE MAINTENANCE MODE ---
+app.post('/api/maintenance', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) required' });
+    try {
+        await db.collection('settings').doc('maintenance').set(
+            { enabled, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+        );
+        io.emit('maintenance_update', { enabled });
+        res.json({ success: true, enabled });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.get('/api/pay/status/:transId', async (req, res) => {
@@ -435,13 +603,59 @@ app.get('/api/pay/status/:transId', async (req, res) => {
     }
 });
 
-// --- ADMIN SERVER STATUS ---
-app.get('/api/admin/server-status', (req, res) => {
-    // Simple shared-secret auth — set ADMIN_SECRET in Railway env vars
-    const adminSecret = process.env.ADMIN_SECRET;
-    if (adminSecret && req.headers['x-admin-secret'] !== adminSecret) {
-        return res.status(403).json({ error: 'Forbidden' });
+// --- SERVER-SIDE FINANCIAL SETTLEMENT ---
+const settleGame = async (roomId, winnerId) => {
+    if (!db) return;
+    const room = rooms.get(roomId);
+    if (!room || room.stake === 0 || !winnerId) return;
+
+    const { winnings } = calculatePayouts(room.stake);
+    const loserId = room.players.find(id => id !== winnerId);
+    if (!loserId) return;
+
+    // Idempotency: prevent double-settling on rematch or duplicate events
+    const settlementRef = db.collection('processed_settlements').doc(`settle_${roomId}`);
+
+    try {
+        await db.runTransaction(async (tx) => {
+            const sentinelSnap = await tx.get(settlementRef);
+            if (sentinelSnap.exists) return; // already settled
+
+            const winnerRef = db.collection('users').doc(winnerId);
+            const loserRef = db.collection('users').doc(loserId);
+            const [winnerDoc, loserDoc] = await Promise.all([
+                tx.get(winnerRef), tx.get(loserRef)
+            ]);
+
+            if (winnerDoc.exists) {
+                tx.update(winnerRef, { balance: (winnerDoc.data().balance || 0) + winnings });
+                tx.set(winnerRef.collection('transactions').doc(), {
+                    type: 'winnings', amount: winnings, status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    gameType: room.gameType
+                });
+            }
+            if (loserDoc.exists) {
+                const newBal = Math.max(0, (loserDoc.data().balance || 0) - room.stake);
+                tx.update(loserRef, { balance: newBal });
+                tx.set(loserRef.collection('transactions').doc(), {
+                    type: 'stake_loss', amount: -room.stake, status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    gameType: room.gameType
+                });
+            }
+            tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
+        });
+        console.log(`[settleGame] ${roomId}: credited ${winnings} FCFA to ${winnerId}`);
+    } catch (err) {
+        console.error(`[settleGame] Failed for room ${roomId}:`, err.message);
     }
+};
+
+// --- ADMIN SERVER STATUS ---
+app.get('/api/admin/server-status', verifyAdmin, (req, res) => {
     try {
         const status = {
             uptime: Math.floor(process.uptime()),
@@ -503,6 +717,9 @@ const endGame = (roomId, winnerId, reason) => {
     room.winner = winnerId;
 
     const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
+
+    // Settle finances server-side (non-blocking) — winner credited, loser debited via Firebase Admin
+    if (winnerId && room.stake > 0) settleGame(roomId, winnerId);
 
     io.to(roomId).emit('game_over', {
         winner: winnerId,
@@ -604,6 +821,9 @@ const createInitialGameState = (gameType, p1, p2) => {
                 pgn: '',
                 turn: p1
             };
+        case 'Pool':
+            // Pool game: client drives all state; wins are reported via MOVE action with newState.winner
+            return { ...common, balls: Array.from({ length: 15 }, (_, i) => ({ id: i + 1, pocketed: false, owner: null })), turn: p1 };
         default:
             return common;
     }
@@ -992,20 +1212,9 @@ io.on('connection', (socket) => {
             }
             io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
         }
-        else if (room.gameType === 'TicTacToe' && action.type === 'DRAW_ROUND') {
-            room.gameState.drawCount = (room.gameState.drawCount || 0) + 1;
-            if (room.gameState.drawCount >= 3) {
-                endGame(roomId, null, 'Three Consecutive Draws');
-                return;
-            }
-            io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
-            setTimeout(() => {
-                room.gameState.board = Array(9).fill(null);
-                room.status = 'active';
-                room.turn = room.players.find(id => id !== room.turn);
-                io.to(roomId).emit('game_update', { ...room, roomId });
-            }, 3000);
-        }
+        // Draw is handled above inside the MOVE + index branch.
+        // The separate DRAW_ROUND action is intentionally not handled here
+        // to prevent double-incrementing drawCount.
 
         // --- LUDO ---
         else if (room.gameType === 'Ludo') {

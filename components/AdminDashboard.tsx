@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth } from '../services/firebase';
 
 interface AdminDashboardProps {
     user: User;
@@ -56,9 +56,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
     // Load Real Data
     useEffect(() => {
-        const isMaint = localStorage.getItem('vantage_maintenance') === 'true';
-        setMaintenanceMode(isMaint);
-
         const fetchData = async () => {
             setLoadingUsers(true);
             try {
@@ -78,7 +75,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         fetchData();
 
         const unsubGames = subscribeToGameConfigs(setGameConfigs);
-        return () => unsubGames();
+        // Subscribe to real-time Firestore maintenance mode instead of localStorage
+        const unsubMaint = subscribeToMaintenanceMode(setMaintenanceMode);
+        return () => { unsubGames(); unsubMaint(); };
     }, []);
 
     // Tab Specific Fetches
@@ -103,17 +102,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     const fetchServerStatus = async () => {
         setLoadingServerStatus(true);
         try {
-            // In development, server is usually on :8080. In production, we use relative paths.
             const isProd = window.location.hostname !== 'localhost';
             const url = isProd
-                ? '/api/admin/server-status'
+                ? `${import.meta.env.VITE_SOCKET_URL || ''}/api/admin/server-status`
                 : `${window.location.protocol}//${window.location.hostname}:8080/api/admin/server-status`;
 
-            const headers: Record<string, string> = {};
-            const adminSecret = (import.meta as any).env?.VITE_ADMIN_SECRET;
-            if (adminSecret) headers['x-admin-secret'] = adminSecret;
+            // Use Firebase ID Token for admin auth (no shared secret in bundle)
+            const token = await auth.currentUser?.getIdToken();
+            if (!token) throw new Error('Not logged in');
 
-            const response = await fetch(url, { headers });
+            const response = await fetch(url, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (!response.ok) {
                 const errData = await response.json().catch(() => ({}));
                 throw new Error(errData.error || `HTTP ${response.status}`);
@@ -145,11 +145,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         setLogs(prev => [{ id: Date.now(), action, target, time: 'Just now', type }, ...prev]);
     };
 
-    const handleMaintenanceToggle = () => {
-        const newState = !maintenanceMode;
-        setMaintenanceMode(newState);
-        localStorage.setItem('vantage_maintenance', String(newState));
-        addLog("Maintenance Mode", newState ? "Enabled" : "Disabled", "warning");
+    const handleMaintenanceToggle = async () => {
+        try {
+            await setMaintenanceMode(!maintenanceMode);
+            // State is updated via subscribeToMaintenanceMode listener
+            addLog("Maintenance Mode", !maintenanceMode ? "Enabled" : "Disabled", "warning");
+        } catch (e: any) {
+            console.error('Maintenance toggle failed:', e);
+            alert(e.message || 'Failed to toggle maintenance mode');
+        }
+    };
+
+    const handleBanUser = async (player: any) => {
+        const newBan = !player.isBanned;
+        const action = newBan ? 'Ban' : 'Unban';
+        if (!window.confirm(`${action} user "${player.name}"?`)) return;
+        try {
+            await banUser(player.id, newBan);
+            setUsersList(prev => prev.map(u => u.id === player.id ? { ...u, isBanned: newBan } : u));
+            setBannedCount(prev => newBan ? prev + 1 : prev - 1);
+            addLog(`User ${action}ned`, player.name, newBan ? 'critical' : 'info');
+        } catch (e: any) {
+            console.error('Ban action failed:', e);
+            alert(e.message || 'Ban action failed');
+        }
+    };
+
+    const handleForceWin = async (match: TournamentMatch, winnerId: string) => {
+        if (!window.confirm(`Force win for player ${winnerId === match.player1?.id ? match.player1?.name : match.player2?.name}?`)) return;
+        try {
+            await reportTournamentMatchResult(match.id, winnerId);
+            addLog('Force Win Applied', `Match ${match.id}`, 'warning');
+            // Refresh matches
+            if (selectedTourneyId) handleSelectTournament(selectedTourneyId);
+        } catch (e: any) {
+            console.error('Force win failed:', e);
+            alert(e.message || 'Force win failed');
+        }
     };
 
     const handleResolveBug = async (id: string) => {
@@ -421,9 +453,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                 <div className="flex gap-1">
                                                     {match.status !== 'completed' && (
                                                         <>
-                                                            <button className="px-3 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[10px] font-bold rounded border border-green-500/20" title="Force P1 Win">P1</button>
-                                                            <button className="px-3 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[10px] font-bold rounded border border-green-500/20" title="Force P2 Win">P2</button>
-                                                            <button className="px-2 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[10px] font-bold rounded border border-red-500/20" title="Reset"><RefreshCcw size={12} /></button>
+                                                            <button
+                                                                onClick={() => match.player1?.id && handleForceWin(match, match.player1.id)}
+                                                                className="px-3 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[10px] font-bold rounded border border-green-500/20"
+                                                                title={`Force ${match.player1?.name} Win`}
+                                                            >P1</button>
+                                                            <button
+                                                                onClick={() => match.player2?.id && handleForceWin(match, match.player2.id)}
+                                                                className="px-3 py-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 text-[10px] font-bold rounded border border-green-500/20"
+                                                                title={`Force ${match.player2?.name} Win`}
+                                                            >P2</button>
                                                         </>
                                                     )}
                                                     {match.status === 'completed' && (
@@ -506,6 +545,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                 <td className="p-4 text-right">
                                                     <div className="flex items-center justify-end gap-2">
                                                         <button
+                                                            onClick={() => handleBanUser(player)}
                                                             className={`p-2 rounded-lg transition-colors border ${player.isBanned ? 'bg-red-500 text-white border-red-500' : 'bg-red-500/10 text-red-400 border-red-500/20 hover:bg-red-500/20'}`}
                                                             title={player.isBanned ? "Unban User" : "Ban User"}
                                                         >

@@ -150,10 +150,50 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
     });
 };
 
-export const getAllUsers = async (): Promise<User[]> => {
-    const q = query(collection(db, "users"));
+export const getAllUsers = async (lastId?: string): Promise<User[]> => {
+    let q = query(collection(db, "users"), orderBy("name"), limit(100));
+    if (lastId) {
+        const lastDoc = await getDoc(doc(db, "users", lastId));
+        if (lastDoc.exists()) q = query(collection(db, "users"), orderBy("name"), limit(100));
+    }
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => doc.data() as User);
+};
+
+export const banUser = async (userId: string, ban: boolean): Promise<void> => {
+    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/admin/ban-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, ban })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Ban failed');
+    }
+};
+
+export const setMaintenanceMode = async (enabled: boolean): Promise<void> => {
+    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/maintenance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ enabled })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to set maintenance mode');
+    }
+};
+
+export const subscribeToMaintenanceMode = (callback: (enabled: boolean) => void) => {
+    return onSnapshot(doc(db, 'settings', 'maintenance'), (snap) => {
+        callback(snap.exists() ? (snap.data().enabled ?? false) : false);
+    });
 };
 
 export const updateGameStatus = async (gameId: string, status: 'active' | 'coming_soon') => {
@@ -495,57 +535,21 @@ export const updateTournamentStatus = async (tournamentId: string, status: 'acti
 };
 
 export const startTournament = async (tournamentId: string) => {
-    const tRef = doc(db, "tournaments", tournamentId);
-    const tSnap = await getDoc(tRef);
-    if (!tSnap.exists()) return;
-    const tData = tSnap.data() as Tournament;
-
-    const participants = [...tData.participants];
-    for (let i = participants.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [participants[i], participants[j]] = [participants[j], participants[i]];
+    // Delegate entirely to the server, which owns all tournament bracket logic.
+    // This prevents the race condition between client-side Firestore writes and
+    // the server's scheduler / checkAndAdvanceTournamentLogic function.
+    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/tournaments/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tournamentId })
+    });
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to start tournament');
     }
-
-    const batch = writeBatch(db);
-    const matchesRef = collection(db, "tournament_matches");
-
-    let matchCount = 0;
-    const round = 1;
-
-    const playerProfiles = await Promise.all(participants.map(async (uid) => {
-        const uSnap = await getDoc(doc(db, 'users', uid));
-        return uSnap.exists() ? uSnap.data() as User : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
-    }));
-
-    while (playerProfiles.length > 0) {
-        const p1 = playerProfiles.pop();
-        const p2 = playerProfiles.pop();
-
-        const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
-        const matchRef = doc(matchesRef, matchId);
-
-        const matchData: any = {
-            id: matchId,
-            tournamentId,
-            round,
-            matchIndex: matchCount,
-            player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
-            player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
-            winnerId: p2 ? null : p1?.id,
-            status: p2 ? 'scheduled' : 'completed',
-            startTime: tData.startTime,
-            nextMatchId: null
-        };
-
-        batch.set(matchRef, matchData);
-        matchCount++;
-    }
-
-    batch.update(tRef, { status: 'active', participants: participants });
-    await batch.commit();
-
-    // Process any immediate byes in Round 1 so the next round is created right away
-    await checkAndAdvanceTournament(tournamentId, 1);
 };
 
 export const setTournamentMatchActive = async (matchId: string) => {
@@ -611,17 +615,20 @@ export const checkTournamentTimeouts = async (tournamentId: string) => {
 };
 
 export const reportTournamentMatchResult = async (matchId: string, winnerId: string) => {
-    await updateDoc(doc(db, "tournament_matches", matchId), {
-        winnerId,
-        status: 'completed'
+    // Delegate to server API, which handles Firestore update + bracket advancement atomically.
+    const SOCKET_URL = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/tournaments/force-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ matchId, winnerId })
     });
-
-    const mSnap = await getDoc(doc(db, "tournament_matches", matchId));
-    if (!mSnap.exists()) return;
-    const mData = mSnap.data() as TournamentMatch;
-
-    await checkAndAdvanceTournament(mData.tournamentId, mData.round);
-}
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to report match result');
+    }
+};
 
 const checkAndAdvanceTournament = async (tournamentId: string, round: number) => {
     const q = query(

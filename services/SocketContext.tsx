@@ -9,7 +9,7 @@ import React, {
 import { io, Socket } from 'socket.io-client';
 import { SocketGameState } from '../types';
 import { useAppState } from './AppContext';
-import { setTournamentMatchActive, reportTournamentMatchResult, addUserTransaction } from './firebase';
+import { setTournamentMatchActive, reportTournamentMatchResult } from './firebase';
 import { playSFX } from './sound';
 
 // ─── Context Shape ─────────────────────────────────────────────────────────────
@@ -137,39 +137,20 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const handleGameOver = ({ winner, financials }: { winner: string; financials?: any }) => {
             dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
             const currentGame = socketGameRef.current;
-            const currentUser = userRef.current; // always fresh, never stale
+            const currentUser = userRef.current;
 
+            // Report tournament match result via server API (server also handles bracket advancement)
             if (currentUser && winner === currentUser.id && currentGame?.tournamentMatchId) {
                 reportTournamentMatchResult(currentGame.tournamentMatchId, winner)
                     .catch(e => console.error('Tournament result report failed:', e));
             }
 
-            const stake = currentGame?.stake ?? 0;
-            const isRealUser = currentUser && !currentUser.id.startsWith('guest-');
-
-            // Bug F1 complete fix: Debit stake from BOTH players at game end.
-            // Stakes are not held/escrowed at match start, so we settle here.
-            // Only runs when there is a decisive winner (draws skip this — both keep stakes).
-            if (winner && stake > 0 && isRealUser) {
-                addUserTransaction(currentUser!.id, {
-                    type: 'stake_loss',
-                    amount: -stake,
-                    status: 'completed',
-                    date: new Date().toISOString()
-                }).catch(e => console.error('[SocketContext] Stake debit failed:', e));
-            }
+            // Financial settlement is handled entirely server-side by settleGame() in server.js.
+            // The server uses Firebase Admin SDK to atomically credit winnings and debit stakes.
+            // No client-side Firestore writes needed here — balance will update via subscribeToUser.
 
             if (currentUser && winner === currentUser.id) {
                 const winnings = financials?.winnings ?? 0;
-                // Credit winnings immediately on game_over (Bug D fix) so funds aren't lost on disconnect.
-                if (winnings > 0 && isRealUser) {
-                    addUserTransaction(currentUser.id, {
-                        type: 'winnings',
-                        amount: winnings,
-                        status: 'completed',
-                        date: new Date().toISOString()
-                    }).catch(e => console.error('[SocketContext] Winnings credit failed:', e));
-                }
                 dispatch({
                     type: 'SET_GAME_RESULT',
                     payload: { result: 'win', amount: winnings, financials }
@@ -177,7 +158,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             } else if (winner) {
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'loss', amount: 0 } });
             } else {
-                // Draw — no winner, no stake deduction (guard above skips it)
+                // Draw — no financial movement
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'draw', amount: 0 } });
             }
         };

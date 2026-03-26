@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, creditDepositIdempotent, addUserTransaction } from '../services/firebase';
+import { getUserTransactions, creditDepositIdempotent } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -123,28 +123,46 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
     const handleWithdraw = async () => {
         if (!amount || !phone) { setErrorMsg('Please fill in the amount and phone number.'); return; }
-        if (Number(amount) > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); return; }
+        const withdrawAmount = parseInt(amount);
+        if (isNaN(withdrawAmount) || withdrawAmount < 1000) {
+            setErrorMsg('Minimum withdrawal is 1,000 FCFA.');
+            return;
+        }
+        if (withdrawAmount > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); return; }
+        if (!/^6\d{8}$/.test(phone.replace(/\s/g, ''))) {
+            setErrorMsg('Invalid phone number. Must start with 6 and be 9 digits.');
+            return;
+        }
 
         setIsLoading(true);
         setErrorMsg(null);
-        cancelPayment();
 
-        setTimeout(async () => {
-            setIsLoading(false);
-            if (!user.id.startsWith('guest-')) {
-                await addUserTransaction(user.id, {
-                    type: 'withdrawal',
-                    amount: -Number(amount),
-                    status: 'pending',
-                    date: new Date().toISOString()
-                });
+        try {
+            const PROXY_BASE = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
+            const response = await fetch(`${PROXY_BASE}/api/pay/disburse`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount: withdrawAmount, phone: phone.replace(/\s/g, ''), userId: user.id })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                setErrorMsg(data.error || 'Withdrawal failed. Please try again.');
+            } else {
+                setShowSuccess(true);
+                setAmount('');
+                setPhone('');
+                setTimeout(() => setShowSuccess(false), 4000);
+                // Refresh transaction history
+                const history = await getUserTransactions(user.id);
+                setTransactions(history);
+                onTopUp(); // triggers subscribeToUser to refresh balance
             }
-            setShowSuccess(true);
-            setTimeout(() => setShowSuccess(false), 3000);
-            setAmount('');
-            const history = await getUserTransactions(user.id);
-            setTransactions(history);
-        }, 1500);
+        } catch (err) {
+            setErrorMsg('Network error. Please check your connection and try again.');
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const cancelPayment = () => {
