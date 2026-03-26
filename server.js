@@ -471,14 +471,21 @@ const startTournamentScheduler = () => {
     console.log("Tournament scheduler started.");
     setInterval(async () => {
         try {
-            const now = new Date().toISOString();
+            // Query only by status (single-field index — always auto-created by Firestore).
+            // Filter startTime in-memory to avoid requiring a composite index on
+            // (status + startTime). The firestore.indexes.json in the repo will
+            // create the composite index on next firebase deploy.
             const snapshot = await db.collection("tournaments")
                 .where("status", "==", "registration")
-                .where("startTime", "<=", now)
                 .get();
 
+            const now = new Date();
             for (const doc of snapshot.docs) {
-                await startTournamentLogic(doc.id);
+                const tData = doc.data();
+                const startTime = tData.startTime ? new Date(tData.startTime) : null;
+                if (startTime && startTime <= now) {
+                    await startTournamentLogic(doc.id);
+                }
             }
 
             // Also check timeouts for active tournaments
