@@ -175,6 +175,11 @@ app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
     }
 });
 
+// --- SERVER TIME SYNC ---
+app.get('/api/time', (req, res) => {
+    res.json({ time: Date.now() });
+});
+
 // --- FAPSHI PAYOUT (REAL WITHDRAWAL) ---
 app.post('/api/pay/disburse', verifyAuth, async (req, res) => {
     try {

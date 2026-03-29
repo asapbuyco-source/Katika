@@ -54,6 +54,23 @@ const getApiUrl = () => {
     return rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
 };
 
+let serverTimeOffset = 0;
+export const fetchServerTimeOffset = async () => {
+    try {
+        const url = `${getApiUrl()}/api/time`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.time) {
+            serverTimeOffset = data.time - Date.now();
+            console.log(`Server time offset synced: ${serverTimeOffset}ms`);
+        }
+    } catch (err) {
+        console.error('Failed to sync server time offset:', err);
+    }
+};
+
+export const getServerTime = () => Date.now() + serverTimeOffset;
+
 const googleProvider = new GoogleAuthProvider();
 
 // ... (keep auth/user/transaction/game functions as is until Tournaments section) ...

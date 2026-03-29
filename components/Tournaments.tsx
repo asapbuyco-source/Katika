@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp, Bell, Loader2 } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn } from '../services/firebase';
+import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn, fetchServerTimeOffset, getServerTime } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
@@ -32,6 +32,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
 
     // Real-time Status Subscription
     useEffect(() => {
+        fetchServerTimeOffset();
         let unsubTournament: (() => void) | undefined;
         let unsubMatches: (() => void) | undefined;
 
@@ -226,7 +227,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
 
         useEffect(() => {
             const tick = () => {
-                const diff = new Date(startTime).getTime() - Date.now();
+                const diff = new Date(startTime).getTime() - getServerTime();
                 if (diff <= 0) {
                     setParts({ d: 0, h: 0, m: 0, s: 0, past: true });
                 } else {
@@ -246,6 +247,15 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
             return (
                 <div className="flex items-center gap-2 px-4 py-2 bg-gold-500/20 border border-gold-500/40 rounded-xl text-gold-400 font-bold text-sm">
                     <Crown size={16} fill="currentColor" /> Tournament Completed
+                </div>
+            );
+        }
+
+        if (status === 'registration' && parts.past) {
+            return (
+                <div className="flex items-center gap-2 px-4 py-2 bg-yellow-500/20 border border-yellow-500/40 rounded-xl">
+                    <Loader2 size={16} className="animate-spin text-yellow-400" />
+                    <span className="text-yellow-400 font-bold text-sm tracking-wide">GENERATING BRACKET...</span>
                 </div>
             );
         }
@@ -294,7 +304,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
         useEffect(() => {
             const timer = setInterval(() => {
                 const start = new Date(startTime).getTime();
-                const now = Date.now();
+                const now = getServerTime();
                 const diff = start - now;
 
                 if (diff > 0) {
@@ -799,7 +809,16 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                     <RefreshCw className="animate-spin text-gold-400" size={32} />
                                 </div>
                             ) : matches.length === 0 ? (
-                                <div className="text-center text-slate-500 mt-20">Bracket will be generated when tournament starts.</div>
+                                <div className="text-center text-slate-500 mt-20 flex flex-col items-center gap-4">
+                                    {new Date(selectedTournament.startTime).getTime() < getServerTime() ? (
+                                        <>
+                                            <Loader2 className="animate-spin text-gold-500" size={40} />
+                                            <span>Please wait. The server is configuring your opponents...</span>
+                                        </>
+                                    ) : (
+                                        "Bracket will be generated when tournament starts."
+                                    )}
+                                </div>
                             ) : (
                                 <div className="flex gap-16 min-w-max h-full items-center">
                                     {Object.keys(bracketData).sort((a, b) => Number(a) - Number(b)).map((roundNum, rIdx) => (
