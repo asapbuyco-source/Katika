@@ -384,23 +384,28 @@ const AppContent = () => {
 
     const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit' | 'draw') => {
         let tournamentPot = 0;
-        if (activeGameTable?.tournamentMatchId && user) {
+        const tournamentMatchId = activeGameTable?.tournamentMatchId;
+
+        if (tournamentMatchId && user) {
             try {
-                const parts = activeGameTable.tournamentMatchId.split('-');
+                // Extract tournamentId from matchId convention: "m-{tournamentId}-r{round}-{idx}"
+                const parts = tournamentMatchId.split('-');
                 if (parts.length > 1) {
-                    const tDoc = await getDoc(doc(db, 'tournaments', parts[1]));
+                    const tId = parts[1];
+                    const tDoc = await getDoc(doc(db, 'tournaments', tId));
                     if (tDoc.exists()) {
                         const tData = tDoc.data() as Tournament;
-                        // Dynamic tournaments store the net prizePool directly (entry fees minus 10% platform fee).
-                        // Fixed tournaments use house-funded prizePool. Never double-count.
                         tournamentPot = tData.prizePool || 0;
                     }
                 }
             } catch (e) { console.error('[App] Error fetching tournament pot:', e); }
-            if (result === 'win') {
-                await reportTournamentMatchResult(activeGameTable.tournamentMatchId, user.id);
-            }
+
+            // NOTE: Tournament match result is reported EXCLUSIVELY by the server's endGame() hook.
+            // The server calls recordTournamentMatchResult() which advances the bracket atomically.
+            // The client must NOT call reportTournamentMatchResult() here — that would cause
+            // race conditions and double-advancement. Server authority is maintained.
         }
+
         dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
     }, [activeGameTable, user, dispatch]);
 
@@ -408,9 +413,25 @@ const AppContent = () => {
         if (socket && socketGame) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
-        const isTournament = !!activeGameTable?.tournamentMatchId;
+        const tournamentMatchId = activeGameTable?.tournamentMatchId;
+        const isTournament = !!tournamentMatchId;
+
+        // Extract tournamentId from matchId ("m-{tournamentId}-r{round}-{idx}")
+        // so the Tournaments page can auto-open the correct bracket.
+        let pendingTournamentId: string | null = null;
+        if (tournamentMatchId) {
+            const parts = tournamentMatchId.split('-');
+            if (parts.length > 1) pendingTournamentId = parts[1];
+        }
+
         // Navigate FIRST to prevent blank screen (game view with no table)
-        dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
+        if (isTournament) {
+            // Store which tournament to re-open, then navigate
+            dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: pendingTournamentId });
+            dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
+        } else {
+            dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+        }
         // Then clear all game state
         setSocketGame(null);
         dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
@@ -507,7 +528,7 @@ const AppContent = () => {
                                     <MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} />
                                 </MV>
                             )}
-                            {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} /></MV>}
+                            {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} pendingTournamentId={preSelectedGame} onClearPendingTournament={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
                             {currentView === 'game' && user && activeGameTable && (
                                 <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
                                     {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
@@ -552,7 +573,8 @@ const AppContent = () => {
                         amount={gameResult.amount}
                         financials={gameResult.financials}
                         onContinue={finalizeGameEnd}
-                        onRematch={socketGame && isConnected ? handleRematchRequest : undefined}
+                        // No rematch for tournament games — bracket advances automatically
+                        onRematch={socketGame && isConnected && !activeGameTable?.tournamentMatchId ? handleRematchRequest : undefined}
                         rematchStatus={rematchStatus}
                         stake={socketGame?.stake}
                         userBalance={user?.balance}

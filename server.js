@@ -1158,8 +1158,8 @@ io.on('connection', (socket) => {
             }
         }
 
-        // Public Matchmaking Queue
-        const queueKey = `${gameType}_${stake}`;
+        // Public Matchmaking Queue vs Private Room Queue
+        const queueKey = privateRoomId ? `private_${privateRoomId}` : `${gameType}_${stake}`;
         if (!queues.has(queueKey)) queues.set(queueKey, []);
 
         const queue = queues.get(queueKey);
@@ -1172,13 +1172,15 @@ io.on('connection', (socket) => {
             // MATCH FOUND!
             const opponent = queue.shift();
             const opponentId = opponent.userProfile.id;
-            const roomId = generateRoomId();
+            const roomId = privateRoomId || generateRoomId();
 
             // Create Room
             const room = {
                 id: roomId,
                 gameType,
                 stake,
+                privateRoomId: privateRoomId || undefined,
+                tournamentMatchId: privateRoomId?.startsWith('m-') ? privateRoomId : undefined,
                 players: [opponentId, userId], // Player 0 (Host), Player 1 (Joiner)
                 profiles: {
                     [opponentId]: opponent.userProfile,

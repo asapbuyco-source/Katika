@@ -117,7 +117,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         >
             <h2 className="text-2xl font-display font-bold text-white mb-2">
                 {status === 'connecting' && "Accessing Vantage Network..."}
-                {status === 'waiting' && (isSocketMode ? "Connecting to Real-time Server..." : "Waiting for Opponent...")}
+                {status === 'waiting' && (isSocketMode ? "Waiting for Opponent..." : "Waiting for Opponent...")}
                 {status === 'found' && "MATCH SECURED"}
             </h2>
             
@@ -133,8 +133,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                     </motion.div>
                 ) : (
                     <>
-                        <p className="text-slate-400 font-mono text-sm">
-                            {isSocketMode ? "Searching for players..." : "Searching Global Pool..."}
+                        <p className="text-slate-400 font-mono text-sm uppercase tracking-widest text-gold-500 font-bold">
+                            {isSocketMode ? "Waiting in Arena..." : "Searching Global Pool..."}
                         </p>
                         <div className="px-3 py-1 bg-royal-800 rounded-full border border-gold-500/30 text-gold-400 text-xs font-bold">
                             Stake: {stake.toLocaleString()} FCFA
@@ -196,15 +196,27 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         <div className="mt-16 w-full max-w-sm">
             {status !== 'found' && (
                 <>
-                    <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
-                        <ShieldAlert className="text-yellow-500 shrink-0 mt-0.5" size={18} />
-                        <div className="space-y-1">
-                            <p className="text-xs font-bold text-yellow-500 uppercase tracking-wide">Do not leave this screen</p>
-                            <p className="text-[11px] text-yellow-200/70 leading-relaxed">
-                                Minimizing the app or closing the browser during matchmaking may result in a connection drop or forfeit of your stake.
-                            </p>
+                    {isSocketMode ? (
+                        <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
+                            <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={18} />
+                            <div className="space-y-1">
+                                <p className="text-xs font-bold text-red-500 uppercase tracking-wide">Arena Rules</p>
+                                <p className="text-[11px] text-red-200/70 leading-relaxed">
+                                    Your opponent has not arrived yet. If they do not join within <span className="font-bold text-white">5 minutes</span> of the match start time, they will automatically forfeit, and you will advance. Stay on this screen.
+                                </p>
+                            </div>
                         </div>
-                    </div>
+                    ) : (
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
+                            <ShieldAlert className="text-yellow-500 shrink-0 mt-0.5" size={18} />
+                            <div className="space-y-1">
+                                <p className="text-xs font-bold text-yellow-500 uppercase tracking-wide">Do not leave this screen</p>
+                                <p className="text-[11px] text-yellow-200/70 leading-relaxed">
+                                    Minimizing the app or closing the browser during matchmaking may result in a connection drop or forfeit of your stake.
+                                </p>
+                            </div>
+                        </div>
+                    )}
 
                     <motion.button 
                         initial={{ opacity: 0 }}

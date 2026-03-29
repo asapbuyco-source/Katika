@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp, Bell } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp, Bell, Loader2 } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
 import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn } from '../services/firebase';
 import { playSFX } from '../services/sound';
@@ -9,10 +9,12 @@ import { playSFX } from '../services/sound';
 interface TournamentsProps {
     user: User;
     onJoinMatch: (gameType: string, tournamentMatchId: string) => void;
-    socket?: any; // Socket.IO client instance for real-time notifications
+    socket?: any;
+    pendingTournamentId?: string | null;   // From App.tsx: auto-open this tournament on return from match
+    onClearPendingTournament?: () => void; // Call this after opening, to prevent re-trigger
 }
 
-export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, socket }) => {
+export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, socket, pendingTournamentId, onClearPendingTournament }) => {
     const [activeTab, setActiveTab] = useState<'list' | 'detail'>('list');
     const [tournaments, setTournaments] = useState<Tournament[]>([]);
     const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -122,7 +124,34 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
         const data = await getTournaments();
         setTournaments(data);
         setLoading(false);
+        return data; // return so callers can use the fresh list
     };
+
+    // Auto-open tournament bracket on return from a match
+    // (App.tsx passes the tournamentId via pendingTournamentId after game end)
+    useEffect(() => {
+        if (!pendingTournamentId) return;
+        const open = async () => {
+            const data = await fetchTournaments();
+            const t = data.find(x => x.id === pendingTournamentId);
+            if (t) {
+                setSelectedTournament(t);
+                setActiveTab('detail');
+                // Show a status banner so user knows what happened
+                const msg = t.status === 'completed'
+                    ? '🏆 Tournament finished! See the final results below.'
+                    : t.status === 'active'
+                        ? '⚔️ Tournament is still active. Your bracket has been updated.'
+                        : '📋 Back to your tournament.';
+                setMatchAlert({ matchId: '', message: msg });
+                if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+                alertTimerRef.current = setTimeout(() => setMatchAlert(null), 8000);
+            }
+            onClearPendingTournament?.();
+        };
+        open();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [pendingTournamentId]);
 
     const handleSelectTournament = async (t: Tournament) => {
         setSelectedTournament(t);
@@ -287,8 +316,8 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                     }
                 } else if (status === 'scheduled') {
                     // Start time passed but not yet activated by scheduler (short gap)
-                    setTimeLeft('Starting...');
-                    setUrgent(false);
+                    setTimeLeft('Creating Match...');
+                    setUrgent(true);
                 } else {
                     setTimeLeft('—');
                     setUrgent(false);
@@ -297,7 +326,12 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
             return () => clearInterval(timer);
         }, [startTime, status]);
 
-        return <span className={`font-mono font-bold ${urgent ? 'text-red-400 animate-pulse' : 'text-gold-400'}`}>{timeLeft}</span>;
+        return (
+            <span className={`flex items-center gap-2 font-mono font-bold ${urgent ? 'text-red-400 animate-pulse' : 'text-gold-400'}`}>
+                {timeLeft === 'Creating Match...' && <Loader2 size={14} className="animate-spin" />}
+                {timeLeft}
+            </span>
+        );
     };
 
     return (
@@ -623,7 +657,21 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                             <div className="flex justify-between items-end mb-4">
                                                 <div>
                                                     <div className="text-xs text-slate-500 font-bold mb-1">VS</div>
-                                                    <div className="text-lg font-bold text-white">{myNextMatch.player1?.id === user.id ? myNextMatch.player2?.name || "BYE (Auto Win)" : myNextMatch.player1?.name}</div>
+                                                    <div className="text-lg font-bold text-white flex flex-col gap-2">
+                                                        <span>{myNextMatch.player1?.id === user.id ? myNextMatch.player2?.name || "BYE (Auto Win)" : myNextMatch.player1?.name}</span>
+                                                        {(() => {
+                                                            const oppId = myNextMatch.player1?.id === user.id ? myNextMatch.player2?.id : myNextMatch.player1?.id;
+                                                            const oppWaiting = oppId && myNextMatch.checkedIn?.includes(oppId) && !myNextMatch.checkedIn?.includes(user.id);
+                                                            if (oppWaiting) {
+                                                                return (
+                                                                    <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-red-500/20 text-red-400 text-[10px] font-bold tracking-widest uppercase rounded-full border border-red-500/30 animate-pulse shadow-[0_0_15px_rgba(239,68,68,0.2)]">
+                                                                        ⚠️ Opponent is waiting in the arena!
+                                                                    </div>
+                                                                );
+                                                            }
+                                                            return null;
+                                                        })()}
+                                                    </div>
                                                 </div>
                                                 <div className="text-right">
                                                     <div className="text-xs text-slate-500 font-bold mb-1">STARTS IN</div>
