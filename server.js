@@ -314,233 +314,366 @@ app.post('/api/tournaments/register', verifyAuth, async (req, res) => {
     }
 });
 
-// Helper for starting tournament logic
+// ─── TOURNAMENT CORE LOGIC ──────────────────────────────────────────────────
+
+/**
+ * Finalise a tournament once the last match is done.
+ * Uses an idempotency sentinel document so concurrent calls are safe.
+ */
+const finaliseTournament = async (tournamentId, winnerId) => {
+    if (!db) return;
+    const sentinelRef = db.collection('processed_tournaments').doc(tournamentId);
+    const tRef = db.collection('tournaments').doc(tournamentId);
+
+    await db.runTransaction(async (tx) => {
+        const [sentinelSnap, tSnap, userSnap] = await Promise.all([
+            tx.get(sentinelRef),
+            tx.get(tRef),
+            tx.get(db.collection('users').doc(winnerId))
+        ]);
+
+        if (sentinelSnap.exists) return; // already paid out
+        if (!tSnap.exists || tSnap.data().status === 'completed') return;
+
+        const tData = tSnap.data();
+        const prize = tData.prizePool || 0;
+
+        if (userSnap.exists && prize > 0) {
+            const userRef = db.collection('users').doc(winnerId);
+            tx.update(userRef, { balance: (userSnap.data().balance || 0) + prize });
+            tx.set(userRef.collection('transactions').doc(), {
+                type: 'winnings',
+                amount: prize,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                note: `Tournament Win: ${tData.name}`
+            });
+            console.log(`[Tournament] ${tData.name}: credited ${prize} FCFA to winner ${winnerId}`);
+        }
+
+        tx.update(tRef, { status: 'completed', winnerId });
+        tx.set(sentinelRef, {
+            winnerId,
+            finalizedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+    });
+};
+
+/**
+ * Check if a round is fully done and advance to the next round or
+ * finalise the tournament if there is only one winner left.
+ */
+const checkAndAdvanceTournamentLogic = async (tournamentId, round) => {
+    if (!db) return;
+
+    const matchesSnap = await db.collection('tournament_matches')
+        .where('tournamentId', '==', tournamentId)
+        .where('round', '==', round)
+        .get();
+
+    const matches = matchesSnap.docs.map(d => d.data());
+    if (matches.length === 0) return;
+
+    const allComplete = matches.every(m => m.status === 'completed');
+    if (!allComplete) return;
+
+    matches.sort((a, b) => a.matchIndex - b.matchIndex);
+    const winners = matches.map(m => m.winnerId).filter(Boolean);
+
+    // ── Single winner → tournament over ──────────────────────────────────────
+    if (winners.length === 1) {
+        await finaliseTournament(tournamentId, winners[0]);
+        return;
+    }
+
+    // ── Guard: don't create next round twice ─────────────────────────────────
+    const nextRoundSnap = await db.collection('tournament_matches')
+        .where('tournamentId', '==', tournamentId)
+        .where('round', '==', round + 1)
+        .limit(1)
+        .get();
+    if (!nextRoundSnap.empty) {
+        console.log(`[Tournament] ${tournamentId} R${round + 1} already exists, skipping.`);
+        return;
+    }
+
+    console.log(`[Tournament] ${tournamentId} advancing R${round} → R${round + 1} (${winners.length} winners)`);
+
+    // ── Next round starts 10 minutes from now ────────────────────────────────
+    const nextRoundStartTime = new Date(Date.now() + 10 * 60 * 1000).toISOString();
+
+    const batch = db.batch();
+    let nextMatchCount = 0;
+
+    for (let i = 0; i < winners.length; i += 2) {
+        const p1Id = winners[i];
+        const p2Id = winners[i + 1]; // undefined if odd number of winners (bye)
+
+        const [p1Doc, p2Doc] = await Promise.all([
+            db.collection('users').doc(p1Id).get(),
+            p2Id ? db.collection('users').doc(p2Id).get() : Promise.resolve(null)
+        ]);
+
+        const p1 = p1Doc?.exists ? p1Doc.data() : { id: p1Id, name: 'Unknown', avatar: '', rankTier: 'Bronze' };
+        const p2 = p2Doc?.exists ? p2Doc.data() : (p2Id ? { id: p2Id, name: 'Unknown', avatar: '', rankTier: 'Bronze' } : null);
+
+        const newMatchId = `m-${tournamentId}-r${round + 1}-${nextMatchCount}`;
+        const isBye = !p2Id;
+
+        batch.set(db.collection('tournament_matches').doc(newMatchId), {
+            id: newMatchId,
+            tournamentId,
+            round: round + 1,
+            matchIndex: nextMatchCount,
+            player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo || 0 },
+            player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo || 0 } : null,
+            // If bye, auto-win for player1
+            winnerId: isBye ? p1Id : null,
+            status: isBye ? 'completed' : 'scheduled',
+            startTime: nextRoundStartTime,
+            checkedIn: []
+        });
+        nextMatchCount++;
+    }
+
+    await batch.commit();
+
+    // Recursively cascade any new byes immediately
+    if (nextMatchCount > 0) {
+        await checkAndAdvanceTournamentLogic(tournamentId, round + 1);
+    }
+};
+
+/**
+ * Start a tournament: shuffle participants, pair them into R1 matches,
+ * mark byes, and cascade immediately so odd-player byes propagate.
+ */
 const startTournamentLogic = async (tournamentId) => {
     if (!db) return;
-    const tRef = db.collection("tournaments").doc(tournamentId);
+    const tRef = db.collection('tournaments').doc(tournamentId);
 
     try {
         const tDoc = await tRef.get();
         if (!tDoc.exists) return;
         const tData = tDoc.data();
-        if (tData.status !== 'registration') return;
+        if (tData.status !== 'registration') {
+            console.log(`[Tournament] ${tournamentId} is not in registration (status=${tData.status}), skipping.`);
+            return;
+        }
+        if (tData.participants.length === 0) {
+            console.warn(`[Tournament] ${tournamentId} has no participants, cancelling.`);
+            await tRef.update({ status: 'cancelled', cancelledAt: admin.firestore.FieldValue.serverTimestamp() });
+            return;
+        }
 
-        console.log(`Starting tournament: ${tData.name} (${tournamentId})`);
+        console.log(`[Tournament] Starting: ${tData.name} (${tournamentId}) with ${tData.participants.length} players`);
 
+        // Shuffle participants
         const participants = [...tData.participants];
-        // Shuffle
         for (let i = participants.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [participants[i], participants[j]] = [participants[j], participants[i]];
         }
 
-        const batch = db.batch();
-        const matchesRef = db.collection("tournament_matches");
-        let matchCount = 0;
-        const round = 1;
-
+        // Fetch player profiles
         const playerProfiles = await Promise.all(participants.map(async (uid) => {
             const uSnap = await db.collection('users').doc(uid).get();
-            return uSnap.exists ? uSnap.data() : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
+            return uSnap.exists
+                ? { id: uid, ...uSnap.data() }
+                : { id: uid, name: 'Unknown', avatar: '', elo: 0, rankTier: 'Bronze' };
         }));
 
-        while (playerProfiles.length > 0) {
-            const p1 = playerProfiles.pop();
-            const p2 = playerProfiles.pop();
+        // Pair players — odd player gets a bye (auto-win)
+        const batch = db.batch();
+        const matchesRef = db.collection('tournament_matches');
+        const startTime = tData.startTime; // Use the original scheduled start time for R1
+        let matchCount = 0;
 
-            const matchId = `m-${tournamentId}-r${round}-${matchCount}`;
-            const matchRef = matchesRef.doc(matchId);
+        for (let i = 0; i < playerProfiles.length; i += 2) {
+            const p1 = playerProfiles[i];
+            const p2 = playerProfiles[i + 1] || null; // null = bye
+            const matchId = `m-${tournamentId}-r1-${matchCount}`;
+            const isBye = !p2;
 
-            const matchData = {
+            batch.set(matchesRef.doc(matchId), {
                 id: matchId,
                 tournamentId,
-                round,
+                round: 1,
                 matchIndex: matchCount,
-                player1: p1 ? { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo } : null,
-                player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo } : null,
-                winnerId: p2 ? null : p1?.id,
-                status: p2 ? 'scheduled' : 'completed',
-                startTime: tData.startTime,
-                nextMatchId: null
-            };
-
-            batch.set(matchRef, matchData);
+                player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo || 0 },
+                player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo || 0 } : null,
+                winnerId: isBye ? p1.id : null,
+                status: isBye ? 'completed' : 'scheduled',
+                startTime,   // ISO string from tournament config
+                checkedIn: []
+            });
             matchCount++;
         }
 
-        batch.update(tRef, { status: 'active', participants: participants });
+        // Mark tournament as active with shuffled order
+        batch.update(tRef, { status: 'active', participants });
         await batch.commit();
 
-        // Initial bye check
+        console.log(`[Tournament] ${tournamentId}: ${matchCount} R1 matches created (${participants.length} players).`);
+
+        // Cascade byes immediately (e.g., all byes in R1 → create R2 automatically)
         await checkAndAdvanceTournamentLogic(tournamentId, 1);
     } catch (err) {
-        console.error(`Error starting tournament ${tournamentId}:`, err);
+        console.error(`[Tournament] Error starting ${tournamentId}:`, err);
     }
 };
 
-const checkAndAdvanceTournamentLogic = async (tournamentId, round) => {
+/**
+ * Record a match result, then advance the bracket.
+ * Called both by game engine (endGame hook) and admin API.
+ */
+const recordTournamentMatchResult = async (matchId, winnerId) => {
     if (!db) return;
-    const matchesSnap = await db.collection("tournament_matches")
-        .where("tournamentId", "==", tournamentId)
-        .where("round", "==", round)
-        .get();
+    try {
+        const mRef = db.collection('tournament_matches').doc(matchId);
+        const mSnap = await mRef.get();
+        if (!mSnap.exists) return;
+        const mData = mSnap.data();
+        if (mData.status === 'completed') return; // idempotent
 
-    const matches = matchesSnap.docs.map(d => d.data());
-    if (matches.length === 0 || !matches.every(m => m.status === 'completed')) return;
+        await mRef.update({ winnerId, status: 'completed', completedAt: admin.firestore.FieldValue.serverTimestamp() });
+        await checkAndAdvanceTournamentLogic(mData.tournamentId, mData.round);
 
-    // Guard: prevent duplicate next-round creation (race between scheduler and admin API)
-    const nextRoundSnap = await db.collection("tournament_matches")
-        .where("tournamentId", "==", tournamentId)
-        .where("round", "==", round + 1)
-        .limit(1)
-        .get();
-    if (!nextRoundSnap.empty) {
-        console.log(`[Tournament] ${tournamentId} round ${round + 1} already exists, skipping advance.`);
-        return;
-    }
-
-    console.log(`Advancing tournament ${tournamentId} to next round from R${round}`);
-
-    matches.sort((a, b) => a.matchIndex - b.matchIndex);
-    const winners = matches.map(m => m.winnerId).filter(Boolean);
-
-    if (winners.length === 1 && matches.length === 1) {
-        // Final winner
-        await db.runTransaction(async (tx) => {
-            const tRef = db.collection("tournaments").doc(tournamentId);
-            const tDoc = await tx.get(tRef);
-            if (!tDoc.exists || tDoc.data().status === 'completed') return;
-
-            const tData = tDoc.data();
-            const winnerId = winners[0];
-            const userRef = db.collection("users").doc(winnerId);
-            const userDoc = await tx.get(userRef);
-
-            if (userDoc.exists) {
-                const prize = tData.prizePool || 0;
-                tx.update(userRef, { balance: (userDoc.data().balance || 0) + prize });
-                tx.set(userRef.collection("transactions").doc(), {
-                    type: 'winnings',
-                    amount: prize,
-                    status: 'completed',
-                    date: new Date().toISOString(),
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    note: `Tournament Win: ${tData.name}`
-                });
+        // Notify connected players via socket
+        [mData.player1?.id, mData.player2?.id].filter(Boolean).forEach(pid => {
+            const sId = userSockets.get(pid);
+            if (sId) {
+                const sock = io.sockets.sockets.get(sId);
+                if (sock) sock.emit('tournament_match_result', { matchId, winnerId });
             }
-            tx.update(tRef, { status: 'completed', winnerId: winnerId });
         });
-        return;
+    } catch (err) {
+        console.error(`[Tournament] recordTournamentMatchResult ${matchId}:`, err);
     }
-
-    const batch = db.batch();
-    let nextMatchCount = 0;
-    for (let i = 0; i < winners.length; i += 2) {
-        const p1Id = winners[i];
-        const p2Id = winners[i + 1];
-
-        const p1Doc = await db.collection("users").doc(p1Id).get();
-        const p1 = p1Doc.exists ? p1Doc.data() : { id: p1Id, name: 'Unknown' };
-
-        let p2 = null;
-        if (p2Id) {
-            const p2Doc = await db.collection("users").doc(p2Id).get();
-            p2 = p2Doc.exists ? p2Doc.data() : { id: p2Id, name: 'Unknown' };
-        }
-
-        const newMatchId = `m-${tournamentId}-r${round + 1}-${nextMatchCount}`;
-        batch.set(db.collection("tournament_matches").doc(newMatchId), {
-            id: newMatchId,
-            tournamentId,
-            round: round + 1,
-            matchIndex: nextMatchCount,
-            player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier },
-            player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier } : null,
-            winnerId: p2Id ? null : p1Id,
-            status: p2Id ? 'scheduled' : 'completed',
-            startTime: new Date(Date.now() + 60000).toISOString()
-        });
-        nextMatchCount++;
-    }
-    await batch.commit();
 };
 
-// --- BACKGROUND SCHEDULER ---
+// ─── BACKGROUND SCHEDULER ────────────────────────────────────────────────────
 const startTournamentScheduler = () => {
     if (!db) return;
-    console.log("Tournament scheduler started.");
-    setInterval(async () => {
+    console.log('[Scheduler] Tournament scheduler started (60s interval).');
+
+    const runScheduler = async () => {
+        const now = new Date();
+        const nowIso = now.toISOString();
+
         try {
-            // Query only by status (single-field index — always auto-created by Firestore).
-            // Filter startTime in-memory to avoid requiring a composite index on
-            // (status + startTime). The firestore.indexes.json in the repo will
-            // create the composite index on next firebase deploy.
-            const snapshot = await db.collection("tournaments")
-                .where("status", "==", "registration")
+            // ── 1. Auto-start tournaments whose registration period has ended ────
+            const regSnap = await db.collection('tournaments')
+                .where('status', '==', 'registration')
                 .get();
 
-            const now = new Date();
-            for (const doc of snapshot.docs) {
+            for (const doc of regSnap.docs) {
                 const tData = doc.data();
-                const startTime = tData.startTime ? new Date(tData.startTime) : null;
-                if (startTime && startTime <= now) {
+                if (tData.startTime && new Date(tData.startTime) <= now) {
                     await startTournamentLogic(doc.id);
                 }
             }
 
-            // Also check timeouts for active tournaments
-            const activeTourneys = await db.collection("tournaments").where("status", "==", "active").get();
-            for (const tDoc of activeTourneys.docs) {
-                // Simplified timeout check: port logic from firebase.ts checkTournamentTimeouts
-                const matches = await db.collection("tournament_matches")
-                    .where("tournamentId", "==", tDoc.id)
-                    .where("status", "==", "scheduled")
-                    .get();
+            // ── 2. Activate scheduled matches whose start time has arrived ───────
+            const scheduledSnap = await db.collection('tournament_matches')
+                .where('status', '==', 'scheduled')
+                .get();
 
-                const curTime = new Date();
-                for (const mDoc of matches.docs) {
-                    const m = mDoc.data();
-                    const start = new Date(m.startTime);
-                    const elapsedMin = (curTime.getTime() - start.getTime()) / 60000;
+            for (const mDoc of scheduledSnap.docs) {
+                const m = mDoc.data();
+                if (!m.startTime) continue;
+                const start = new Date(m.startTime);
+                const elapsedMin = (now.getTime() - start.getTime()) / 60000;
 
-                    // Fix 3: Emit a pre-forfeit warning at 4 min, forfeit at 5 min
-                    if (elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
-                        // Mark warning as issued so we don't spam
-                        await db.collection("tournament_matches").doc(m.id).update({ warningIssued: true });
-                        // Broadcast to both players' sockets if connected
-                        [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
-                            const sId = userSockets.get(pid);
-                            if (sId) {
-                                const sock = io.sockets.sockets.get(sId);
-                                if (sock) sock.emit('tournament_warning', {
-                                    matchId: m.id,
-                                    message: 'Your tournament match will be auto-forfeited in 60 seconds if not started!'
-                                });
-                            }
-                        });
-                        console.log(`[Scheduler] Pre-forfeit warning issued for match ${m.id}`);
+                if (elapsedMin >= 0 && elapsedMin < 0.5) {
+                    // Match just started — activate it
+                    await db.collection('tournament_matches').doc(m.id).update({ status: 'active' });
+                    console.log(`[Scheduler] Match ${m.id} activated.`);
+
+                    // Notify both players via socket
+                    [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
+                        const sId = userSockets.get(pid);
+                        if (sId) {
+                            const sock = io.sockets.sockets.get(sId);
+                            if (sock) sock.emit('tournament_match_active', {
+                                matchId: m.id,
+                                tournamentId: m.tournamentId,
+                                opponent: m.player1?.id === pid ? m.player2 : m.player1
+                            });
+                        }
+                    });
+                }
+            }
+
+            // ── 3. Forfeit active matches that have timed out (5 min window) ─────
+            const activeMatchesSnap = await db.collection('tournament_matches')
+                .where('status', '==', 'active')
+                .get();
+
+            for (const mDoc of activeMatchesSnap.docs) {
+                const m = mDoc.data();
+                if (!m.startTime) continue;
+                const start = new Date(m.startTime);
+                const elapsedMin = (now.getTime() - start.getTime()) / 60000;
+
+                // Warning at 4 min
+                if (elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
+                    await db.collection('tournament_matches').doc(m.id).update({ warningIssued: true });
+                    [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
+                        const sId = userSockets.get(pid);
+                        if (sId) {
+                            const sock = io.sockets.sockets.get(sId);
+                            if (sock) sock.emit('tournament_warning', {
+                                matchId: m.id,
+                                message: 'Your match will be auto-forfeited in 60 seconds! Join the lobby now.'
+                            });
+                        }
+                    });
+                }
+
+                // Forfeit at 5 min — fair no-show logic
+                if (elapsedMin > 5) {
+                    const checkedIn = m.checkedIn || [];
+                    const p1Id = m.player1?.id;
+                    const p2Id = m.player2?.id;
+                    let winnerId = null;
+                    let forfeitType = 'both_absent';
+
+                    if (p1Id && p2Id) {
+                        const p1In = checkedIn.includes(p1Id);
+                        const p2In = checkedIn.includes(p2Id);
+                        if (p1In && !p2In) { winnerId = p1Id; forfeitType = 'p2_absent'; }
+                        else if (p2In && !p1Id) { winnerId = p2Id; forfeitType = 'p1_absent'; }
+                        else {
+                            // Neither showed — lower matchIndex player wins (deterministic)
+                            winnerId = p1Id;
+                            forfeitType = 'both_absent';
+                        }
+                    } else {
+                        winnerId = p1Id || p2Id;
                     }
 
-                    if (elapsedMin > 5) { // 5 min timeout
-                        console.log(`Timeout for match ${m.id}`);
-                        // player1 gets the bye only if player2 was the one who didn't show;
-                        // if both absent, pick player1 as default (documented limitation)
-                        const winnerId = m.player1?.id || m.player2?.id;
-                        if (winnerId) {
-                            await db.collection("tournament_matches").doc(m.id).update({
-                                winnerId,
-                                status: 'completed',
-                                forfeitReason: 'auto_timeout'
-                            });
-                            await checkAndAdvanceTournamentLogic(tDoc.id, m.round);
-                        }
+                    if (winnerId) {
+                        console.log(`[Scheduler] Forfeiting match ${m.id}: winner=${winnerId}, type=${forfeitType}`);
+                        await db.collection('tournament_matches').doc(m.id).update({
+                            winnerId,
+                            status: 'completed',
+                            forfeitReason: 'no_show',
+                            forfeitType
+                        });
+                        await checkAndAdvanceTournamentLogic(m.tournamentId, m.round);
                     }
                 }
             }
         } catch (err) {
-            console.error("Scheduler error:", err);
+            console.error('[Scheduler] Error:', err);
         }
-    }, 60000); // Pulse every minute
+    };
+
+    // Run once immediately on startup, then every 30 seconds
+    runScheduler();
+    setInterval(runScheduler, 30000);
 };
 
 if (db) startTournamentScheduler();
@@ -841,6 +974,16 @@ const endGame = (roomId, winnerId, reason) => {
             winnings
         }
     });
+
+    // ── Tournament match hook ──────────────────────────────────────────────────
+    // If this game was for a tournament match, record the result and advance the bracket.
+    const tournamentMatchId = room.tournamentMatchId || room.privateRoomId;
+    if (db && winnerId && tournamentMatchId) {
+        // The privateRoomId is used as the matchId convention in this app
+        recordTournamentMatchResult(tournamentMatchId, winnerId).catch(e =>
+            console.error(`[endGame] Tournament advancement failed for match ${tournamentMatchId}:`, e)
+        );
+    }
 
     // Cleanup Room Data after a delay (Extended for Rematch window)
     setTimeout(() => {

@@ -1,17 +1,18 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp } from 'lucide-react';
+import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp, Bell } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, checkTournamentTimeouts, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn } from '../services/firebase';
+import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn } from '../services/firebase';
 import { playSFX } from '../services/sound';
 
 interface TournamentsProps {
     user: User;
     onJoinMatch: (gameType: string, tournamentMatchId: string) => void;
+    socket?: any; // Socket.IO client instance for real-time notifications
 }
 
-export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) => {
+export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, socket }) => {
     const [activeTab, setActiveTab] = useState<'list' | 'detail'>('list');
     const [tournaments, setTournaments] = useState<Tournament[]>([]);
     const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -19,6 +20,8 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
     const [loading, setLoading] = useState(false);
     const [viewMode, setViewMode] = useState<'bracket' | 'rules'>('bracket');
     const [championProfile, setChampionProfile] = useState<User | null>(null);
+    const [matchAlert, setMatchAlert] = useState<{ matchId: string; message: string } | null>(null);
+    const alertTimerRef = useRef<any>(null);
 
     // Registration Modal State
     const [showRegModal, setShowRegModal] = useState(false);
@@ -49,16 +52,41 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
         };
     }, [selectedTournament?.id]);
 
-    // Time Elimination Loop
+    // Real-time timeout elimination is handled entirely by the server scheduler.
+    // The client polls tournament_matches via subscribeToTournamentMatches for updates.
+
+    // Socket: real-time match activation & warning events
     useEffect(() => {
-        let interval: any;
-        if (selectedTournament && selectedTournament.status === 'active') {
-            interval = setInterval(() => {
-                checkTournamentTimeouts(selectedTournament.id);
-            }, 15000);
-        }
-        return () => clearInterval(interval);
-    }, [selectedTournament?.status, selectedTournament?.id]);
+        if (!socket) return;
+
+        const onMatchActive = (data: { matchId: string; tournamentId: string; opponent: any }) => {
+            playSFX('win');
+            setMatchAlert({ matchId: data.matchId, message: '🎮 Your match is LIVE! Enter the lobby now.' });
+            if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+            alertTimerRef.current = setTimeout(() => setMatchAlert(null), 30000);
+            fetchTournaments();
+        };
+
+        const onWarning = (data: { matchId: string; message: string }) => {
+            playSFX('error');
+            setMatchAlert({ matchId: data.matchId, message: `⚠️ ${data.message}` });
+        };
+
+        const onResult = () => {
+            fetchTournaments();
+        };
+
+        socket.on('tournament_match_active', onMatchActive);
+        socket.on('tournament_warning', onWarning);
+        socket.on('tournament_match_result', onResult);
+
+        return () => {
+            socket.off('tournament_match_active', onMatchActive);
+            socket.off('tournament_warning', onWarning);
+            socket.off('tournament_match_result', onResult);
+            if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+        };
+    }, [socket]);
 
     // Fetch Champion Logic
     useEffect(() => {
@@ -147,35 +175,70 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
 
     const bracketData = getBracketRounds();
 
-    const MatchTimer = ({ startTime }: { startTime: string }) => {
+    const MatchTimer = ({ startTime, status }: { startTime: string; status: string }) => {
         const [timeLeft, setTimeLeft] = useState("");
+        const [urgent, setUrgent] = useState(false);
 
         useEffect(() => {
             const timer = setInterval(() => {
                 const start = new Date(startTime).getTime();
                 const now = Date.now();
-                const diff = start - now;
+                const diff = start - now; // negative once past start
 
-                if (diff <= 0) {
-                    if (now - start > 3 * 60 * 1000) {
-                        setTimeLeft("AWAITING FORFEIT");
-                    } else {
-                        setTimeLeft("LIVE - JOIN NOW");
-                    }
-                } else {
+                if (diff > 0) {
+                    // Countdown to start
                     const m = Math.floor(diff / 60000);
                     const s = Math.floor((diff % 60000) / 1000);
-                    setTimeLeft(`${m}:${s.toString().padStart(2, '0')}`);
+                    setTimeLeft(`Starts in ${m}:${s.toString().padStart(2, '0')}`);
+                    setUrgent(false);
+                } else if (status === 'active') {
+                    // Match is live — show elapsed
+                    const elapsed = Math.floor(-diff / 60000);
+                    const remaining = 5 - elapsed;
+                    if (remaining > 0) {
+                        setTimeLeft(`LIVE — ${remaining}m to join`);
+                        setUrgent(remaining <= 2);
+                    } else {
+                        setTimeLeft('FORFEITING SOON...');
+                        setUrgent(true);
+                    }
+                } else {
+                    setTimeLeft('Starting...');
                 }
             }, 1000);
             return () => clearInterval(timer);
-        }, [startTime]);
+        }, [startTime, status]);
 
-        return <span className="font-mono font-bold text-gold-400">{timeLeft}</span>;
+        return <span className={`font-mono font-bold ${urgent ? 'text-red-400 animate-pulse' : 'text-gold-400'}`}>{timeLeft}</span>;
     };
 
     return (
         <div className="p-4 md:p-6 max-w-7xl mx-auto min-h-screen pb-24 md:pb-6 relative overflow-hidden">
+
+            {/* MATCH ACTIVATION ALERT */}
+            <AnimatePresence>
+                {matchAlert && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -40 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -40 }}
+                        className="fixed top-4 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md"
+                    >
+                        <div className="mx-4 p-4 bg-gradient-to-r from-gold-500 to-gold-600 rounded-2xl shadow-2xl flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3">
+                                <Bell size={20} className="text-royal-950 shrink-0 animate-bounce" />
+                                <span className="font-bold text-royal-950 text-sm">{matchAlert.message}</span>
+                            </div>
+                            <button
+                                onClick={() => setMatchAlert(null)}
+                                className="text-royal-950 hover:text-royal-800"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             {/* REGISTRATION MODAL */}
             <AnimatePresence>
@@ -470,8 +533,9 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch }) =
                                                 </div>
                                                 <div className="text-right">
                                                     <div className="text-xs text-slate-500 font-bold mb-1">STARTS IN</div>
-                                                    <MatchTimer startTime={myNextMatch.startTime} />
+                                                    <MatchTimer startTime={myNextMatch.startTime} status={myNextMatch.status} />
                                                 </div>
+
                                             </div>
                                             {myNextMatch.player2 ? (
                                                 <button

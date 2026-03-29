@@ -507,7 +507,7 @@ const AppContent = () => {
                                     <MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} />
                                 </MV>
                             )}
-                            {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} /></MV>}
+                            {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} /></MV>}
                             {currentView === 'game' && user && activeGameTable && (
                                 <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
                                     {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
