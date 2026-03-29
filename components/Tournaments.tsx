@@ -76,17 +76,32 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
             fetchTournaments();
         };
 
+        // Handle tournament completion broadcast — force a full refresh
+        const onTournamentCompleted = (data: { tournamentId: string; winnerId: string }) => {
+            playSFX('win');
+            fetchTournaments();
+            // If viewing this tournament, force refresh it
+            if (selectedTournament?.id === data.tournamentId) {
+                // subscribeToTournament will auto-update via real-time listener
+                setMatchAlert({ matchId: '', message: '🏆 Tournament Complete! Champion has been crowned.' });
+                if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
+                alertTimerRef.current = setTimeout(() => setMatchAlert(null), 10000);
+            }
+        };
+
         socket.on('tournament_match_active', onMatchActive);
         socket.on('tournament_warning', onWarning);
         socket.on('tournament_match_result', onResult);
+        socket.on('tournament_completed', onTournamentCompleted);
 
         return () => {
             socket.off('tournament_match_active', onMatchActive);
             socket.off('tournament_warning', onWarning);
             socket.off('tournament_match_result', onResult);
+            socket.off('tournament_completed', onTournamentCompleted);
             if (alertTimerRef.current) clearTimeout(alertTimerRef.current);
         };
-    }, [socket]);
+    }, [socket, selectedTournament?.id]);
 
     // Fetch Champion Logic
     useEffect(() => {
@@ -175,6 +190,74 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
 
     const bracketData = getBracketRounds();
 
+    // ─── TOURNAMENT COUNTDOWN ────────────────────────────────────────────────────
+    // Shows a large DD:HH:MM:SS countdown until tournament start.
+    const TournamentCountdown = ({ startTime, status }: { startTime: string; status: string }) => {
+        const [parts, setParts] = useState({ d: 0, h: 0, m: 0, s: 0, past: false });
+
+        useEffect(() => {
+            const tick = () => {
+                const diff = new Date(startTime).getTime() - Date.now();
+                if (diff <= 0) {
+                    setParts({ d: 0, h: 0, m: 0, s: 0, past: true });
+                } else {
+                    const d = Math.floor(diff / 86400000);
+                    const h = Math.floor((diff % 86400000) / 3600000);
+                    const m = Math.floor((diff % 3600000) / 60000);
+                    const s = Math.floor((diff % 60000) / 1000);
+                    setParts({ d, h, m, s, past: false });
+                }
+            };
+            tick();
+            const id = setInterval(tick, 1000);
+            return () => clearInterval(id);
+        }, [startTime]);
+
+        if (status === 'completed') {
+            return (
+                <div className="flex items-center gap-2 px-4 py-2 bg-gold-500/20 border border-gold-500/40 rounded-xl text-gold-400 font-bold text-sm">
+                    <Crown size={16} fill="currentColor" /> Tournament Completed
+                </div>
+            );
+        }
+
+        if (status === 'active' || parts.past) {
+            return (
+                <div className="flex items-center gap-2 px-4 py-2 bg-green-500/20 border border-green-500/40 rounded-xl">
+                    <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-green-500"></span>
+                    </span>
+                    <span className="text-green-400 font-bold text-sm tracking-wide">TOURNAMENT LIVE</span>
+                </div>
+            );
+        }
+
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const isUrgent = parts.d === 0 && parts.h === 0 && parts.m < 5;
+        return (
+            <div className={`flex items-center gap-3 px-4 py-2.5 rounded-xl border ${
+                isUrgent
+                    ? 'bg-red-500/10 border-red-500/30'
+                    : 'bg-black/30 border-white/10'
+            }`}>
+                <Clock size={14} className={isUrgent ? 'text-red-400 animate-pulse' : 'text-slate-400'} />
+                <div className="flex items-baseline gap-1 font-mono">
+                    {parts.d > 0 && (
+                        <><span className={`text-xl font-black ${isUrgent ? 'text-red-400' : 'text-white'}`}>{pad(parts.d)}</span><span className="text-xs text-slate-500">d</span><span className="text-slate-600 mx-0.5">:</span></>
+                    )}
+                    <span className={`text-xl font-black ${isUrgent ? 'text-red-400 animate-pulse' : 'text-white'}`}>{pad(parts.h)}</span><span className="text-xs text-slate-500">h</span>
+                    <span className="text-slate-600 mx-0.5">:</span>
+                    <span className={`text-xl font-black ${isUrgent ? 'text-red-400 animate-pulse' : 'text-white'}`}>{pad(parts.m)}</span><span className="text-xs text-slate-500">m</span>
+                    <span className="text-slate-600 mx-0.5">:</span>
+                    <span className={`text-xl font-black ${isUrgent ? 'text-red-400 animate-pulse' : 'text-gold-400'}`}>{pad(parts.s)}</span><span className="text-xs text-slate-500">s</span>
+                </div>
+                {isUrgent && <span className="text-xs text-red-400 font-bold animate-pulse">STARTING SOON!</span>}
+            </div>
+        );
+    };
+
+    // ─── MATCH TIMER ─────────────────────────────────────────────────────────────
     const MatchTimer = ({ startTime, status }: { startTime: string; status: string }) => {
         const [timeLeft, setTimeLeft] = useState("");
         const [urgent, setUrgent] = useState(false);
@@ -183,7 +266,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
             const timer = setInterval(() => {
                 const start = new Date(startTime).getTime();
                 const now = Date.now();
-                const diff = start - now; // negative once past start
+                const diff = start - now;
 
                 if (diff > 0) {
                     // Countdown to start
@@ -192,7 +275,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                     setTimeLeft(`Starts in ${m}:${s.toString().padStart(2, '0')}`);
                     setUrgent(false);
                 } else if (status === 'active') {
-                    // Match is live — show elapsed
+                    // Match is live — show elapsed vs forfeit window
                     const elapsed = Math.floor(-diff / 60000);
                     const remaining = 5 - elapsed;
                     if (remaining > 0) {
@@ -202,8 +285,13 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                         setTimeLeft('FORFEITING SOON...');
                         setUrgent(true);
                     }
-                } else {
+                } else if (status === 'scheduled') {
+                    // Start time passed but not yet activated by scheduler (short gap)
                     setTimeLeft('Starting...');
+                    setUrgent(false);
+                } else {
+                    setTimeLeft('—');
+                    setUrgent(false);
                 }
             }, 1000);
             return () => clearInterval(timer);
@@ -456,8 +544,14 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                     {selectedTournament.name}
                                     {selectedTournament.type === 'fixed' && <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded border border-purple-500/30 uppercase">Fixed Pool</span>}
                                 </h1>
-                                <div className="flex items-center gap-2 text-slate-400 text-xs mt-1">
-                                    <Clock size={12} /> Starts {new Date(selectedTournament.startTime).toLocaleString()}
+                                <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                    <TournamentCountdown
+                                        startTime={selectedTournament.startTime}
+                                        status={selectedTournament.status}
+                                    />
+                                    <span className="text-xs text-slate-500">
+                                        {new Date(selectedTournament.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                    </span>
                                 </div>
                             </div>
                         </div>

@@ -357,6 +357,13 @@ const finaliseTournament = async (tournamentId, winnerId) => {
             winnerId,
             finalizedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        // Broadcast tournament completion to all connected clients
+        // (done outside transaction via setImmediate to avoid blocking)
+        setImmediate(() => {
+            io.emit('tournament_completed', { tournamentId, winnerId, prizeName: tData.name });
+            console.log(`[Tournament] Broadcasted tournament_completed for ${tournamentId}`);
+        });
     });
 };
 
@@ -576,6 +583,9 @@ const startTournamentScheduler = () => {
             }
 
             // ── 2. Activate scheduled matches whose start time has arrived ───────
+            //    KEY FIX: Removed the narrow 0.5-minute (30s) upper bound.
+            //    Any 'scheduled' match past its start time gets activated.
+            //    The 'activatedAt' field prevents double-notification on the same match.
             const scheduledSnap = await db.collection('tournament_matches')
                 .where('status', '==', 'scheduled')
                 .get();
@@ -586,10 +596,13 @@ const startTournamentScheduler = () => {
                 const start = new Date(m.startTime);
                 const elapsedMin = (now.getTime() - start.getTime()) / 60000;
 
-                if (elapsedMin >= 0 && elapsedMin < 0.5) {
-                    // Match just started — activate it
-                    await db.collection('tournament_matches').doc(m.id).update({ status: 'active' });
-                    console.log(`[Scheduler] Match ${m.id} activated.`);
+                if (elapsedMin >= 0 && !m.activatedAt) {
+                    // Match start time reached — activate it
+                    await db.collection('tournament_matches').doc(m.id).update({
+                        status: 'active',
+                        activatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    console.log(`[Scheduler] Match ${m.id} activated (${elapsedMin.toFixed(1)}min elapsed).`);
 
                     // Notify both players via socket
                     [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
@@ -607,18 +620,20 @@ const startTournamentScheduler = () => {
             }
 
             // ── 3. Forfeit active matches that have timed out (5 min window) ─────
-            const activeMatchesSnap = await db.collection('tournament_matches')
-                .where('status', '==', 'active')
+            //    Also catch matches still in 'scheduled' status but 5+ min overdue
+            //    (edge case where scheduler missed the activation window on restart).
+            const overdueMatchesSnap = await db.collection('tournament_matches')
+                .where('status', 'in', ['active', 'scheduled'])
                 .get();
 
-            for (const mDoc of activeMatchesSnap.docs) {
+            for (const mDoc of overdueMatchesSnap.docs) {
                 const m = mDoc.data();
                 if (!m.startTime) continue;
                 const start = new Date(m.startTime);
                 const elapsedMin = (now.getTime() - start.getTime()) / 60000;
 
-                // Warning at 4 min
-                if (elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
+                // Warning at 4 min (only for 'active' matches)
+                if (m.status === 'active' && elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
                     await db.collection('tournament_matches').doc(m.id).update({ warningIssued: true });
                     [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
                         const sId = userSockets.get(pid);
@@ -632,7 +647,7 @@ const startTournamentScheduler = () => {
                     });
                 }
 
-                // Forfeit at 5 min — fair no-show logic
+                // Forfeit at >5 min — applies to both 'active' and overdue 'scheduled' matches
                 if (elapsedMin > 5) {
                     const checkedIn = m.checkedIn || [];
                     const p1Id = m.player1?.id;
@@ -644,9 +659,9 @@ const startTournamentScheduler = () => {
                         const p1In = checkedIn.includes(p1Id);
                         const p2In = checkedIn.includes(p2Id);
                         if (p1In && !p2In) { winnerId = p1Id; forfeitType = 'p2_absent'; }
-                        else if (p2In && !p1Id) { winnerId = p2Id; forfeitType = 'p1_absent'; }
+                        else if (p2In && !p1In) { winnerId = p2Id; forfeitType = 'p1_absent'; }
                         else {
-                            // Neither showed — lower matchIndex player wins (deterministic)
+                            // Neither showed — p1 wins (deterministic by seed order)
                             winnerId = p1Id;
                             forfeitType = 'both_absent';
                         }
@@ -655,7 +670,7 @@ const startTournamentScheduler = () => {
                     }
 
                     if (winnerId) {
-                        console.log(`[Scheduler] Forfeiting match ${m.id}: winner=${winnerId}, type=${forfeitType}`);
+                        console.log(`[Scheduler] Forfeiting match ${m.id} (status=${m.status}): winner=${winnerId}, type=${forfeitType}`);
                         await db.collection('tournament_matches').doc(m.id).update({
                             winnerId,
                             status: 'completed',

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins } from 'lucide-react';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth } from '../services/firebase';
 
@@ -49,7 +49,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         gameType: 'Ludo',
         entryFee: 1000,
         maxPlayers: 16,
-        startTime: '',
+        startInHours: 0,
+        startInMinutes: 30,
         prizePool: 0,
         type: 'dynamic' as 'fixed' | 'dynamic'
     });
@@ -198,25 +199,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
     const handleCreateTournament = async (e: React.FormEvent) => {
         e.preventDefault();
+        const totalMinutes = (Number(newTourney.startInHours) * 60) + Number(newTourney.startInMinutes);
+        if (totalMinutes < 1) {
+            alert('Tournament must start at least 1 minute from now.');
+            return;
+        }
+        // Compute absolute ISO start time from timer offset
+        const startTime = new Date(Date.now() + totalMinutes * 60 * 1000).toISOString();
         try {
             await createTournament({
                 name: newTourney.name,
                 gameType: newTourney.gameType,
                 entryFee: Number(newTourney.entryFee),
                 maxPlayers: Number(newTourney.maxPlayers),
-                startTime: newTourney.startTime,
+                startTime,
                 participants: [],
                 status: 'registration',
-                // If dynamic, calculated from users. If fixed, use admin input.
                 prizePool: newTourney.type === 'fixed' ? Number(newTourney.prizePool) : 0,
                 type: newTourney.type
             });
-            alert("Tournament Created!");
-            addLog("Tournament Created", newTourney.name, "info");
+            alert(`Tournament Created! Starts in ${newTourney.startInHours}h ${newTourney.startInMinutes}m.`);
+            addLog('Tournament Created', newTourney.name, 'info');
             setShowCreateTourney(false);
+            setNewTourney({ name: '', gameType: 'Ludo', entryFee: 1000, maxPlayers: 16, startInHours: 0, startInMinutes: 30, prizePool: 0, type: 'dynamic' });
             fetchAdminTournaments();
         } catch (err) {
-            alert("Failed to create tournament");
+            alert('Failed to create tournament');
         }
     };
 
@@ -368,7 +376,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                             </div>
                                         )}
                                     </div>
-                                    <input type="datetime-local" className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white" value={newTourney.startTime} onChange={e => setNewTourney({ ...newTourney, startTime: e.target.value })} required />
+                                    {/* Timer-based start: "starts in X hours Y minutes" */}
+                                    <div>
+                                        <label className="text-[10px] text-slate-400 uppercase tracking-wider font-bold mb-1 flex items-center gap-1">
+                                            <Clock size={10} /> Starts In (from now)
+                                        </label>
+                                        <div className="flex gap-2 items-center">
+                                            <div className="flex-1 relative">
+                                                <input
+                                                    id="tourney-start-hours"
+                                                    type="number"
+                                                    min={0} max={72}
+                                                    className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white text-center font-mono"
+                                                    value={newTourney.startInHours}
+                                                    onChange={e => setNewTourney({ ...newTourney, startInHours: Math.max(0, Number(e.target.value)) })}
+                                                />
+                                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">h</span>
+                                            </div>
+                                            <span className="text-slate-500 font-bold text-sm">:</span>
+                                            <div className="flex-1 relative">
+                                                <input
+                                                    id="tourney-start-mins"
+                                                    type="number"
+                                                    min={0} max={59}
+                                                    className="w-full bg-black/30 border border-white/10 rounded-lg p-2 text-xs text-white text-center font-mono"
+                                                    value={newTourney.startInMinutes}
+                                                    onChange={e => setNewTourney({ ...newTourney, startInMinutes: Math.min(59, Math.max(0, Number(e.target.value))) })}
+                                                />
+                                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-slate-500">m</span>
+                                            </div>
+                                        </div>
+                                        <p className="text-[10px] text-slate-500 mt-1">
+                                            Will start at approx. {(() => {
+                                                const t = new Date(Date.now() + ((newTourney.startInHours * 60) + newTourney.startInMinutes) * 60000);
+                                                return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                            })()}
+                                        </p>
+                                    </div>
                                     <button type="submit" className="w-full py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-xs">Create Event</button>
                                 </form>
                             </div>
