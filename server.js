@@ -1730,23 +1730,38 @@ io.on('connection', (socket) => {
                     return;
                 }
 
-                // Fix 2: Pool — sanity check ball count to prevent fabricated pockets
+                // Pool — verify only the current turn player can submit moves,
+                // and sanity-check ball states to prevent fabricated pockets.
                 if (room.gameType === 'Pool' && action.newState.balls) {
-                    const prevBalls = room.gameState.balls || [];
-                    const newBalls = action.newState.balls;
-                    // Verify ball count hasn't increased (can't un-pocket a ball)
-                    if (newBalls.length > prevBalls.length) {
-                        console.warn(`[Pool][${roomId}] Ball count increased from ${prevBalls.length} to ${newBalls.length}. Rejected.`);
+                    // Turn guard: only the player whose turn it currently is may submit
+                    if (room.turn !== userId) {
+                        console.warn(`[Pool][${roomId}] Shot from non-turn player ${userId}, turn=${room.turn}. Rejected.`);
                         return;
                     }
-                    // Verify no *already-potted* ball was un-potted
-                    const prevPotted = prevBalls.filter(b => b.isPotted).map(b => b.id);
-                    const newUnPotted = newBalls.filter(b => !b.isPotted && prevPotted.includes(b.id));
-                    if (newUnPotted.length > 0) {
-                        console.warn(`[Pool][${roomId}] Attempt to un-pot balls by ${userId}. Rejected.`);
+
+                    const prevBalls = (room.gameState.balls || []);
+                    const newBalls = action.newState.balls;
+
+                    // Build sets of previously pocketed ball IDs (support both `pocketed` and legacy `isPotted` flags)
+                    const prevPottedIds = new Set(
+                        prevBalls.filter(b => b.pocketed || b.isPotted).map(b => b.id)
+                    );
+
+                    // Verify no already-pocketed ball was un-pocketed (cheating guard)
+                    for (const b of newBalls) {
+                        if (prevPottedIds.has(b.id) && !(b.pocketed || b.isPotted)) {
+                            console.warn(`[Pool][${roomId}] Attempt to un-pocket ball ${b.id} by ${userId}. Rejected.`);
+                            return;
+                        }
+                    }
+
+                    // Verify ball count hasn't grown
+                    if (newBalls.length > 16) { // 15 numbered + 1 cue
+                        console.warn(`[Pool][${roomId}] Invalid ball count ${newBalls.length}. Rejected.`);
                         return;
                     }
                 }
+
             }
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
                 const board = room.gameState.board;
