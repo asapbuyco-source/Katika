@@ -12,8 +12,8 @@ interface PoolGameProps {
   socket?: Socket|null; socketGame?: SocketGameState|null;
 }
 
-// ── Physics constants ─────────────────────────────────────────────────────────
-const TW = 900, TH = 450, BR = 11;
+// ΓöÇΓöÇ Physics constants ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+const TW = 900, TH = 450, BR = 11, RAIL = 18;
 const PR = 22;          // visual pocket radius
 const PD = PR + 4;      // pocket detection radius (larger than visual = no missed pockets)
 const FRICTION = 0.986, WALL_REST = 0.72, BALL_REST = 0.93, VEL_THRESH = 0.08, SUB = 8;
@@ -36,7 +36,7 @@ const BALL_COLORS: Record<number,string> = {
   13:'#F08020', 14:'#1A8C3B', 15:'#8B1A1A',
 };
 
-interface Ball { id:number; x:number; y:number; vx:number; vy:number; pocketed:boolean; }
+interface Ball { id:number; x:number; y:number; vx:number; vy:number; pocketed:boolean; rot?:number; }
 interface Spark { x:number; y:number; vx:number; vy:number; life:number; maxLife:number; r:number; color:string; }
 
 function buildRack(): Ball[] {
@@ -49,10 +49,6 @@ function buildRack(): Ball[] {
   return balls;
 }
 
-// Returns true if (x,y) is within PD of any pocket
-function nearPocket(x:number, y:number): boolean {
-  return POCKETS.some(p => Math.hypot(x-p.x, y-p.y) < PD + BR);
-}
 
 function stepPhysics(
   balls: Ball[], sparks: Spark[],
@@ -71,15 +67,14 @@ function stepPhysics(
     const active = balls.filter(b=>!b.pocketed);
     for (const b of active) {
       b.x += b.vx/SUB; b.y += b.vy/SUB;
-      // Wall bounce — skip if near a pocket (so balls flow in)
-      if (!nearPocket(b.x, b.y)) {
-        let f=0, bounced=false;
-        if(b.x<BR){b.x=BR; f=Math.abs(b.vx); b.vx=f*WALL_REST; bounced=true;}
-        if(b.x>TW-BR){b.x=TW-BR; f=Math.abs(b.vx); b.vx=-f*WALL_REST; bounced=true;}
-        if(b.y<BR){b.y=BR; f=Math.abs(b.vy); b.vy=f*WALL_REST; bounced=true;}
-        if(b.y>TH-BR){b.y=TH-BR; f=Math.abs(b.vy); b.vy=-f*WALL_REST; bounced=true;}
-        if(bounced && step===0 && f>2){ playPoolSound('cushion',Math.min(1,f/14)); if(f>10) shakeCb(f*0.1); }
-      }
+      // Directional wall bounce — only skip the wall that faces a nearby pocket
+      let f=0, bounced=false;
+      const pNear=(px:number,py:number)=>Math.hypot(b.x-px,b.y-py)<PD;
+      if(b.x<RAIL+BR&&!pNear(POCKETS[0].x,POCKETS[0].y)&&!pNear(POCKETS[3].x,POCKETS[3].y)){b.x=RAIL+BR;f=Math.abs(b.vx);b.vx=f*WALL_REST;bounced=true;}
+      if(b.x>TW-RAIL-BR&&!pNear(POCKETS[2].x,POCKETS[2].y)&&!pNear(POCKETS[5].x,POCKETS[5].y)){b.x=TW-RAIL-BR;f=Math.abs(b.vx);b.vx=-f*WALL_REST;bounced=true;}
+      if(b.y<RAIL+BR&&!pNear(POCKETS[0].x,POCKETS[0].y)&&!pNear(POCKETS[1].x,POCKETS[1].y)&&!pNear(POCKETS[2].x,POCKETS[2].y)){b.y=RAIL+BR;f=Math.abs(b.vy);b.vy=f*WALL_REST;bounced=true;}
+      if(b.y>TH-RAIL-BR&&!pNear(POCKETS[3].x,POCKETS[3].y)&&!pNear(POCKETS[4].x,POCKETS[4].y)&&!pNear(POCKETS[5].x,POCKETS[5].y)){b.y=TH-RAIL-BR;f=Math.abs(b.vy);b.vy=-f*WALL_REST;bounced=true;}
+      if(bounced&&step===0&&f>2){playPoolSound('cushion',Math.min(1,f/14));if(f>10)shakeCb(f*0.1);}
     }
     // Ball-ball collisions
     for (let i=0;i<active.length;i++) for (let j=i+1;j<active.length;j++) {
@@ -115,7 +110,7 @@ function stepPhysics(
               life:30+Math.random()*20,maxLife:50,r:1+Math.random()*2.5,
               color:cols[Math.floor(Math.random()*cols.length)]});
           }
-          // Ring pulse — 6 evenly-spaced slower outer sparks
+          // Ring pulse ΓÇö 6 evenly-spaced slower outer sparks
           for(let k=0;k<8;k++){
             const ang=(k/8)*Math.PI*2;
             sparks.push({x:p.x,y:p.y,vx:Math.cos(ang)*3.5,vy:Math.sin(ang)*3.5,
@@ -130,7 +125,7 @@ function stepPhysics(
     if(b.pocketed) continue;
     b.vx*=FRICTION; b.vy*=FRICTION;
     if(Math.abs(b.vx)<VEL_THRESH) b.vx=0; if(Math.abs(b.vy)<VEL_THRESH) b.vy=0;
-    if(b.vx||b.vy) moving=true;
+    if(b.vx||b.vy){ moving=true; b.rot=((b.rot||0)+Math.hypot(b.vx,b.vy)*0.045)%(Math.PI*2); }
   }
   return moving || sparks.length>0;
 }
@@ -146,7 +141,8 @@ function shade(hex:string, p:number){
 function drawScene(
   ctx:CanvasRenderingContext2D, balls:Ball[], sparks:Spark[],
   angle:number, power:number, showAim:boolean, bih:boolean,
-  ghost:{x:number;y:number}|null, strikeOff:number, shake:number
+  ghost:{x:number;y:number}|null, strikeOff:number, shake:number,
+  targetBallIds?:number[]
 ){
   // Camera shake
   ctx.save();
@@ -172,26 +168,33 @@ function drawScene(
   ctx.fillStyle='rgba(255,255,255,0.22)';
   [[TW*.65,TH/2],[TW*.25,TH/2]].forEach(([sx,sy])=>{ ctx.beginPath(); ctx.arc(sx,sy,3,0,Math.PI*2); ctx.fill(); });
 
-  // Inner cushion shadow along rails
-  const ish=ctx.createLinearGradient(0,0,0,18); ish.addColorStop(0,'rgba(0,0,0,0.55)'); ish.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=ish; ctx.fillRect(0,0,TW,18);
-  const ish2=ctx.createLinearGradient(0,TH,0,TH-18); ish2.addColorStop(0,'rgba(0,0,0,0.55)'); ish2.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=ish2; ctx.fillRect(0,TH-18,TW,18);
-  const ish3=ctx.createLinearGradient(0,0,18,0); ish3.addColorStop(0,'rgba(0,0,0,0.55)'); ish3.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=ish3; ctx.fillRect(0,0,18,TH);
-  const ish4=ctx.createLinearGradient(TW,0,TW-18,0); ish4.addColorStop(0,'rgba(0,0,0,0.55)'); ish4.addColorStop(1,'rgba(0,0,0,0)');
-  ctx.fillStyle=ish4; ctx.fillRect(TW-18,0,18,TH);
+  // Cushion rails - Uniform color
+  const railColor = '#104462'; // Slightly darker than the mid-felt to look like a raised cushion
+  const C=35, M=28;
+  const poly = (pts: number[][]) => {
+    ctx.fillStyle=railColor; ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
+    for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]);
+    ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1; ctx.stroke();
+  };
+  poly([[C,0], [TW/2-M,0], [TW/2-M+RAIL,RAIL], [C+RAIL,RAIL]]);          // TL
+  poly([[TW/2+M,0], [TW-C,0], [TW-C-RAIL,RAIL], [TW/2+M-RAIL,RAIL]]);    // TR
+  poly([[C,TH], [TW/2-M,TH], [TW/2-M+RAIL,TH-RAIL], [C+RAIL,TH-RAIL]]);  // BL
+  poly([[TW/2+M,TH], [TW-C,TH], [TW-C-RAIL,TH-RAIL], [TW/2+M-RAIL,TH-RAIL]]); // BR
+  poly([[0,C], [0,TH-C], [RAIL,TH-C-RAIL], [RAIL,C+RAIL]]);             // L
+  poly([[TW,C], [TW,TH-C], [TW-RAIL,TH-C-RAIL], [TW-RAIL,C+RAIL]]);    // R
 
-  // Pockets
+  // 3-D pocket tunnels
   POCKETS.forEach(p=>{
-    ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(p.x,p.y,PR+5,0,Math.PI*2); ctx.fill();
-    const pg=ctx.createRadialGradient(p.x,p.y,PR*0.3,p.x,p.y,PR+5);
-    pg.addColorStop(0,'rgba(0,0,0,1)'); pg.addColorStop(0.7,'rgba(0,0,0,0.8)'); pg.addColorStop(1,'rgba(80,80,80,0.3)');
-    ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(p.x,p.y,PR+5,0,Math.PI*2); ctx.fill();
-    // Metallic rim
+    const outer=ctx.createRadialGradient(p.x,p.y,PR*0.5,p.x,p.y,PR+8);
+    outer.addColorStop(0,'rgba(0,0,0,1)'); outer.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.fillStyle=outer; ctx.beginPath(); ctx.arc(p.x,p.y,PR+8,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle='#180a01'; ctx.beginPath(); ctx.arc(p.x,p.y,PR+4,0,Math.PI*2); ctx.fill();
+    const tunnel=ctx.createRadialGradient(p.x-PR*.3,p.y-PR*.3,1,p.x,p.y,PR+3);
+    tunnel.addColorStop(0,'rgba(90,50,10,0.5)'); tunnel.addColorStop(0.5,'rgba(0,0,0,0.92)'); tunnel.addColorStop(1,'#000');
+    ctx.fillStyle=tunnel; ctx.beginPath(); ctx.arc(p.x,p.y,PR+3,0,Math.PI*2); ctx.fill();
     const rim=ctx.createLinearGradient(p.x-PR,p.y-PR,p.x+PR,p.y+PR);
-    rim.addColorStop(0,'#aaa'); rim.addColorStop(0.5,'#333'); rim.addColorStop(1,'#666');
-    ctx.strokeStyle=rim; ctx.lineWidth=3; ctx.beginPath(); ctx.arc(p.x,p.y,PR+2,0,Math.PI*2); ctx.stroke();
+    rim.addColorStop(0,'rgba(210,165,70,0.9)'); rim.addColorStop(0.45,'rgba(50,30,5,0.7)'); rim.addColorStop(1,'rgba(110,75,20,0.5)');
+    ctx.strokeStyle=rim; ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(p.x,p.y,PR+1,0,Math.PI*2); ctx.stroke();
   });
 
   // BIH ghost
@@ -202,14 +205,14 @@ function drawScene(
     ctx.setLineDash([]); ctx.globalAlpha=1;
   }
 
-  // Aim guide — dashed ghost line
+  // Aim guide ΓÇö dashed ghost line
   if(showAim && !bih && cue && strikeOff===0){
     const sdx=Math.cos(angle+Math.PI), sdy=Math.sin(angle+Math.PI);
     let lx=cue.x, ly=cue.y, len=0, hitGhost:{x:number,y:number}|null=null;
     const st=2, mx=(TW+TH)/st;
     for(let s=0;s<mx;s++){
       lx+=sdx*st; ly+=sdy*st;
-      if(lx<BR||lx>TW-BR||ly<BR||ly>TH-BR){len=s*st; break;}
+      if(lx<RAIL+BR||lx>TW-RAIL-BR||ly<RAIL+BR||ly>TH-RAIL-BR){len=s*st; break;}
       const hit=balls.find(b=>!b.pocketed&&b.id!==0&&Math.hypot(b.x-lx,b.y-ly)<BR*2);
       if(hit){len=s*st; hitGhost={x:lx-sdx*st,y:ly-sdy*st}; break;}
       len=s*st;
@@ -243,37 +246,64 @@ function drawScene(
   });
   ctx.globalAlpha=1; ctx.restore();
 
-  // Draw balls
+  // Draw balls — 3-D rolling effect
+  const time=Date.now();
   balls.forEach(b=>{
     if(b.pocketed) return;
     const col=BALL_COLORS[b.id]||'#888', stripe=b.id>=9;
+    const rot=b.rot||0;
+    const spd=Math.hypot(b.vx,b.vy);
+    // specular offset drifts opposite velocity direction
+    const sox=-BR*.33-Math.cos(rot)*BR*.16;
+    const soy=-BR*.33-Math.sin(rot)*BR*.16;
     ctx.save(); ctx.translate(b.x,b.y);
-    // Shadow
-    ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.beginPath(); ctx.ellipse(3,4,BR,BR*0.75,0,0,Math.PI*2); ctx.fill();
-    // Clip
+    // 3-D contact shadow
+    ctx.fillStyle='rgba(0,0,0,0.36)'; ctx.beginPath(); ctx.ellipse(3,BR*0.65,BR*0.88,BR*0.32,0,0,Math.PI*2); ctx.fill();
     ctx.beginPath(); ctx.arc(0,0,BR,0,Math.PI*2); ctx.clip();
     if(stripe){
       ctx.fillStyle='#F4F2EC'; ctx.fillRect(-BR,-BR,BR*2,BR*2);
+      ctx.save(); ctx.rotate(rot); // stripe rotates with ball
       ctx.fillStyle=col; ctx.fillRect(-BR,-BR*0.52,BR*2,BR*1.04);
-      const shd=ctx.createRadialGradient(-BR*0.4,-BR*0.4,0,0,0,BR*1.1); shd.addColorStop(0,'rgba(0,0,0,0)'); shd.addColorStop(0.65,'rgba(0,0,0,0.25)'); shd.addColorStop(1,'rgba(0,0,0,0.75)');
+      ctx.restore();
+      const shd=ctx.createRadialGradient(-BR*.35,-BR*.35,0,0,0,BR*1.15); shd.addColorStop(0,'rgba(255,255,255,0.06)'); shd.addColorStop(0.5,'rgba(0,0,0,0.18)'); shd.addColorStop(1,'rgba(0,0,0,0.72)');
       ctx.fillStyle=shd; ctx.fillRect(-BR,-BR,BR*2,BR*2);
     } else {
-      const bg=ctx.createRadialGradient(-BR*.38,-BR*.38,0,0,0,BR); bg.addColorStop(0,shade(col,35)); bg.addColorStop(0.55,col); bg.addColorStop(1,'#000');
+      const bg=ctx.createRadialGradient(-BR*.38,-BR*.38,0,0,0,BR); bg.addColorStop(0,shade(col,40)); bg.addColorStop(0.5,shade(col,8)); bg.addColorStop(0.85,col); bg.addColorStop(1,'#000');
       ctx.fillStyle=bg; ctx.fillRect(-BR,-BR,BR*2,BR*2);
+    }
+    // Rolling equator line (visible when moving)
+    if(spd>0.6){
+      const ea=Math.atan2(b.vy,b.vx)+Math.PI/2;
+      ctx.save(); ctx.rotate(ea);
+      ctx.beginPath(); ctx.ellipse(0,Math.sin(rot)*BR*.5,Math.abs(Math.cos(rot))*BR+0.5,BR*.11,0,0,Math.PI*2);
+      ctx.fillStyle=stripe?'rgba(0,0,0,0.17)':'rgba(0,0,0,0.2)'; ctx.fill();
+      ctx.restore();
     }
     // Number disc
     if(b.id!==0){
-      const nr=stripe?BR*.48:BR*.44;
+      const nr=stripe?BR*.46:BR*.42;
       const nd=ctx.createRadialGradient(0,0,0,0,0,nr);
-      if(stripe){nd.addColorStop(0,shade(col,25)); nd.addColorStop(1,shade(col,-15));}
-      else{nd.addColorStop(0,'#fff'); nd.addColorStop(1,'#ddd');}
+      nd.addColorStop(0,'rgba(255,255,255,0.98)'); nd.addColorStop(1,'rgba(220,220,220,0.93)');
       ctx.fillStyle=nd; ctx.beginPath(); ctx.arc(0,0,nr,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle=stripe?'#fff':'#111'; ctx.font=`bold ${b.id<10?8:7}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(b.id),0,0.5);
+      ctx.fillStyle=stripe?col:'#111'; ctx.font=`bold ${b.id<10?8:7}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(b.id),0,0.5);
     }
-    // Specular
-    ctx.globalAlpha=0.65; const sp=ctx.createRadialGradient(-BR*.33,-BR*.33,.5,-BR*.33,-BR*.33,BR*.58); sp.addColorStop(0,'rgba(255,255,255,0.9)'); sp.addColorStop(1,'rgba(255,255,255,0)');
+    // Moving specular
+    ctx.globalAlpha=0.7;
+    const sp=ctx.createRadialGradient(sox,soy,0.4,sox,soy,BR*.62); sp.addColorStop(0,'rgba(255,255,255,0.95)'); sp.addColorStop(0.5,'rgba(255,255,255,0.18)'); sp.addColorStop(1,'rgba(255,255,255,0)');
     ctx.fillStyle=sp; ctx.beginPath(); ctx.arc(0,0,BR,0,Math.PI*2); ctx.fill();
+    // Rim darkening
+    ctx.globalAlpha=0.42; const rim2=ctx.createRadialGradient(0,0,BR*.6,0,0,BR); rim2.addColorStop(0,'rgba(0,0,0,0)'); rim2.addColorStop(1,'rgba(0,0,0,0.68)');
+    ctx.fillStyle=rim2; ctx.fillRect(-BR,-BR,BR*2,BR*2);
     ctx.globalAlpha=1; ctx.restore();
+    // Target highlight
+    if(targetBallIds&&targetBallIds.includes(b.id)){
+      ctx.save(); ctx.translate(b.x,b.y);
+      const pulse=1+(Math.sin(time/150)*0.15); ctx.scale(pulse,pulse);
+      ctx.beginPath(); ctx.arc(0,0,BR+4,0,Math.PI*2);
+      ctx.strokeStyle=`rgba(239,68,68,${0.45+Math.sin(time/150)*0.3})`; ctx.lineWidth=2.5; ctx.stroke();
+      ctx.globalAlpha=0.12; ctx.fillStyle='#ef4444'; ctx.fill(); ctx.globalAlpha=1;
+      ctx.restore();
+    }
   });
 
   // Cue stick
@@ -292,13 +322,54 @@ function drawScene(
   ctx.restore(); // end shake
 }
 
-function findBotShot(balls:Ball[], bg:'solids'|'stripes'|null){
+// Smarter bot: scores each target ball by pocket opportunity and picks the best shot
+function findBotShot(balls:Ball[], grp:'solids'|'stripes'|null){
   const cue=balls.find(b=>b.id===0&&!b.pocketed); if(!cue) return null;
-  const grp=bg ? balls.filter(b=>!b.pocketed&&((bg==='solids'&&b.id>=1&&b.id<=7)||(bg==='stripes'&&b.id>=9&&b.id<=15))) : balls.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8);
-  let targets=grp.length>0?grp:(bg&&grp.length===0?balls.filter(b=>b.id===8&&!b.pocketed):balls.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8));
+  // Determine which balls to target
+  const myBalls=grp
+    ? balls.filter(b=>!b.pocketed&&((grp==='solids'&&b.id>=1&&b.id<=7)||(grp==='stripes'&&b.id>=9&&b.id<=15)))
+    : balls.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8);
+  const targets=myBalls.length>0?myBalls:(grp&&myBalls.length===0
+    ? balls.filter(b=>b.id===8&&!b.pocketed)
+    : balls.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8)
+  );
   if(!targets.length) return null;
-  const best=targets.reduce((a,b)=>Math.hypot(b.x-cue.x,b.y-cue.y)<Math.hypot(a.x-cue.x,a.y-cue.y)?b:a);
-  return {angle:Math.atan2(best.y-cue.y,best.x-cue.x)+(Math.random()-.5)*.05, power:48+Math.random()*32};
+
+  let best:{angle:number;power:number;score:number}|null=null;
+
+  for(const target of targets){
+    for(const pocket of POCKETS){
+      // Direction from target to pocket
+      const tpd=Math.hypot(pocket.x-target.x,pocket.y-target.y);
+      if(tpd<1) continue;
+      const tpnx=(pocket.x-target.x)/tpd, tpny=(pocket.y-target.y)/tpd;
+      // Ghost ball position: cue hits target toward pocket
+      const ghostX=target.x-tpnx*(BR*2.02), ghostY=target.y-tpny*(BR*2.02);
+      // Direction cue must travel
+      const cgd=Math.hypot(ghostX-cue.x,ghostY-cue.y);
+      if(cgd<1) continue;
+      const angle=Math.atan2(ghostY-cue.y,ghostX-cue.x);
+      // Penalise if another ball blocks cue path
+      const blocked=balls.some(b=>{
+        if(b.pocketed||b.id===0||b.id===target.id) return false;
+        const t2=(b.x-cue.x)*(ghostX-cue.x)+(b.y-cue.y)*(ghostY-cue.y);
+        const t=t2/(cgd*cgd); if(t<0||t>1) return false;
+        const px=cue.x+t*(ghostX-cue.x), py=cue.y+t*(ghostY-cue.y);
+        return Math.hypot(b.x-px,b.y-py)<BR*2.1;
+      });
+      // Score: prefer shorter cue travel, shorter target-pocket, unblocked
+      const score=(blocked?-1000:0)-(cgd*0.6)-(tpd*0.4);
+      if(!best||score>best.score){
+        const dist=Math.hypot(ghostX-cue.x,ghostY-cue.y);
+        const power=Math.min(92,45+dist*0.045);
+        best={angle,power,score};
+      }
+    }
+  }
+  if(!best) return null;
+  // Tiny aim jitter for realism (hard=small, easy=large)
+  const jitter=(Math.random()-.5)*0.06;
+  return {angle:best.angle+jitter, power:best.power};
 }
 
 export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,socketGame}) => {
@@ -330,7 +401,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const [shake,setShake]=useState(0);
   const [portrait,setPortrait]=useState(false);
   const [countdown,setCountdown]=useState(TURN_TIME);
-  // pocketFlash removed — sparkles now drawn on canvas
+  // pocketFlash removed ΓÇö sparkles now drawn on canvas
 
   const drag=useRef(false), dragStart=useRef<{x:number;y:number}|null>(null);
 
@@ -341,7 +412,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const bihRef=useRef(bih); bihRef.current=bih;
   const turnRef=useRef(turnId); turnRef.current=turnId;
 
-  const name2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.name||'Opponent'):'Bot 🤖';
+  const name2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.name||'Opponent'):'Bot ≡ƒñû';
   const av2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.avatar||`https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`):`https://api.dicebear.com/7.x/bottts/svg?seed=katika_bot`;
 
   // Orientation
@@ -355,7 +426,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   useEffect(()=>{
     if(isP2P&&socketGame){
       const gs=(socketGame as any).gameState;
-      if(gs?.balls){ballsRef.current=gs.balls;setBalls([...gs.balls]);}
+      // Only apply server balls if they have geometry (initial server state is geometry-less)
+      if(gs?.balls&&gs.balls[0]?.x!==undefined){ballsRef.current=gs.balls;setBalls([...gs.balls]);}
       const st=gs?.turn||players[0]||myId; setTurnId(st);
       setMsg(st===myId?'🎱 Your Break!':`⏳ ${name2(oppId)}'s Break`);
     } else setMsg('🎱 Your Break! Hold & drag to aim');
@@ -381,8 +453,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   useEffect(()=>{
     if(!isP2P||moving||!isMyTurn) return;
     if(countdown<=0){
-      // Time up — forfeit this turn
-      setMsg('⏰ Time up! Forfeited turn.');
+      // Time up ΓÇö forfeit this turn
+      setMsg('ΓÅ░ Time up! Forfeited turn.');
       if(socket&&roomId) socket.emit('game_action',{roomId,action:{type:'FORFEIT'}});
       onGameEnd('loss'); return;
     }
@@ -393,23 +465,28 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   // Reset countdown on turn change
   useEffect(()=>{setCountdown(TURN_TIME);},[turnId]);
 
-  const send=(nextTurn:string,gBih:boolean,mg:'solids'|'stripes'|null)=>{
+  const send=(nextTurn:string,gBih:boolean,myGrp:'solids'|'stripes'|null,oppGrp:'solids'|'stripes'|null)=>{
     if(!socket||!roomId) return;
-    socket.emit('game_action',{roomId,action:{type:'MOVE',newState:{balls:ballsRef.current,turn:nextTurn,ballInHand:gBih,[iAmP1?'myGroupP1':'myGroupP2']:mg}}});
+    // Send BOTH groups so each client can update their own assignment
+    socket.emit('game_action',{roomId,action:{type:'MOVE',newState:{
+      balls:ballsRef.current, turn:nextTurn, ballInHand:gBih,
+      myGroupP1: iAmP1 ? myGrp : oppGrp,
+      myGroupP2: iAmP1 ? oppGrp : myGrp,
+    }}});
   };
 
-  // Physics loop
+  // Physics loop — no React re-renders in hot path
+  const shakeRef=useRef(0);
   const runPhysics=useCallback(()=>{
     const m=stepPhysics(
       ballsRef.current, sparksRef.current,
       id=>{pottedRef.current.push(id);},
       id=>{ if(!fhLocked.current){fhRef.current=id;fhLocked.current=true;} },
-      n=>setShake(p=>Math.min(7,p+n))
+      n=>{ shakeRef.current=Math.min(7,shakeRef.current+n); }
     );
-    setBalls([...ballsRef.current]);
-    setShake(p=>p>0.4?p*0.82:0);
+    shakeRef.current=shakeRef.current>0.4?shakeRef.current*0.82:0;
     if(m){ animRef.current=requestAnimationFrame(runPhysics); }
-    else { setMoving(false); handleTurnEnd(); }
+    else { setBalls([...ballsRef.current]); setMoving(false); handleTurnEnd(); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
@@ -434,13 +511,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     if(eightPot){
       playSFX(cuePot?'loss':'win');
       if(botShot){
-        if(cuePot){endGame('win','🎱 Bot scratched on 8! You win!');return;}
+        if(cuePot){endGame('win','≡ƒÄ▒ Bot scratched on 8! You win!');return;}
         const bl=ballsRef.current.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8&&((bgRef.current==='solids'&&b.id<8)||(bgRef.current==='stripes'&&b.id>8)));
-        endGame(bl.length===0&&bgRef.current?'loss':'win', bl.length===0&&bgRef.current?'⬛ Bot sinks 8! You lose.':'Bot early 8! You win!'); return;
+        endGame(bl.length===0&&bgRef.current?'loss':'win', bl.length===0&&bgRef.current?'Γ¼¢ Bot sinks 8! You lose.':'Bot early 8! You win!'); return;
       } else {
-        if(cuePot){endGame('loss','😬 Scratched on 8! You lose.');return;}
+        if(cuePot){endGame('loss','≡ƒÿ¼ Scratched on 8! You lose.');return;}
         const ml=ballsRef.current.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8&&((myGrRef.current==='solids'&&b.id<8)||(myGrRef.current==='stripes'&&b.id>8)));
-        endGame(ml.length===0&&myGrRef.current?'win':'loss',ml.length===0&&myGrRef.current?'🎱 8-ball sunk! You win!':'8-ball sunk early! You lose.'); return;
+        endGame(ml.length===0&&myGrRef.current?'win':'loss',ml.length===0&&myGrRef.current?'≡ƒÄ▒ 8-ball sunk! You win!':'8-ball sunk early! You lose.'); return;
       }
     }
 
@@ -464,13 +541,17 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     const nextP2P=keep?myId:oppId, nextBot=keep?(botShot?'bot':myId):(botShot?myId:'bot');
     const next=isP2P?nextP2P:nextBot;
 
-    if(foul) setMsg(`⚠️ FOUL: ${fr}`);
-    else if(keep) setMsg(botShot?`${name2(oppId)} continues...`:'✅ Good shot! Continue...');
-    else {playSFX('turn'); setMsg(next===myId?'🎱 Your turn!':`${name2(oppId)}'s turn`);}
+    if(foul) setMsg(`ΓÜá∩╕Å FOUL: ${fr}`);
+    else if(keep) setMsg(botShot?`${name2(oppId)} continues...`:'Γ£à Good shot! Continue...');
+    else {playSFX('turn'); setMsg(next===myId?'≡ƒÄ▒ Your turn!':`${name2(oppId)}'s turn`);}
 
     const oppBih=foul&&!keep, humBih=foul&&botShot;
     if(!isP2P){if(humBih) setBih(true);}
-    else {if(oppBih&&next===myId) setBih(true); send(next,oppBih,nmg);}
+    else {
+      const myGrp=myGrRef.current, oppGrp=myGrp==='solids'?'stripes':myGrp?'solids':null;
+      if(oppBih&&next===myId) setBih(true);
+      send(next,oppBih,myGrp,oppGrp);
+    }
     setTurnId(next);
     if(!isP2P&&next==='bot') setTimeout(()=>botShot && humBih?execBot(true,nbg):execBot(false,nbg), 900+Math.random()*700);
   };
@@ -513,9 +594,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     const pos=getPos(e);
     if(bihRef.current){
       const ok=!ballsRef.current.some(b=>b.id!==0&&!b.pocketed&&Math.hypot(b.x-pos.x,b.y-pos.y)<BR*2.1);
-      if(ok&&pos.x>BR&&pos.x<TW-BR&&pos.y>BR&&pos.y<TH-BR){
+      if(ok&&pos.x>RAIL+BR&&pos.x<TW-RAIL-BR&&pos.y>RAIL+BR&&pos.y<TH-RAIL-BR){
         const c=ballsRef.current.find(b=>b.id===0)!; c.pocketed=false;c.x=pos.x;c.y=pos.y;c.vx=0;c.vy=0;
-        setBalls([...ballsRef.current]); setBih(false); bihRef.current=false; playSFX('click'); setMsg('🎱 Take your shot!');
+        setBalls([...ballsRef.current]); setBih(false); bihRef.current=false; playSFX('click'); setMsg('≡ƒÄ▒ Take your shot!');
       }
       return;
     }
@@ -537,24 +618,55 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     drag.current=false;
   };
 
+  // Persistent render loop — reads from refs, avoids React re-renders
+  const angleRef=useRef(angle); angleRef.current=angle;
+  const powerRef=useRef(power); powerRef.current=power;
+  const bihRef2=useRef(bih); bihRef2.current=bih;
+  const ghostRef=useRef(ghost); ghostRef.current=ghost;
+  const strikeOffRef=useRef(strikeOff); strikeOffRef.current=strikeOff;
+  const myGroupRef2=useRef(myGroup); myGroupRef2.current=myGroup;
+  const isMyTurnRef=useRef(isMyTurn); isMyTurnRef.current=isMyTurn;
+  const isBotRef=useRef(isBot); isBotRef.current=isBot;
+  const movingRef2=useRef(moving); movingRef2.current=moving;
+  const renderRaf=useRef<number|null>(null);
+
   useEffect(()=>{
     const cv=canvasRef.current; if(!cv) return;
     const ctx=cv.getContext('2d'); if(!ctx) return;
-    drawScene(ctx,balls,sparksRef.current,angle,power,(isMyTurn||isBot)&&!moving,bih,ghost,strikeOff,shake);
-  },[balls,angle,power,isMyTurn,isBot,moving,bih,ghost,strikeOff,shake]);
+    const loop=()=>{
+      const mt=isMyTurnRef.current, ib=isBotRef.current, mv=movingRef2.current;
+      const grp=myGroupRef2.current;
+      const tids=mt&&!mv
+        ?(grp==='solids'?[1,2,3,4,5,6,7]:grp==='stripes'?[9,10,11,12,13,14,15]:[1,2,3,4,5,6,7,9,10,11,12,13,14,15])
+          .filter(id=>!ballsRef.current.find(b=>b.id===id)?.pocketed)
+        :[];
+      const targetBallIds=(tids.length===0&&grp)?[8]:tids;
+      drawScene(ctx,ballsRef.current,sparksRef.current,angleRef.current,powerRef.current,(mt||ib)&&!mv,bihRef2.current,ghostRef.current,strikeOffRef.current,shakeRef.current,targetBallIds);
+      renderRaf.current=requestAnimationFrame(loop);
+    };
+    loop();
+    return ()=>{ if(renderRaf.current) cancelAnimationFrame(renderRaf.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
 
   const myPot=myGroup?balls.filter(b=>b.pocketed&&b.id!==0&&b.id!==8&&((myGroup==='solids'&&b.id<8)||(myGroup==='stripes'&&b.id>8))).length:0;
   const oppPot=myGroup?balls.filter(b=>b.pocketed&&b.id!==0&&b.id!==8&&((myGroup==='solids'&&b.id>8)||(myGroup==='stripes'&&b.id<8))).length:0;
 
-  const wrapStyle: React.CSSProperties = portrait
-    ?{width:'100vh',height:'100vw',transform:'rotate(90deg)',transformOrigin:'calc(100vw/2) calc(100vw/2)',overflow:'hidden',background:'linear-gradient(180deg,#14232e 0%,#0a1620 100%)'}
-    :{width:'100vw',height:'100dvh',background:'linear-gradient(180deg,#14232e 0%,#0a1620 100%)'};
+  // Compute scale so table fills screen properly in both orientations
+  const [pScale,setPScale]=useState(1);
+  const [lScale,setLScale]=useState(1);
+  useEffect(()=>{
+    const upd=()=>{
+      if(portrait) setPScale(Math.min(window.innerWidth/TH,(window.innerHeight-108)/TW)*0.97);
+      else setLScale(Math.min((window.innerWidth-40)/TW,(window.innerHeight-108)/TH)*0.97);
+    };
+    upd(); window.addEventListener('resize',upd); return ()=>window.removeEventListener('resize',upd);
+  },[portrait]);
 
   const countdownUrgent=isP2P&&isMyTurn&&!moving&&countdown<=10;
 
   return (
-    <div style={{width:'100vw',height:'100dvh',overflow:'hidden',background:'#0e1a22'}}>
-      <div style={wrapStyle} className="flex flex-col select-none overflow-hidden">
+    <div style={{width:'100vw',height:'100dvh',overflow:'hidden',background:'#0a1218',display:'flex',flexDirection:'column'}} className="select-none">
 
         {/* Forfeit Modal */}
         <AnimatePresence>
@@ -598,7 +710,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           {/* Center */}
           <div className="flex flex-col items-center flex-shrink-0 px-2 gap-0.5">
             <div className="text-[8px] text-yellow-400 font-black uppercase tracking-widest">Pot</div>
-            <div className="text-xs font-mono font-bold text-white">💰{(table.stake*2).toLocaleString()}</div>
+            <div className="text-xs font-mono font-bold text-white">≡ƒÆ░{(table.stake*2).toLocaleString()}</div>
             {isP2P&&isMyTurn&&!moving&&(
               <motion.div animate={countdownUrgent?{scale:[1,1.1,1]}:{}} transition={{repeat:Infinity,duration:.5}} className={`flex items-center gap-1 text-[10px] font-mono font-black ${countdown<=10?'text-red-400':'text-slate-300'}`}>
                 <Clock size={9}/>{countdown}s
@@ -625,7 +737,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
         {/* Status + Power */}
         <div className="w-full px-3 py-1.5 flex flex-col gap-1 flex-shrink-0">
           <div className={`text-center text-xs font-bold py-1 px-4 rounded-full border mx-auto max-w-xs ${isMyTurn?'bg-emerald-900/30 border-emerald-500/30 text-emerald-300':isBot?'bg-orange-900/30 border-orange-500/30 text-orange-300':'bg-slate-900/50 border-white/10 text-slate-400'}`}>
-            {msg||'…'}{moving&&<span className="ml-2 animate-pulse text-slate-500">●●</span>}
+            {msg||'ΓÇª'}{moving&&<span className="ml-2 animate-pulse text-slate-500">ΓùÅΓùÅ</span>}
           </div>
           {power>2&&isMyTurn&&(
             <div className="flex items-center gap-2 mx-auto w-full max-w-xs px-2">
@@ -638,19 +750,27 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           )}
         </div>
 
-        {/* Table — fills all remaining space */}
-        <div className="flex-1 flex items-center justify-center p-2 sm:p-4 min-h-0">
-          <div className="relative w-full h-full max-w-[2000px] flex items-center justify-center">
-            {/* Aspect-ratio wrapper that fills available space */}
-            <div className="relative w-full" style={{maxHeight:'100%', aspectRatio:'2/1'}}>
-              {/* Premium Mahogany Rail Frame */}
-              <div className="absolute inset-0 rounded-2xl" style={{
-                background:'linear-gradient(135deg,#2c1506 0%,#1a0c03 40%,#0f0701 100%)',
-                boxShadow:'0 40px 80px rgba(0,0,0,.92), 0 0 0 1px rgba(255,180,80,0.08), inset 0 0 0 18px #1e0e05, inset 0 0 0 19px #070402, inset 0 2px 6px 19px rgba(0,0,0,.85)'
-              }}>
-                {/* Inner brass highlight along rail top edge */}
-                <div className="absolute inset-0 rounded-2xl" style={{boxShadow:'inset 0 1px 0 rgba(200,150,60,0.15), inset 0 -1px 0 rgba(0,0,0,0.5)'}} />
-                {/* Diamonds top — now diamond-shaped rotated squares */}
+        {/* Table — fills remaining space; portrait: rotated canvas, landscape: centered scale */}
+        <div className="flex-1 flex items-center justify-center min-h-0 overflow-hidden" style={{padding: portrait?'2px':'8px'}}>
+          <div style={portrait ? {
+            position:'relative', width:TW, height:TH, flexShrink:0,
+            transform:`rotate(90deg) scale(${pScale})`,
+            transformOrigin:'center',
+          } : {
+            position:'relative', width:TW, height:TH, flexShrink:0,
+            transform:`scale(${lScale})`,
+            transformOrigin:'center',
+          }}>
+            {/* Premium Mahogany Rail Frame */}
+            <div className="absolute inset-0 rounded-xl" style={{
+              background:'linear-gradient(145deg,#7a3e10 0%,#4a2008 18%,#2d1005 40%,#4a2008 72%,#7a3e10 100%)',
+              boxShadow:'0 30px 70px rgba(0,0,0,.95), 0 0 0 1px rgba(255,180,80,0.12), inset 0 0 0 20px #3a1a07, inset 0 0 0 21px rgba(0,0,0,0.6), inset 0 1px 8px 21px rgba(0,0,0,.9)'
+            }}>
+              {/* Wood grain highlight */}
+              <div className="absolute inset-0 rounded-xl" style={{boxShadow:'inset 0 1px 0 rgba(220,160,70,0.25), inset 0 -1px 0 rgba(0,0,0,0.7), inset 1px 0 0 rgba(180,120,50,0.15), inset -1px 0 0 rgba(0,0,0,0.5)'}} />
+              {/* Horizontal wood grain lines */}
+              {[20,40,60,80].map(p=>(<div key={p} className="absolute" style={{top:`${p}%`,left:'4%',right:'4%',height:'1px',background:'rgba(0,0,0,0.18)'}}/>))}
+                {/* Diamonds top ΓÇö now diamond-shaped rotated squares */}
                 {[25,37.5,50,62.5,75].map(pct=>(
                   <div key={pct} className="absolute w-2.5 h-2.5" style={{top:'4px',left:`${pct}%`,transform:'translateX(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
                 ))}
@@ -666,46 +786,42 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
                 {[33,67].map(pct=>(
                   <div key={pct} className="absolute w-2.5 h-2.5" style={{right:'4px',top:`${pct}%`,transform:'translateY(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
                 ))}
-                {/* Canvas inset */}
-                <div className="absolute inset-[18px] rounded-lg overflow-hidden" style={{boxShadow:'inset 0 0 30px 8px rgba(0,0,0,.75)'}}>
-                  <canvas ref={canvasRef} width={TW} height={TH}
-                    className="w-full h-full block touch-none"
-                    style={{cursor:isMyTurn&&!moving?'crosshair':'default'}}
-                    onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
-                    onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}/>
+              {/* Canvas inset */}
+              <div className="absolute rounded-lg overflow-hidden" style={{inset:'20px',boxShadow:'inset 0 0 40px 10px rgba(0,0,0,.8)'}}>
+                <canvas ref={canvasRef} width={TW} height={TH}
+                  className="w-full h-full block touch-none"
+                  style={{cursor:isMyTurn&&!moving?'crosshair':'default'}}
+                  onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+                  onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}/>
+              </div>{/* canvas inset */}
+            </div>{/* frame */}
+
+            {/* Overlays */}
+            {(!isMyTurn&&!isBot&&!moving&&isP2P)&&(
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="bg-black/60 backdrop-blur rounded-full px-5 py-2 flex gap-2 items-center">
+                  {[0,150,300].map(d=><div key={d} className="w-2.5 h-2.5 rounded-full bg-red-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}
+                  <span className="text-sm font-bold text-white ml-1">{name2(oppId)}'s turn</span>
                 </div>
               </div>
-
-              {/* Pocket sparkle handled on canvas — no DOM ring flash */}
-
-              {/* Overlays */}
-              {(!isMyTurn&&!isBot&&!moving&&isP2P)&&(
-                <div className="absolute inset-[16px] flex items-center justify-center pointer-events-none rounded-xl">
-                  <div className="bg-black/60 backdrop-blur rounded-full px-5 py-2 flex gap-2 items-center">
-                    {[0,150,300].map(d=><div key={d} className="w-2.5 h-2.5 rounded-full bg-red-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}
-                    <span className="text-sm font-bold text-white ml-1">{name2(oppId)}'s turn</span>
-                  </div>
+            )}
+            {isBot&&!moving&&(
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="bg-black/60 backdrop-blur rounded-full px-5 py-2 flex gap-2 items-center">
+                  {[0,150,300].map(d=><div key={d} className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}
+                  <span className="text-sm font-bold text-white ml-1">🤖 Planning shot...</span>
                 </div>
-              )}
-              {isBot&&!moving&&(
-                <div className="absolute inset-[16px] flex items-center justify-center pointer-events-none rounded-xl">
-                  <div className="bg-black/60 backdrop-blur rounded-full px-5 py-2 flex gap-2 items-center">
-                    {[0,150,300].map(d=><div key={d} className="w-2.5 h-2.5 rounded-full bg-orange-400 animate-bounce" style={{animationDelay:`${d}ms`}}/>)}
-                    <span className="text-sm font-bold text-white ml-1">🤖 Planning shot...</span>
-                  </div>
-                </div>
-              )}
-              {bih&&isMyTurn&&(
-                <div className="absolute inset-[16px] flex items-end justify-center pointer-events-none pb-4 rounded-xl">
-                  <motion.div animate={{opacity:[.65,1,.65]}} transition={{repeat:Infinity,duration:1.4}} className="bg-blue-900/80 border border-blue-400/50 rounded-full px-5 py-1.5 text-blue-200 text-sm font-bold">
-                    🖐 Tap anywhere to place ball
-                  </motion.div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+              </div>
+            )}
+            {bih&&isMyTurn&&(
+              <div className="absolute inset-0 flex items-end justify-center pointer-events-none pb-4">
+                <motion.div animate={{opacity:[.65,1,.65]}} transition={{repeat:Infinity,duration:1.4}} className="bg-blue-900/80 border border-blue-400/50 rounded-full px-5 py-1.5 text-blue-200 text-sm font-bold">
+                  🖐 Tap anywhere to place ball
+                </motion.div>
+              </div>
+            )}
+          </div>{/* portrait/landscape wrapper */}
+        </div>{/* table flex container */}
     </div>
   );
 };

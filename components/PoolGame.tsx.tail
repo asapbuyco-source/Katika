@@ -1,0 +1,270 @@
+  const countdownUrgent = isP2P && isMyTurn && !moving && countdown <= 10;
+
+  // Target balls the current active player should hit
+  const targetBallIds: number[] = (() => {
+    const grp = turnId === myId ? myGroup : botGroup;
+    if (!grp) return balls.filter(b => !b.pocketed && b.id !== 0 && b.id !== 8).map(b => b.id);
+    if (grp === 'solids') return balls.filter(b => !b.pocketed && b.id >= 1 && b.id <= 7).map(b => b.id);
+    return balls.filter(b => !b.pocketed && b.id >= 9 && b.id <= 15).map(b => b.id);
+  })();
+
+  // Rules dropdown
+  const [showRules, setShowRules] = React.useState(false);
+
+  // My remaining balls (not yet pocketed)
+  const myRemaining = myGroup
+    ? Array.from({length:7},(_,i)=>myGroup==='solids'?i+1:i+9).filter(id=>!balls.find(b=>b.id===id)?.pocketed)
+    : [];
+  const oppRemaining = myGroup
+    ? Array.from({length:7},(_,i)=>myGroup==='stripes'?i+1:i+9).filter(id=>!balls.find(b=>b.id===id)?.pocketed)
+    : [];
+
+  return (
+    <div style={{width:'100vw',height:'100dvh',overflow:'hidden',background:'#c8a060',display:'flex',flexDirection:'column',userSelect:'none'}}>
+
+      {/* ── Rules Panel ── */}
+      <AnimatePresence>
+        {showRules && (
+          <motion.div initial={{opacity:0,y:-20}} animate={{opacity:1,y:0}} exit={{opacity:0,y:-20}}
+            style={{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:60,display:'flex',alignItems:'flex-start',justifyContent:'center',paddingTop:60,background:'rgba(0,0,0,0.7)',backdropFilter:'blur(4px)'}}
+            onClick={()=>setShowRules(false)}>
+            <motion.div onClick={e=>e.stopPropagation()} style={{background:'#1c2a35',border:'1px solid rgba(255,255,255,0.1)',borderRadius:16,padding:20,maxWidth:340,width:'90%',maxHeight:'70vh',overflowY:'auto'}}>
+              <h3 style={{color:'#facc15',fontWeight:900,fontSize:16,margin:'0 0 12px',textAlign:'center'}}>🎱 8-Ball Rules</h3>
+              {[
+                ['Break','The player who breaks must hit the rack first. If a ball is pocketed, they continue.'],
+                ['Groups','First ball pocketed after break determines your group: Solids (1–7) or Stripes (9–15).'],
+                ['Your Turn','Sink all balls in your group, then pocket the 8-ball to win.'],
+                ['Fouls','Hitting the wrong group first, scratching (cue in pocket), or no contact is a foul — opponent gets ball-in-hand.'],
+                ['8-Ball','Pocket the 8-ball early = instant loss. Scratch on 8 = instant loss.'],
+                ['Timer','You have 60 seconds per turn in multiplayer. Time out = forfeit turn.'],
+              ].map(([t,d])=>(
+                <div key={t} style={{marginBottom:10}}>
+                  <p style={{color:'#34d399',fontWeight:700,fontSize:12,margin:'0 0 2px'}}>{t}</p>
+                  <p style={{color:'#94a3b8',fontSize:11,margin:0,lineHeight:1.5}}>{d}</p>
+                </div>
+              ))}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Forfeit Modal ── */}
+      <AnimatePresence>
+        {forfeit && (
+          <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+            <motion.div initial={{opacity:0}} animate={{opacity:1}} exit={{opacity:0}}
+              style={{position:'absolute',inset:0,background:'rgba(0,0,0,0.8)',backdropFilter:'blur(4px)'}}
+              onClick={()=>setForfeit(false)}/>
+            <motion.div initial={{scale:.9,y:20}} animate={{scale:1,y:0}} exit={{scale:.9,opacity:0}}
+              style={{position:'relative',zIndex:10,background:'#1c2a35',border:'1px solid rgba(239,68,68,0.3)',borderRadius:20,padding:24,width:'100%',maxWidth:320}}>
+              <div style={{display:'flex',flexDirection:'column',alignItems:'center',textAlign:'center',marginBottom:20}}>
+                <div style={{width:56,height:56,background:'rgba(239,68,68,0.1)',borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',marginBottom:12}}>
+                  <AlertTriangle color="#f87171" size={24}/>
+                </div>
+                <h2 style={{color:'#fff',fontWeight:700,fontSize:18,margin:0}}>Forfeit Match?</h2>
+                <p style={{color:'#94a3b8',fontSize:13,margin:'4px 0 0'}}>This counts as a loss.</p>
+              </div>
+              <div style={{display:'flex',gap:10}}>
+                <button onClick={()=>setForfeit(false)} style={{flex:1,padding:'10px',background:'rgba(255,255,255,0.05)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:12,color:'#cbd5e1',fontWeight:700,fontSize:14,cursor:'pointer'}}>Stay</button>
+                <button onClick={()=>{if(isP2P&&socket&&roomId)socket.emit('game_action',{roomId,action:{type:'FORFEIT'}});onGameEnd('quit');}}
+                  style={{flex:1,padding:'10px',background:'#dc2626',border:'none',borderRadius:12,color:'#fff',fontWeight:700,fontSize:14,cursor:'pointer'}}>Forfeit</button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Top Bar ── */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'6px 10px',flexShrink:0}}>
+        {/* Status message */}
+        <div style={{flex:1,display:'flex',justifyContent:'center'}}>
+          <div style={{
+            fontSize:11,fontWeight:700,padding:'4px 14px',borderRadius:999,
+            border:`1px solid ${isMyTurn?'rgba(52,211,153,0.4)':isBot?'rgba(251,146,60,0.4)':'rgba(255,255,255,0.12)'}`,
+            background:isMyTurn?'rgba(6,78,59,0.7)':isBot?'rgba(120,53,15,0.7)':'rgba(0,0,0,0.5)',
+            color:isMyTurn?'#6ee7b7':isBot?'#fdba74':'#94a3b8',maxWidth:'80%',
+            whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',
+          }}>{msg||'…'}{moving&&<span style={{marginLeft:6,color:'#475569'}}>●●</span>}</div>
+        </div>
+        <div style={{display:'flex',gap:8,alignItems:'center',flexShrink:0}}>
+          {/* Rules button */}
+          <button onClick={()=>setShowRules(v=>!v)}
+            style={{width:36,height:36,borderRadius:'50%',background:'rgba(0,0,0,0.5)',border:'2px solid rgba(255,255,255,0.15)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',fontSize:16}}>
+            ❓
+          </button>
+          {/* Pause/Forfeit */}
+          <button onClick={()=>setForfeit(true)}
+            style={{width:36,height:36,borderRadius:'50%',background:'#c2410c',border:'2px solid #fb923c',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+            <span style={{color:'#fff',fontSize:14}}>⏸</span>
+          </button>
+        </div>
+      </div>
+
+      {/* ── Game Area (Table + side bars) ── */}
+      <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',padding:'0 4px',minHeight:0,gap:4}}>
+
+        {/* Left: Vertical power bar */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4,flexShrink:0,width:28}}>
+          <span style={{fontSize:8,color:'rgba(0,0,0,0.6)',fontWeight:700,letterSpacing:'0.05em',writingMode:'vertical-rl',transform:'rotate(180deg)'}}>FORCE</span>
+          <div style={{flex:1,width:14,background:'rgba(0,0,0,0.35)',borderRadius:7,overflow:'hidden',border:'1px solid rgba(0,0,0,0.3)',position:'relative',maxHeight:180}}>
+            <motion.div style={{
+              position:'absolute',bottom:0,left:0,right:0,
+              height:`${power}%`,
+              background:power>75?'linear-gradient(to top,#ef4444,#fca5a5)':power>45?'linear-gradient(to top,#f59e0b,#fde68a)':'linear-gradient(to top,#22c55e,#86efac)',
+              borderRadius:7,
+            }} animate={power>2?{opacity:[0.85,1,0.85]}:{}} transition={{repeat:Infinity,duration:.6}}/>
+          </div>
+          <span style={{fontSize:9,fontFamily:'monospace',color:'rgba(0,0,0,0.7)',fontWeight:700}}>{power>2?`${Math.round(power)}%`:''}</span>
+        </div>
+
+        {/* Table */}
+        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',minWidth:0,height:'100%'}}>
+          <div style={{position:'relative',width:'100%',maxHeight:'100%',aspectRatio:'2/1'}}>
+            {/* Wood rail frame */}
+            <div style={{
+              position:'absolute',inset:0,borderRadius:16,
+              background:'linear-gradient(135deg,#8B4513 0%,#6B3410 30%,#5a2d0c 70%,#3e1a08 100%)',
+              boxShadow:'0 8px 32px rgba(0,0,0,0.6),inset 0 0 0 3px rgba(255,180,80,0.15)',
+            }}>
+              {/* Diamonds */}
+              {[25,37.5,50,62.5,75].map(p=><div key={`t${p}`} style={{position:'absolute',width:8,height:8,top:4,left:`${p}%`,transform:'translateX(-50%) rotate(45deg)',background:'rgba(255,255,255,0.5)',boxShadow:'0 0 3px rgba(255,255,255,0.5)'}}/>)}
+              {[25,37.5,50,62.5,75].map(p=><div key={`b${p}`} style={{position:'absolute',width:8,height:8,bottom:4,left:`${p}%`,transform:'translateX(-50%) rotate(45deg)',background:'rgba(255,255,255,0.5)',boxShadow:'0 0 3px rgba(255,255,255,0.5)'}}/>)}
+              {[33,67].map(p=><div key={`l${p}`} style={{position:'absolute',width:8,height:8,left:4,top:`${p}%`,transform:'translateY(-50%) rotate(45deg)',background:'rgba(255,255,255,0.5)'}}/>)}
+              {[33,67].map(p=><div key={`r${p}`} style={{position:'absolute',width:8,height:8,right:4,top:`${p}%`,transform:'translateY(-50%) rotate(45deg)',background:'rgba(255,255,255,0.5)'}}/>)}
+              {/* Canvas */}
+              <div style={{position:'absolute',inset:16,borderRadius:8,overflow:'hidden',boxShadow:'inset 0 0 20px rgba(0,0,0,0.6)'}}>
+                <canvas ref={canvasRef} width={TW} height={TH}
+                  style={{width:'100%',height:'100%',display:'block',cursor:isMyTurn&&!moving?'crosshair':'default',touchAction:'none'}}
+                  onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}
+                  onTouchStart={onDown} onTouchMove={onMove} onTouchEnd={onUp}/>
+              </div>
+            </div>
+            {/* Target ball pulsing ring overlay — drawn on canvas via targetBallIds passed to drawScene, but also shown as CSS overlay dots */}
+
+            {/* Opponent turn overlay */}
+            {!isMyTurn&&!isBot&&!moving&&isP2P&&(
+              <div style={{position:'absolute',inset:14,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+                <div style={{background:'rgba(0,0,0,0.65)',backdropFilter:'blur(6px)',borderRadius:999,padding:'8px 18px',display:'flex',gap:6,alignItems:'center'}}>
+                  {[0,150,300].map(d=><div key={d} style={{width:8,height:8,borderRadius:'50%',background:'#f87171',animation:`bounce 1s ${d}ms infinite`}}/>)}
+                  <span style={{fontSize:12,fontWeight:700,color:'#fff',marginLeft:4}}>{name2(oppId)}'s turn</span>
+                </div>
+              </div>
+            )}
+            {isBot&&!moving&&(
+              <div style={{position:'absolute',inset:14,display:'flex',alignItems:'center',justifyContent:'center',pointerEvents:'none'}}>
+                <div style={{background:'rgba(0,0,0,0.65)',backdropFilter:'blur(6px)',borderRadius:999,padding:'8px 18px',display:'flex',gap:6,alignItems:'center'}}>
+                  {[0,150,300].map(d=><div key={d} style={{width:8,height:8,borderRadius:'50%',background:'#fb923c',animation:`bounce 1s ${d}ms infinite`}}/>)}
+                  <span style={{fontSize:12,fontWeight:700,color:'#fff',marginLeft:4}}>🤖 Planning shot...</span>
+                </div>
+              </div>
+            )}
+            {bih&&isMyTurn&&(
+              <div style={{position:'absolute',inset:14,display:'flex',alignItems:'flex-end',justifyContent:'center',paddingBottom:10,pointerEvents:'none'}}>
+                <motion.div animate={{opacity:[.65,1,.65]}} transition={{repeat:Infinity,duration:1.4}}
+                  style={{background:'rgba(30,58,138,0.85)',border:'1px solid rgba(96,165,250,0.5)',borderRadius:999,padding:'6px 16px',color:'#bfdbfe',fontSize:12,fontWeight:700}}>
+                  🖐 Tap anywhere to place ball
+                </motion.div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: Cue ball indicator */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',flexShrink:0,width:32,gap:6}}>
+          {/* Cue ball visual */}
+          <div style={{width:26,height:26,borderRadius:'50%',background:'radial-gradient(circle at 35% 35%,#ffffff,#cccccc)',boxShadow:'0 2px 6px rgba(0,0,0,0.5)',border:'2px solid rgba(255,255,255,0.3)'}}/>
+          {/* Red dot = cue ball in play */}
+          {balls.find(b=>b.id===0&&!b.pocketed)&&<div style={{width:8,height:8,borderRadius:'50%',background:'#ef4444'}}/>}
+          {/* Timer */}
+          {isP2P&&isMyTurn&&!moving&&(
+            <motion.div animate={countdownUrgent?{scale:[1,1.15,1]}:{}} transition={{repeat:Infinity,duration:.5}}
+              style={{fontSize:10,fontFamily:'monospace',fontWeight:900,color:countdown<=10?'#ef4444':'rgba(0,0,0,0.6)',background:'rgba(0,0,0,0.2)',borderRadius:6,padding:'2px 4px'}}>
+              {countdown}s
+            </motion.div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Bottom HUD (match reference images) ── */}
+      <div style={{flexShrink:0,padding:'4px 6px 6px',display:'flex',alignItems:'center',gap:4}}>
+
+        {/* Player avatar + timer */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,flexShrink:0}}>
+          <div style={{
+            width:44,height:44,borderRadius:8,
+            border:`3px solid ${isMyTurn?'#22c55e':'rgba(255,255,255,0.15)'}`,
+            overflow:'hidden',background:'#1c2a35',
+            boxShadow:isMyTurn?'0 0 10px rgba(34,197,94,0.5)':'none',
+          }}>
+            <img src={user.avatar||`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+          </div>
+          {isP2P&&(
+            <div style={{background:'#111',borderRadius:4,padding:'1px 4px',fontSize:9,fontFamily:'monospace',color:isMyTurn&&countdown<=10?'#f87171':'#fff',fontWeight:700}}>
+              {isMyTurn?`${Math.floor(countdown/60)}:${String(countdown%60).padStart(2,'0')}:'--'}
+            </div>
+          )}
+        </div>
+
+        {/* My balls row */}
+        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:2,background:'rgba(0,0,0,0.55)',borderRadius:8,padding:'4px 6px',minWidth:0,overflow:'hidden'}}>
+          {myGroup
+            ? Array.from({length:7},(_,i)=>myGroup==='solids'?i+1:i+9).map(bid=>{
+                const pk=balls.find(b=>b.id===bid)?.pocketed;
+                const isTarget=targetBallIds.includes(bid)&&isMyTurn&&!moving;
+                return (
+                  <div key={bid} style={{position:'relative',flexShrink:0}}>
+                    <div style={{width:22,height:22,borderRadius:'50%',background:BALL_COLORS[bid],opacity:pk?0.25:1,boxShadow:pk?'none':`0 1px 4px rgba(0,0,0,0.5)`,border:'1.5px solid rgba(255,255,255,0.2)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <span style={{color:'#fff',fontSize:8,fontWeight:900,textShadow:'0 1px 2px rgba(0,0,0,0.8)'}}>{bid}</span>
+                    </div>
+                    {isTarget&&!pk&&(
+                      <motion.div animate={{scale:[1,1.5,1],opacity:[0.8,0,0.8]}} transition={{repeat:Infinity,duration:1.2}}
+                        style={{position:'absolute',inset:-3,borderRadius:'50%',border:'2px solid #ef4444',pointerEvents:'none'}}/>
+                    )}
+                  </div>
+                );
+              })
+            : <span style={{color:'rgba(255,255,255,0.3)',fontSize:9}}>Open</span>
+          }
+        </div>
+
+        {/* Center score */}
+        <div style={{flexShrink:0,display:'flex',flexDirection:'column',alignItems:'center',gap:2}}>
+          <div style={{background:'#111',borderRadius:8,padding:'4px 10px',minWidth:36,textAlign:'center'}}>
+            <span style={{color:'#fff',fontSize:18,fontWeight:900,fontFamily:'monospace'}}>{(table.stake*2).toLocaleString()}</span>
+          </div>
+          <div style={{fontSize:8,color:'rgba(0,0,0,0.5)',fontWeight:700}}>💰 POT</div>
+        </div>
+
+        {/* Opponent balls row */}
+        <div style={{flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:2,background:'rgba(0,0,0,0.55)',borderRadius:8,padding:'4px 6px',minWidth:0,overflow:'hidden'}}>
+          {myGroup
+            ? Array.from({length:7},(_,i)=>myGroup==='stripes'?i+1:i+9).map(bid=>{
+                const pk=balls.find(b=>b.id===bid)?.pocketed;
+                return (
+                  <div key={bid} style={{width:22,height:22,borderRadius:'50%',background:BALL_COLORS[bid],opacity:pk?0.25:1,boxShadow:pk?'none':`0 1px 4px rgba(0,0,0,0.5)`,border:'1.5px solid rgba(255,255,255,0.2)',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <span style={{color:'#fff',fontSize:8,fontWeight:900,textShadow:'0 1px 2px rgba(0,0,0,0.8)'}}>{bid}</span>
+                  </div>
+                );
+              })
+            : <span style={{color:'rgba(255,255,255,0.3)',fontSize:9}}>Waiting</span>
+          }
+        </div>
+
+        {/* Opponent avatar */}
+        <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:2,flexShrink:0}}>
+          <div style={{
+            width:44,height:44,borderRadius:8,
+            border:`3px solid ${(!isMyTurn&&!isBot)||isBot?'#ef4444':'rgba(255,255,255,0.15)'}`,
+            overflow:'hidden',background:'#1c2a35',
+            boxShadow:(!isMyTurn&&!isBot)||isBot?'0 0 10px rgba(239,68,68,0.5)':'none',
+          }}>
+            <img src={av2(oppId)} alt="" style={{width:'100%',height:'100%',objectFit:'cover'}}/>
+          </div>
+          <div style={{background:'#111',borderRadius:4,padding:'1px 4px',fontSize:9,fontFamily:'monospace',color:'#fff',fontWeight:700,minWidth:20,textAlign:'center'}}>
+            {oppPot}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};

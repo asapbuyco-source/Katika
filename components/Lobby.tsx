@@ -151,12 +151,6 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
         if (isMaintenance) return;
         if (!selectedGame) return;
 
-        // Bug H fix: Pool has no P2P socket integration — redirect to bot play
-        if (selectedGame === 'Pool') {
-            toast.info('Pool is currently single-player only. Starting bot match!');
-            onQuickMatch(-1, selectedGame);
-            return;
-        }
 
         if (user.balance < tier.stake) {
             setNeededAmount(tier.stake - user.balance);
