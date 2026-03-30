@@ -133,6 +133,10 @@ const verifyAuth = async (req, res, next) => {
 // --- HEALTH CHECK (required for Railway) ---
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
+// In-memory map: transId -> { userId, amount } for webhook lookup
+// (Firestore persistent_payments acts as long-term idempotency guard)
+const pendingDeposits = new Map();
+
 // --- FAPSHI PAYMENT PROXY (keeps API keys server-side) ---
 app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
     try {
@@ -156,7 +160,20 @@ app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
             return res.status(400).json({ error: 'Amount exceeds maximum allowed deposit.' });
         }
 
+        // The credited amount is the deposit amount requested by the user (before fee).
+        // The fee was added by the client (totalToPay = amount + fee), so we store
+        // the original depositAmount from the client for crediting purposes.
+        // We receive `amount` = totalToPay here; store it for the webhook.
+        const depositAmount = amount; // webhook credits this exact figure
+
         const email = String(userId).includes('@') ? userId : 'guest@vantagegaming.cm';
+
+        // Build webhook URL so Fapshi notifies us when payment completes
+        const rawBase = process.env.SERVER_URL || (process.env.RAILWAY_PUBLIC_DOMAIN
+            ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+            : null);
+        const webhookUrl = rawBase ? `${rawBase}/api/pay/webhook` : undefined;
+
         const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
             method: 'POST',
             headers: {
@@ -164,14 +181,122 @@ app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
                 'apikey': FAPSHI_API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({ amount, email, userId, redirectUrl })
+            body: JSON.stringify({
+                amount,
+                email,
+                userId,
+                redirectUrl,
+                ...(webhookUrl ? { webhook: webhookUrl } : {})
+            })
         });
         const data = await response.json();
         if (!response.ok) return res.status(response.status).json(data);
+
+        // Store pending deposit so webhook can look up userId + amount by transId
+        if (data.transId) {
+            pendingDeposits.set(data.transId, { userId, depositAmount });
+            // Auto-expire after 2 hours to prevent unbounded map growth
+            setTimeout(() => pendingDeposits.delete(data.transId), 2 * 60 * 60 * 1000);
+        }
+
         res.json(data);
     } catch (err) {
         console.error('Fapshi initiate proxy error:', err);
         res.status(500).json({ error: 'Payment initiation failed' });
+    }
+});
+
+// --- FAPSHI WEBHOOK (server-side deposit confirmation) ---
+// Fapshi POST-es this endpoint when a payment status changes.
+// We credit the balance here using Firebase Admin so the deposit is processed
+// even when the user's browser tab is closed.
+app.post('/api/pay/webhook', async (req, res) => {
+    // Immediately acknowledge so Fapshi doesn't retry
+    res.status(200).json({ received: true });
+
+    try {
+        const { transId, status } = req.body || {};
+        if (!transId || status !== 'SUCCESSFUL') return;
+
+        // Look up pending deposit (in-memory first, then verify with Fapshi)
+        let userId, depositAmount;
+        const pending = pendingDeposits.get(transId);
+        if (pending) {
+            userId = pending.userId;
+            depositAmount = pending.depositAmount;
+        } else {
+            // Fallback: verify with Fapshi directly to get amount and userId
+            const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+                headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
+            });
+            if (!verifyRes.ok) {
+                console.error(`[Webhook] Could not verify transId ${transId}`);
+                return;
+            }
+            const verifyData = await verifyRes.json();
+            if (verifyData.status !== 'SUCCESSFUL') return;
+            userId = verifyData.userId || verifyData.externalId;
+            depositAmount = verifyData.amount;
+        }
+
+        if (!userId || !depositAmount) {
+            console.error(`[Webhook] Missing userId or amount for transId=${transId}`);
+            return;
+        }
+
+        if (!db) {
+            console.error('[Webhook] Firestore unavailable — cannot credit deposit');
+            return;
+        }
+
+        // Idempotency: use processed_payments/{transId} sentinel (same as client-side)
+        const paymentRef = db.collection('processed_payments').doc(transId);
+        const userRef = db.collection('users').doc(userId);
+
+        await db.runTransaction(async (tx) => {
+            const [paySnap, userSnap] = await Promise.all([tx.get(paymentRef), tx.get(userRef)]);
+
+            if (paySnap.exists()) {
+                console.log(`[Webhook] transId=${transId} already processed — skipping.`);
+                return;
+            }
+            if (!userSnap.exists()) {
+                console.error(`[Webhook] User ${userId} not found for transId=${transId}`);
+                return;
+            }
+
+            const newBalance = (userSnap.data().balance || 0) + depositAmount;
+            tx.update(userRef, { balance: newBalance });
+            tx.set(paymentRef, {
+                userId,
+                amount: depositAmount,
+                processedAt: admin.firestore.FieldValue.serverTimestamp(),
+                source: 'webhook'
+            });
+            tx.set(userRef.collection('transactions').doc(), {
+                type: 'deposit',
+                amount: depositAmount,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                transId
+            });
+        });
+
+        console.log(`[Webhook] Credited ${depositAmount} FCFA to ${userId} (transId=${transId})`);
+        pendingDeposits.delete(transId);
+
+        // Notify the user's active socket so the UI updates immediately
+        const socketId = userSockets.get(userId);
+        if (socketId) {
+            const sock = io.sockets.sockets.get(socketId);
+            if (sock) {
+                sock.emit('payment_confirmed', { transId, amount: depositAmount });
+                console.log(`[Webhook] Emitted payment_confirmed to socket ${socketId}`);
+            }
+        }
+    } catch (err) {
+        console.error('[Webhook] Error processing payment:', err);
     }
 });
 
@@ -1514,7 +1639,7 @@ io.on('connection', (socket) => {
                 const opponentHasLegalMove = opponentPieces.some(p => {
                     const isOppPlayer1 = room.players[0] === opponentId;
                     const oppFwdDir = isOppPlayer1 ? -1 : 1;
-                    const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[oppFwdDir,-1],[oppFwdDir,1]];
+                    const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[oppFwdDir, -1], [oppFwdDir, 1]];
                     const pieceMap = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
                     return dirs.some(([dr, dc]) => {
                         const mr = p.r + dr, mc = p.c + dc;

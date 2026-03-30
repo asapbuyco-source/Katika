@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
 import { getUserTransactions, creditDepositIdempotent, auth } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
+import { useSocket } from '../services/SocketContext';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
@@ -17,6 +18,7 @@ interface FinanceProps {
 
 export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
     const { t } = useLanguage();
+    const { socket } = useSocket();
     const [activeTab, setActiveTab] = useState<'deposit' | 'withdraw' | 'history'>('deposit');
     const [amount, setAmount] = useState('');
     const [provider, setProvider] = useState<'mtn' | 'orange'>('mtn');
@@ -27,11 +29,14 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
     const [showSuccess, setShowSuccess] = useState(false);
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const pollIntervalRef = useRef<number | null>(null);
+    // Track which transIds have already been credited (to avoid double-credit between
+    // the server webhook path and the client polling path).
+    const creditedTransIds = useRef<Set<string>>(new Set());
 
     // Real Data State
     const [transactions, setTransactions] = useState<Transaction[]>([]);
 
-    // Fetch Transactions on Mount
+    // ── Fetch Transactions on Mount / tab change ─────────────────────────────
     useEffect(() => {
         const fetchHistory = async () => {
             if (user.id.startsWith('guest-')) return;
@@ -41,12 +46,49 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         fetchHistory();
     }, [user.id, activeTab]);
 
-    // Cleanup polling on unmount
+    // ── Cleanup polling on unmount ───────────────────────────────────────────
     useEffect(() => {
         return () => {
             if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
         };
     }, []);
+
+    // ── Server-push: listen for payment_confirmed socket event ───────────────
+    // This fires when the Fapshi webhook hits the server, crediting the balance
+    // server-side. The client just needs to refresh its UI — no Firestore write.
+    useEffect(() => {
+        if (!socket) return;
+
+        const handlePaymentConfirmed = async ({ transId: confirmedTransId, amount: confirmedAmount }: { transId: string; amount: number }) => {
+            // Mark as credited so the poller doesn't attempt a second credit
+            creditedTransIds.current.add(confirmedTransId);
+
+            // Stop the poller if it was running for this transId
+            if (pollIntervalRef.current) {
+                clearInterval(pollIntervalRef.current);
+                pollIntervalRef.current = null;
+            }
+
+            // Trigger balance refresh via the Firestore listener in App.tsx
+            onTopUp();
+
+            // Show confirmation toast
+            setShowSuccess(true);
+            setPaymentLink(null);
+            setTransId(null);
+            setAmount('');
+            setTimeout(() => setShowSuccess(false), 4000);
+
+            // Refresh local history
+            if (!user.id.startsWith('guest-')) {
+                const history = await getUserTransactions(user.id);
+                setTransactions(history);
+            }
+        };
+
+        socket.on('payment_confirmed', handlePaymentConfirmed);
+        return () => { socket.off('payment_confirmed', handlePaymentConfirmed); };
+    }, [socket, user.id, onTopUp]);
 
     const handleDeposit = async () => {
         if (!amount) return;
@@ -82,16 +124,20 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
                 if (status === 'SUCCESSFUL') {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+                    pollIntervalRef.current = null;
 
                     if (!user.id.startsWith('guest-')) {
-                        // Bug F4 fix: creditDepositIdempotent prevents double-crediting if the
-                        // polling fires multiple times before the first Firestore write completes.
-                        // It uses a set-once sentinel doc in processed_payments/{transId}.
-                        await creditDepositIdempotent(user.id, response.transId, depositAmount);
+                        // Only credit client-side if the webhook hasn't already done it.
+                        // creditDepositIdempotent uses a Firestore sentinel so even if both
+                        // paths fire, only one credit is written.
+                        if (!creditedTransIds.current.has(response.transId)) {
+                            creditedTransIds.current.add(response.transId);
+                            await creditDepositIdempotent(user.id, response.transId, depositAmount);
+                        }
                     }
 
-                    // Let the live subscribeToUser listener in App.tsx pick up the real Firestore balance.
-                    // Passing no argument avoids using a stale closure value (Bug C2 fix).
+                    // Let the live subscribeToUser listener in App.tsx pick up the
+                    // real Firestore balance automatically (Bug C2 fix — no stale value).
                     onTopUp();
                     setShowSuccess(true);
                     setPaymentLink(null);
@@ -102,9 +148,10 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                     const history = await getUserTransactions(user.id);
                     setTransactions(history);
 
-                    setTimeout(() => setShowSuccess(false), 3000);
+                    setTimeout(() => setShowSuccess(false), 4000);
                 } else if (status === 'FAILED' || status === 'EXPIRED') {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+                    pollIntervalRef.current = null;
                     setErrorMsg('Payment failed or expired. Please try again.');
                     setPaymentLink(null);
                     setTransId(null);
@@ -194,7 +241,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                         className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-royal-950 px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
                     >
                         <CheckCircle size={20} />
-                        Request Submitted! Balance Updated.
+                        {activeTab === 'deposit' ? '✅ Deposit Confirmed! Balance Updated.' : '✅ Withdrawal Submitted!'}
                     </motion.div>
                 )}
             </AnimatePresence>
