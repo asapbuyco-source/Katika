@@ -22,10 +22,10 @@ const TURN_TIME = 60;   // seconds per turn in P2P
 // Corner & side pocket positions
 const POCKETS = [
   {x:PR*0.6, y:PR*0.6},           // TL corner
-  {x:TW/2,   y:0},                 // Top side
+  {x:TW/2,   y:4},                 // Top side (shifted inward slightly to capture better)
   {x:TW-PR*0.6, y:PR*0.6},        // TR corner
   {x:PR*0.6, y:TH-PR*0.6},        // BL corner
-  {x:TW/2,   y:TH},               // Bottom side
+  {x:TW/2,   y:TH-4},               // Bottom side
   {x:TW-PR*0.6, y:TH-PR*0.6},     // BR corner
 ];
 
@@ -67,13 +67,30 @@ function stepPhysics(
     const active = balls.filter(b=>!b.pocketed);
     for (const b of active) {
       b.x += b.vx/SUB; b.y += b.vy/SUB;
-      // Directional wall bounce — only skip the wall that faces a nearby pocket
+      // Geometric wall bounce — skips bounce if the ball is inside the literal pocket gaps
       let f=0, bounced=false;
-      const pNear=(px:number,py:number)=>Math.hypot(b.x-px,b.y-py)<PD;
-      if(b.x<RAIL+BR&&!pNear(POCKETS[0].x,POCKETS[0].y)&&!pNear(POCKETS[3].x,POCKETS[3].y)){b.x=RAIL+BR;f=Math.abs(b.vx);b.vx=f*WALL_REST;bounced=true;}
-      if(b.x>TW-RAIL-BR&&!pNear(POCKETS[2].x,POCKETS[2].y)&&!pNear(POCKETS[5].x,POCKETS[5].y)){b.x=TW-RAIL-BR;f=Math.abs(b.vx);b.vx=-f*WALL_REST;bounced=true;}
-      if(b.y<RAIL+BR&&!pNear(POCKETS[0].x,POCKETS[0].y)&&!pNear(POCKETS[1].x,POCKETS[1].y)&&!pNear(POCKETS[2].x,POCKETS[2].y)){b.y=RAIL+BR;f=Math.abs(b.vy);b.vy=f*WALL_REST;bounced=true;}
-      if(b.y>TH-RAIL-BR&&!pNear(POCKETS[3].x,POCKETS[3].y)&&!pNear(POCKETS[4].x,POCKETS[4].y)&&!pNear(POCKETS[5].x,POCKETS[5].y)){b.y=TH-RAIL-BR;f=Math.abs(b.vy);b.vy=-f*WALL_REST;bounced=true;}
+      const gapC = 37, gapM = 30; // Matches visual cushion cutouts C=35, M=28
+      
+      if (b.y < RAIL+BR) {
+        if (!(b.x < gapC || (b.x > TW/2 - gapM && b.x < TW/2 + gapM) || b.x > TW - gapC)) {
+          b.y = RAIL+BR; f = Math.abs(b.vy); b.vy = f*WALL_REST; bounced=true;
+        }
+      }
+      if (b.y > TH-RAIL-BR) {
+        if (!(b.x < gapC || (b.x > TW/2 - gapM && b.x < TW/2 + gapM) || b.x > TW - gapC)) {
+          b.y = TH-RAIL-BR; f = Math.abs(b.vy); b.vy = -f*WALL_REST; bounced=true;
+        }
+      }
+      if (b.x < RAIL+BR) {
+        if (!(b.y < gapC || b.y > TH - gapC)) {
+          b.x = RAIL+BR; f = Math.abs(b.vx); b.vx = f*WALL_REST; bounced=true;
+        }
+      }
+      if (b.x > TW-RAIL-BR) {
+        if (!(b.y < gapC || b.y > TH - gapC)) {
+          b.x = TW-RAIL-BR; f = Math.abs(b.vx); b.vx = -f*WALL_REST; bounced=true;
+        }
+      }
       if(bounced&&step===0&&f>2){playPoolSound('cushion',Math.min(1,f/14));if(f>10)shakeCb(f*0.1);}
     }
     // Ball-ball collisions
@@ -322,7 +339,7 @@ function drawScene(
   ctx.restore(); // end shake
 }
 
-// Smarter bot: scores each target ball by pocket opportunity and picks the best shot
+// Smarter bot: Considers cut angles, target-to-pocket blocked paths, and prefers easier shots
 function findBotShot(balls:Ball[], grp:'solids'|'stripes'|null){
   const cue=balls.find(b=>b.id===0&&!b.pocketed); if(!cue) return null;
   // Determine which balls to target
@@ -339,36 +356,89 @@ function findBotShot(balls:Ball[], grp:'solids'|'stripes'|null){
 
   for(const target of targets){
     for(const pocket of POCKETS){
-      // Direction from target to pocket
       const tpd=Math.hypot(pocket.x-target.x,pocket.y-target.y);
       if(tpd<1) continue;
       const tpnx=(pocket.x-target.x)/tpd, tpny=(pocket.y-target.y)/tpd;
+      
       // Ghost ball position: cue hits target toward pocket
       const ghostX=target.x-tpnx*(BR*2.02), ghostY=target.y-tpny*(BR*2.02);
+      
       // Direction cue must travel
       const cgd=Math.hypot(ghostX-cue.x,ghostY-cue.y);
       if(cgd<1) continue;
       const angle=Math.atan2(ghostY-cue.y,ghostX-cue.x);
-      // Penalise if another ball blocks cue path
-      const blocked=balls.some(b=>{
-        if(b.pocketed||b.id===0||b.id===target.id) return false;
-        const t2=(b.x-cue.x)*(ghostX-cue.x)+(b.y-cue.y)*(ghostY-cue.y);
-        const t=t2/(cgd*cgd); if(t<0||t>1) return false;
-        const px=cue.x+t*(ghostX-cue.x), py=cue.y+t*(ghostY-cue.y);
-        return Math.hypot(b.x-px,b.y-py)<BR*2.1;
-      });
-      // Score: prefer shorter cue travel, shorter target-pocket, unblocked
-      const score=(blocked?-1000:0)-(cgd*0.6)-(tpd*0.4);
+      
+      // Calculate Cut Angle: Difference between Cue path and Target path
+      const cutAngle = Math.abs(Math.atan2(tpny, tpnx) - angle);
+      let normCut = cutAngle % (Math.PI*2);
+      if(normCut > Math.PI) normCut = Math.PI*2 - normCut;
+      
+      // Max cut angle is roughly ~81 degrees. Very hard to hit if close to 90
+      if(normCut > Math.PI/2.2) continue; // Physically impossible or too thin
+
+      // Ray-Sphere intersection helper
+      const isBlocked = (start:{x:number, y:number}, end:{x:number, y:number}, dirDist:number, ignoreIds:number[]) => {
+        return balls.some(b => {
+          if(b.pocketed || ignoreIds.includes(b.id)) return false;
+          const t2 = (b.x-start.x)*(end.x-start.x) + (b.y-start.y)*(end.y-start.y);
+          const t = t2 / (dirDist*dirDist);
+          if(t<0 || t>1.02) return false;
+          const px = start.x + t*(end.x-start.x), py = start.y + t*(end.y-start.y);
+          return Math.hypot(b.x-px,b.y-py) < BR*2.05;
+        });
+      };
+
+      // Penalise if cue path is blocked
+      const cueBlocked = isBlocked(cue, {x:ghostX, y:ghostY}, cgd, [0, target.id]);
+      // Penalise if path from target to pocket is blocked
+      const targetBlocked = isBlocked(target, pocket, tpd, [target.id]);
+
+      let score = 0;
+      if (cueBlocked || targetBlocked) score -= 2000;
+      
+      // Score: Prefer shorter cue travel, shorter target travel, straight cuts
+      score -= (cgd * 0.4); 
+      score -= (tpd * 0.5); 
+      score -= Math.pow(normCut * 300, 1.2); // Extremely heavy penalty for thin angles
+
+      // Scratch risk: penalty if straight on
+      if (normCut < 0.05) score -= 150; 
+
       if(!best||score>best.score){
-        const dist=Math.hypot(ghostX-cue.x,ghostY-cue.y);
-        const power=Math.min(92,45+dist*0.045);
+        const power=Math.min(95, 35 + cgd*0.04 + tpd*0.06 + normCut*25);
         best={angle,power,score};
       }
     }
   }
+
+  // Backup Safety Play: If NO clear pocket shot exists, find any legal unblocked ball to hit to prevent a foul
+  if (best && best.score < -1000) {
+    for(const target of targets){
+       const cgd=Math.hypot(target.x-cue.x,target.y-cue.y);
+       const angle=Math.atan2(target.y-cue.y,target.x-cue.x);
+       const tDirX=(target.x-cue.x)/cgd, tDirY=(target.y-cue.y)/cgd;
+       
+       // Aim for a slightly glancing blow
+       const safeAngle = angle + (Math.random()>0.5?0.15:-0.15);
+       
+       const isBlocked = balls.some(b => {
+          if(b.pocketed || b.id===0 || b.id===target.id) return false;
+          const t2 = (b.x-cue.x)*(target.x-cue.x) + (b.y-cue.y)*(target.y-cue.y);
+          const t = t2 / (cgd*cgd);
+          if(t<0 || t>1) return false;
+          const px = cue.x + t*(target.x-cue.x), py = cue.y + t*(target.y-cue.y);
+          return Math.hypot(b.x-px,b.y-py) < BR*2.1;
+       });
+       
+       if (!isBlocked) {
+         return { angle: safeAngle, power: 25 + Math.random()*15 }; // Gentle hit
+       }
+    }
+  }
+
   if(!best) return null;
-  // Tiny aim jitter for realism (hard=small, easy=large)
-  const jitter=(Math.random()-.5)*0.06;
+  // Tiny aim jitter for realism
+  const jitter=(Math.random()-.5)*0.02;
   return {angle:best.angle+jitter, power:best.power};
 }
 
@@ -561,7 +631,31 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     if(hasBih){c.pocketed=false;c.x=TW*.3+Math.random()*TW*.1;c.y=TH*.3+Math.random()*TH*.4;c.vx=0;c.vy=0;setBalls([...ballsRef.current]);}
     const shot=findBotShot(ballsRef.current,bg);
     if(!shot){c.vx=20;c.vy=(Math.random()-.5)*4;playPoolSound('cue-hit',1);startPhysics();return;}
-    setAngle(shot.angle); setPower(shot.power); animStrike(shot.angle,shot.power);
+    
+    // Smooth Aim Animation
+    const currentAngle = angleRef.current;
+    let diff = shot.angle - currentAngle;
+    while(diff < -Math.PI) diff += Math.PI*2;
+    while(diff > Math.PI) diff -= Math.PI*2;
+    
+    let f=0; const steps=45; // ~500ms aiming
+    const aimIv = setInterval(()=>{
+      f++;
+      setAngle(currentAngle + diff * (f/steps));
+      if(f>=steps){
+        clearInterval(aimIv);
+        // Smooth Power Pullback
+        let pf=0; const psteps=25; // ~300ms pullback
+        const pbIv = setInterval(()=>{
+          pf++;
+          setPower(shot.power * (pf/psteps));
+          if(pf>=psteps){
+            clearInterval(pbIv);
+            animStrike(shot.angle,shot.power);
+          }
+        }, 12);
+      }
+    }, 12);
   };
 
   const animStrike=(a:number,p:number)=>{
