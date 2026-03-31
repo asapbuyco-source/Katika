@@ -1,0 +1,148 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── HELPER FUNCTIONS ────────────────────────────────────────────────────
+
+    // A user is authenticated and is who they claim to be
+    function isAuth() {
+      return request.auth != null;
+    }
+
+    // Requesting user owns the document
+    function isOwner(uid) {
+      return isAuth() && request.auth.uid == uid;
+    }
+
+    // User is not anonymous (has a real account)
+    function isFullAccount() {
+      return isAuth() && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Incoming data does NOT attempt to elevate isAdmin
+    // (isAdmin must only be writable by server-side Admin SDK, never the client)
+    function noAdminEscalation() {
+      return !('isAdmin' in request.resource.data) ||
+             request.resource.data.isAdmin == resource.data.get('isAdmin', false);
+    }
+
+    // Incoming data does NOT attempt to arbitrarily increase financial fields or change referrals
+    function noFinancialEscalation() {
+      return (!('balance' in request.resource.data) || request.resource.data.balance == resource.data.get('balance', 0)) &&
+             (!('promoBalance' in request.resource.data) || request.resource.data.promoBalance == resource.data.get('promoBalance', 0)) &&
+             (!('referredBy' in request.resource.data) || (!('referredBy' in resource.data)) || request.resource.data.referredBy == resource.data.get('referredBy', ''));
+    }
+
+    // ─── USERS ───────────────────────────────────────────────────────────────
+    match /users/{uid} {
+      // Anyone authenticated can read public profile fields
+      allow read: if isAuth();
+
+      // User can only write their OWN document, and CANNOT grant themselves isAdmin or Free Money
+      allow create: if isOwner(uid) && noAdminEscalation() && noFinancialEscalation();
+      allow update: if isOwner(uid) && noAdminEscalation() && noFinancialEscalation();
+
+      // Transactions sub-collection: owner read only; writes go through server Admin SDK
+      match /transactions/{txId} {
+        allow read: if isOwner(uid);
+        allow write: if false; // Server Admin SDK only
+      }
+    }
+
+    // ─── GAMES ───────────────────────────────────────────────────────────────
+    match /games/{gameId} {
+      // Players in the game can read it
+      allow read: if isAuth();
+      // Only authenticated non-guests can create games
+      allow create: if isFullAccount();
+      // Game updates go through the server socket; allow client writes for state sync
+      allow update: if isAuth() && request.auth.uid in resource.data.players;
+      allow delete: if false;
+    }
+
+    // ─── CHALLENGES ──────────────────────────────────────────────────────────
+    match /challenges/{challengeId} {
+      allow read: if isAuth() &&
+        (request.auth.uid == resource.data.get('targetId', '') ||
+         request.auth.uid == resource.data.get('sender.id', ''));
+      allow create: if isFullAccount();
+      allow update: if isAuth() &&
+        (request.auth.uid == resource.data.get('targetId', '') ||
+         request.auth.uid == resource.data.get('sender.id', ''));
+      allow delete: if false;
+    }
+
+    // ─── TOURNAMENTS ─────────────────────────────────────────────────────────
+    match /tournaments/{tournamentId} {
+      allow read: if isAuth();
+      // Creates and status changes go through the server API; block direct client writes
+      allow write: if false;
+    }
+
+    match /tournament_matches/{matchId} {
+      allow read: if isAuth();
+      allow write: if false; // Server Admin SDK only
+    }
+
+    // ─── FINANCIAL COLLECTIONS — SERVER ADMIN SDK ONLY ───────────────────────
+    // These collections must NEVER be client-writable. Any read/write goes
+    // through the server using the Firebase Admin SDK with elevated credentials.
+
+    match /processed_payments/{transId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /processed_settlements/{settlementId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /processed_tournaments/{tournamentId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    match /pending_payments/{transId} {
+      allow read: if false;
+      allow write: if false;
+    }
+
+    // ─── SETTINGS (maintenance mode, game configs) ───────────────────────────
+    match /settings/{settingId} {
+      allow read: if isAuth();
+      allow write: if false; // Admin API only
+    }
+
+    match /game_configs/{gameId} {
+      allow read: if isAuth();
+      allow write: if false; // Admin API only
+    }
+
+    // ─── FORUM POSTS ─────────────────────────────────────────────────────────
+    match /forum_posts/{postId} {
+      allow read: if isAuth();
+      allow create: if isFullAccount();
+      allow update: if isAuth() && request.auth.uid == resource.data.get('authorId', '');
+      allow delete: if false;
+    }
+
+    // ─── BUG REPORTS ─────────────────────────────────────────────────────────
+    match /bug_reports/{reportId} {
+      allow read: if false; // Admin only via server
+      allow create: if isAuth();
+      allow update, delete: if false;
+    }
+
+    // ─── LEADERBOARDS / LIVE WINNERS (read-only for clients) ─────────────────
+    match /live_winners/{docId} {
+      allow read: if true; // Public
+      allow write: if false;
+    }
+
+    // ─── DENY EVERYTHING ELSE ────────────────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -282,8 +282,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         } else {
             setPhase('rolling');
             setTimeout(() => {
-                const d1 = Math.ceil(Math.random() * 6);
-                const d2 = Math.ceil(Math.random() * 6);
+                const arr = new Uint32Array(2);
+                window.crypto.getRandomValues(arr);
+                const d1 = (arr[0] % 6) + 1;
+                const d2 = (arr[1] % 6) + 1;
                 updateMyDice([d1, d2]);
                 setPhase('waiting');
                 setIsMyTurn(false);
@@ -296,8 +298,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         setPhase('rolling');
         playSFX('dice');
         setTimeout(() => {
-            const d1 = Math.ceil(Math.random() * 6);
-            const d2 = Math.ceil(Math.random() * 6);
+            const arr = new Uint32Array(2);
+            window.crypto.getRandomValues(arr);
+            const d1 = (arr[0] % 6) + 1;
+            const d2 = (arr[1] % 6) + 1;
             updateOppDice([d1, d2]);
             // Use Ref values to ensure we aren't using stale closure state
             evaluateRoundLocal(myDiceRef.current, [d1, d2]);
@@ -320,6 +324,11 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         } else {
             setRoundWinner('tie');
         }
+        
+        // Automate next round transition
+        setTimeout(() => {
+            nextRoundLocal();
+        }, 3000);
     };
 
     const nextRoundLocal = () => {
@@ -579,14 +588,13 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                             <Box size={24} strokeWidth={3} /> ROLL DICE ({timeLeft}s)
                         </motion.button>
                     ) : phase === 'scored' && !isP2P ? (
-                        <motion.button
-                            key="next"
+                        <motion.div
+                            key="auto-next"
                             initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-                            onClick={nextRoundLocal}
-                            className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black text-xl rounded-2xl shadow-lg transition-all transform active:scale-95 flex items-center justify-center gap-3"
+                            className="w-full py-4 bg-white/10 text-white font-bold text-lg rounded-2xl shadow-lg flex items-center justify-center gap-3 animate-pulse border border-white/20"
                         >
-                            {scores.me >= 3 || scores.opp >= 3 ? 'FINISH MATCH' : 'NEXT ROUND'} <ArrowLeft className="rotate-180" strokeWidth={3} />
-                        </motion.button>
+                            {scores.me >= 3 || scores.opp >= 3 ? 'FINISHING MATCH...' : 'STARTING NEXT ROUND...'}
+                        </motion.div>
                     ) : (
                         <motion.div
                             key="status"

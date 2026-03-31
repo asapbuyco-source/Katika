@@ -22,6 +22,7 @@ import { doc, getDoc } from 'firebase/firestore';
 import { Tournament } from '../types';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { GameResultOverlay } from './GameResultOverlay';
+import { Onboarding } from './Onboarding';
 
 // ─── Lazy-loaded route views ───────────────────────────────────────────────────
 const LandingPage = lazy(() => import('./LandingPage').then(m => ({ default: m.LandingPage })));
@@ -565,6 +566,12 @@ const AppContent = () => {
             </main>
 
             <AnimatePresence>
+                {user && user.hasSeenOnboarding === false && currentView !== 'game' && currentView !== 'matchmaking' && (
+                    <Onboarding 
+                        user={user} 
+                        onComplete={() => dispatch({ type: 'UPDATE_USER', payload: { hasSeenOnboarding: true } })} 
+                    />
+                )}
                 {opponentDisconnected && <ReconnectionModal timeout={opponentTimeout} opponent={opponentProfile} />}
                 {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { socket?.connect(); }} />}
                 {gameResult && (

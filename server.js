@@ -7,6 +7,7 @@ import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 import admin from 'firebase-admin';
+import crypto from 'crypto';
 
 
 // --- CONFIGURATION & VALIDATION ---
@@ -24,6 +25,10 @@ const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
 const FRONTEND_ORIGIN = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
+
+// FIX C2: Admin whitelist — authoritative source is the JWT email, NEVER Firestore's isAdmin flag
+// (isAdmin in Firestore is client-writable; email in a Firebase ID token is cryptographically signed)
+const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'abrackly@gmail.com').split(',').map(e => e.trim());
 
 // --- FIREBASE ADMIN INITIALIZATION ---
 try {
@@ -130,6 +135,20 @@ const verifyAuth = async (req, res, next) => {
     }
 };
 
+// --- GUEST FINANCIAL BLOCK MIDDLEWARE ---
+// FIX: Anonymous / guest accounts cannot perform real-money operations.
+// Firebase sets sign_in_provider='anonymous' for accounts created via signInAnonymously().
+const blockGuests = (req, res, next) => {
+    const provider = req.user?.firebase?.sign_in_provider;
+    if (provider === 'anonymous') {
+        return res.status(403).json({
+            error: 'Guest accounts cannot perform financial transactions. Please create a full account.',
+            code: 'GUEST_RESTRICTED'
+        });
+    }
+    next();
+};
+
 // --- HEALTH CHECK (required for Railway) ---
 app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 
@@ -138,7 +157,7 @@ app.get('/health', (_req, res) => res.status(200).json({ status: 'ok' }));
 const pendingDeposits = new Map();
 
 // --- FAPSHI PAYMENT PROXY (keeps API keys server-side) ---
-app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
+app.post('/api/pay/initiate', verifyAuth, blockGuests, async (req, res) => {
     try {
         const { amount, userId, redirectUrl } = req.body;
 
@@ -195,8 +214,15 @@ app.post('/api/pay/initiate', verifyAuth, async (req, res) => {
         // Store pending deposit so webhook can look up userId + amount by transId
         if (data.transId) {
             pendingDeposits.set(data.transId, { userId, depositAmount });
-            // Auto-expire after 2 hours to prevent unbounded map growth
             setTimeout(() => pendingDeposits.delete(data.transId), 2 * 60 * 60 * 1000);
+            // FIX C5: Also persist to Firestore so deposits survive server restarts
+            if (db) {
+                db.collection('pending_payments').doc(data.transId).set({
+                    userId, depositAmount,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    status: 'pending'
+                }).catch(e => console.error('[Initiate] Failed to persist pending payment to Firestore:', e));
+            }
         }
 
         res.json(data);
@@ -225,18 +251,30 @@ app.post('/api/pay/webhook', async (req, res) => {
             userId = pending.userId;
             depositAmount = pending.depositAmount;
         } else {
-            // Fallback: verify with Fapshi directly to get amount and userId
-            const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
-                headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
-            });
-            if (!verifyRes.ok) {
-                console.error(`[Webhook] Could not verify transId ${transId}`);
-                return;
+            // FIX C5: Try Firestore persistent pending_payments first (survives server restarts)
+            if (db) {
+                const pendingDoc = await db.collection('pending_payments').doc(transId).get();
+                if (pendingDoc.exists()) {
+                    const pData = pendingDoc.data();
+                    userId = pData.userId;
+                    depositAmount = pData.depositAmount;
+                    console.log(`[Webhook] Recovered pending deposit from Firestore: transId=${transId}`);
+                }
             }
-            const verifyData = await verifyRes.json();
-            if (verifyData.status !== 'SUCCESSFUL') return;
-            userId = verifyData.userId || verifyData.externalId;
-            depositAmount = verifyData.amount;
+            // If still not found, fall back to Fapshi verification API
+            if (!userId) {
+                const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+                    headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
+                });
+                if (!verifyRes.ok) {
+                    console.error(`[Webhook] Could not verify transId ${transId}`);
+                    return;
+                }
+                const verifyData = await verifyRes.json();
+                if (verifyData.status !== 'SUCCESSFUL') return;
+                userId = verifyData.userId || verifyData.externalId;
+                depositAmount = verifyData.amount;
+            }
         }
 
         if (!userId || !depositAmount) {
@@ -265,8 +303,34 @@ app.post('/api/pay/webhook', async (req, res) => {
                 return;
             }
 
-            const newBalance = (userSnap.data().balance || 0) + depositAmount;
-            tx.update(userRef, { balance: newBalance });
+            const userData = userSnap.data();
+            let referrerRef, referrerSnap;
+
+            // Fetch referrer document if eligible for bonus (must be a READ operation before any WRITE operations)
+            if (userData.referredBy && !userData.referralBonusPaid) {
+                referrerRef = db.collection('users').doc(userData.referredBy);
+                referrerSnap = await tx.get(referrerRef);
+            }
+
+            const newBalance = (userData.balance || 0) + depositAmount;
+            const updatePayload = { balance: newBalance };
+
+            // Apply referral bonus writes
+            if (referrerSnap && referrerSnap.exists) {
+                updatePayload.referralBonusPaid = true;
+                tx.update(referrerRef, { promoBalance: (referrerSnap.data().promoBalance || 0) + 100 });
+                tx.set(referrerRef.collection('transactions').doc(), {
+                    type: 'winnings', // Treat as winnings so it boosts their stats
+                    amount: 100,
+                    status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    transId: `ref-${transId}`
+                });
+                console.log(`[Webhook] Paid 100 FCFA promo bonus to ${userData.referredBy}`);
+            }
+
+            tx.update(userRef, updatePayload);
             tx.set(paymentRef, {
                 userId,
                 amount: depositAmount,
@@ -306,73 +370,81 @@ app.get('/api/time', (req, res) => {
 });
 
 // --- FAPSHI PAYOUT (REAL WITHDRAWAL) ---
-app.post('/api/pay/disburse', verifyAuth, async (req, res) => {
+// FIX C4: Balance is atomically debited BEFORE calling Fapshi to eliminate the race condition
+// where two concurrent requests both pass the balance check before either debit lands.
+// If Fapshi fails, an immediate refund is issued within the same request.
+app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
     try {
         const { amount, phone, userId } = req.body;
 
-        if (!amount || typeof amount !== 'number' || !Number.isInteger(amount)) {
+        if (!amount || typeof amount !== 'number' || !Number.isInteger(amount))
             return res.status(400).json({ error: 'Invalid amount.' });
-        }
-        if (amount < 1000) {
+        if (amount < 1000)
             return res.status(400).json({ error: 'Minimum withdrawal is 1,000 FCFA.' });
-        }
-        if (amount > 500_000) {
+        if (amount > 500_000)
             return res.status(400).json({ error: 'Maximum withdrawal is 500,000 FCFA per transaction.' });
-        }
-        if (!phone || typeof phone !== 'string' || !/^6\d{8}$/.test(phone.replace(/\s/g, ''))) {
+        if (!phone || typeof phone !== 'string' || !/^6\d{8}$/.test(phone.replace(/\s/g, '')))
             return res.status(400).json({ error: 'Invalid Cameroon phone number (must start with 6, 9 digits total).' });
-        }
-        if (!userId || typeof userId !== 'string') {
+        if (!userId || typeof userId !== 'string')
             return res.status(400).json({ error: 'Invalid userId.' });
-        }
-        // CRITICAL VULNERABILITY FIX: Prevent draining other users' balances
-        if (req.user.uid !== userId) {
+        if (req.user.uid !== userId)
             return res.status(403).json({ error: 'Forbidden: Cannot withdraw from another user' });
-        }
-
-        // Verify user has sufficient balance via Firebase Admin before calling Fapshi
-        if (db) {
-            const userSnap = await db.collection('users').doc(userId).get();
-            if (!userSnap.exists) return res.status(404).json({ error: 'User not found.' });
-            const balance = userSnap.data().balance || 0;
-            if (balance < amount) return res.status(400).json({ error: 'Insufficient balance.' });
-        }
+        if (!db)
+            return res.status(503).json({ error: 'Database unavailable' });
 
         const cleanPhone = phone.replace(/\s/g, '');
-        const response = await fetch(`${FAPSHI_BASE_URL}/payout`, {
-            method: 'POST',
-            headers: {
-                'apiuser': FAPSHI_USER_TOKEN,
-                'apikey': FAPSHI_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' })
-        });
-        const data = await response.json();
-        if (!response.ok) return res.status(response.status).json(data);
+        const userRef = db.collection('users').doc(userId);
+        let pendingTxRef = null;
 
-        // Atomically debit user balance and record transaction
-        if (db) {
-            const userRef = db.collection('users').doc(userId);
+        // STEP 1: Atomically debit balance and record as 'pending' BEFORE calling Fapshi.
+        // Two concurrent requests cannot both pass — the second will see the reduced balance.
+        try {
             await db.runTransaction(async (tx) => {
                 const userDoc = await tx.get(userRef);
-                if (!userDoc.exists) throw new Error('User not found');
-                const newBalance = (userDoc.data().balance || 0) - amount;
-                if (newBalance < 0) throw new Error('Insufficient balance');
-                tx.update(userRef, { balance: newBalance });
-                tx.set(userRef.collection('transactions').doc(), {
-                    type: 'withdrawal',
-                    amount: -amount,
-                    status: 'completed',
-                    phone: cleanPhone,
-                    date: new Date().toISOString(),
+                if (!userDoc.exists()) throw new Error('USER_NOT_FOUND');
+                const currentBalance = userDoc.data().balance || 0;
+                if (currentBalance < amount) throw new Error('INSUFFICIENT_BALANCE');
+                tx.update(userRef, { balance: currentBalance - amount });
+                pendingTxRef = userRef.collection('transactions').doc();
+                tx.set(pendingTxRef, {
+                    type: 'withdrawal', amount: -amount, status: 'pending',
+                    phone: cleanPhone, date: new Date().toISOString(),
                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    transId: data.transId || null
                 });
             });
+        } catch (txErr) {
+            if (txErr.message === 'INSUFFICIENT_BALANCE') return res.status(400).json({ error: 'Insufficient balance.' });
+            if (txErr.message === 'USER_NOT_FOUND') return res.status(404).json({ error: 'User not found.' });
+            throw txErr;
         }
 
-        res.json({ success: true, transId: data.transId });
+        // STEP 2: Call Fapshi — balance is already safely debited
+        const fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
+            method: 'POST',
+            headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' })
+        });
+        const fapshiData = await fapshiRes.json();
+
+        if (!fapshiRes.ok) {
+            // STEP 3a (failure): Refund the debited balance
+            console.error(`[Disburse] Fapshi payout failed for ${userId}. Issuing refund.`, fapshiData);
+            await db.runTransaction(async (tx) => {
+                const userDoc = await tx.get(userRef);
+                if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
+                if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp() });
+            }).catch(e => console.error('[Disburse] Refund transaction failed:', e));
+            return res.status(fapshiRes.status).json(fapshiData);
+        }
+
+        // STEP 3b (success): Mark transaction as completed
+        if (pendingTxRef) {
+            pendingTxRef.update({
+                status: 'completed', transId: fapshiData.transId || null,
+                completedAt: admin.firestore.FieldValue.serverTimestamp()
+            }).catch(e => console.error('[Disburse] Failed to mark tx completed:', e));
+        }
+        res.json({ success: true, transId: fapshiData.transId });
     } catch (err) {
         console.error('Fapshi disburse proxy error:', err);
         res.status(500).json({ error: err.message || 'Withdrawal failed' });
@@ -380,7 +452,7 @@ app.post('/api/pay/disburse', verifyAuth, async (req, res) => {
 });
 
 // --- TOURNAMENT OPERATIONS (SERVER-SIDE) ---
-app.post('/api/tournaments/register', verifyAuth, async (req, res) => {
+app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database service unavailable' });
 
     const { tournamentId, userId } = req.body;
@@ -408,10 +480,28 @@ app.post('/api/tournaments/register', verifyAuth, async (req, res) => {
             if (!userDoc.exists) throw new Error("User not found");
 
             const userData = userDoc.data();
-            if (userData.balance < tData.entryFee) throw new Error("Insufficient funds");
+            const promoBal = userData.promoBalance || 0;
+            const realBal = userData.balance || 0;
+            const entryFee = tData.entryFee;
+
+            if (realBal + promoBal < entryFee) throw new Error("Insufficient funds");
+
+            // Deduct from promo first
+            let remainingFee = entryFee;
+            let newPromo = promoBal;
+            if (newPromo >= remainingFee) {
+                newPromo -= remainingFee;
+                remainingFee = 0;
+            } else {
+                remainingFee -= newPromo;
+                newPromo = 0;
+            }
+            const newReal = Math.max(0, realBal - remainingFee);
 
             // Update user balance
-            transaction.update(userRef, { balance: userData.balance - tData.entryFee });
+            const updates = { balance: newReal };
+            if (newPromo !== promoBal) updates.promoBalance = newPromo;
+            transaction.update(userRef, updates);
 
             // Record transaction
             const txRef = userRef.collection("transactions").doc();
@@ -823,25 +913,29 @@ const startTournamentScheduler = () => {
 
 if (db) startTournamentScheduler();
 
-// --- ADMIN MIDDLEWARE: Verify Firebase ID Token + isAdmin flag ---
+// --- ADMIN MIDDLEWARE: Verify Firebase ID Token + email whitelist ---
+// FIX C2: Admin privilege is determined by the JWT email (cryptographically signed by Firebase),
+// NOT by the Firestore isAdmin flag (which any user can self-write via the client SDK).
 const verifyAdmin = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'Authorization required' });
     }
     const token = authHeader.slice(7);
-    if (!admin.apps.length || !db) {
+    if (!admin.apps.length) {
         return res.status(503).json({ error: 'Auth service unavailable' });
     }
     try {
         const decoded = await admin.auth().verifyIdToken(token);
-        const userSnap = await db.collection('users').doc(decoded.uid).get();
-        if (!userSnap.exists || !userSnap.data().isAdmin) {
+        if (!decoded.email || !ADMIN_EMAILS.includes(decoded.email)) {
+            console.warn(`[Admin] Blocked unauthorized access: uid=${decoded.uid} email=${decoded.email}`);
             return res.status(403).json({ error: 'Forbidden: Admin access required' });
         }
         req.adminUid = decoded.uid;
+        req.adminEmail = decoded.email;
         next();
     } catch (e) {
+        console.error('[Admin] Token verification failed:', e.message);
         return res.status(401).json({ error: 'Invalid or expired token' });
     }
 };
@@ -1026,8 +1120,25 @@ const settleGame = async (roomId, winnerId) => {
                 });
             }
             if (loserDoc.exists) {
-                const newBal = Math.max(0, (loserDoc.data().balance || 0) - room.stake);
-                tx.update(loserRef, { balance: newBal });
+                const loserData = loserDoc.data();
+                const promoBal = loserData.promoBalance || 0;
+                const realBal = loserData.balance || 0;
+
+                let remainingStake = room.stake;
+                let newPromo = promoBal;
+                if (newPromo >= remainingStake) {
+                    newPromo -= remainingStake;
+                    remainingStake = 0;
+                } else {
+                    remainingStake -= newPromo;
+                    newPromo = 0;
+                }
+                const newReal = Math.max(0, realBal - remainingStake);
+
+                const updates = { balance: newReal };
+                if (newPromo !== promoBal) updates.promoBalance = newPromo;
+
+                tx.update(loserRef, updates);
                 tx.set(loserRef.collection('transactions').doc(), {
                     type: 'stake_loss', amount: -room.stake, status: 'completed',
                     date: new Date().toISOString(),
@@ -1087,6 +1198,17 @@ const queues = new Map(); // gameType_stake -> [ { socketId, userProfile } ]
 const userSockets = new Map(); // userId -> socketId
 const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
+
+// Per-user game action rate limiting (anti-bot / anti-spam)
+const gameActionTimestamps = new Map(); // userId -> number[]
+const isGameActionRateLimited = (userId, maxPerSecond = 10) => {
+    const now = Date.now();
+    const timestamps = (gameActionTimestamps.get(userId) || []).filter(t => now - t < 1000);
+    if (timestamps.length >= maxPerSecond) return true;
+    timestamps.push(now);
+    gameActionTimestamps.set(userId, timestamps);
+    return false;
+};
 
 // --- HELPER FUNCTIONS ---
 const generateRoomId = () => `room_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -1249,7 +1371,18 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
-        console.log(`Matchmaking request: ${userProfile.name} for ${gameType} (${stake})`);
+        // --- ASYNC BALANCE VALIDATION ---
+        db.collection('users').doc(userId).get().then((userDoc) => {
+            if (!userDoc.exists) return;
+            const userData = userDoc.data();
+            const totalAvailable = (userData.balance || 0) + (userData.promoBalance || 0);
+            
+            if (stake > 0 && totalAvailable < stake) {
+                socket.emit('game_error', { message: 'Insufficient funds (Real + Promo) to join this match.' });
+                return;
+            }
+
+            console.log(`Matchmaking request: ${userProfile.name} for ${gameType} (${stake})`);
 
         // Check if reconnecting to active or recently-completed room
         for (const [roomId, room] of rooms.entries()) {
@@ -1353,6 +1486,7 @@ io.on('connection', (socket) => {
             socket.emit('waiting_for_opponent');
             console.log(`Added to queue: ${queueKey}`);
         }
+        }).catch(err => console.error("Balance validation error:", err));
     });
 
     // 2. REJOIN EXPLICIT
@@ -1396,6 +1530,13 @@ io.on('connection', (socket) => {
         const userId = socketUsers.get(socket.id);
         if (!userId || !room.players.includes(userId)) return;
 
+        // Anti-bot rate limiting: max 10 game actions per second per user
+        if (isGameActionRateLimited(userId)) {
+            console.warn(`[RateLimit] game_action throttled: userId=${userId} action=${action.type}`);
+            socket.emit('rate_limited', { message: 'Too many actions. Please slow down.' });
+            return;
+        }
+
         // --- GENERIC ACTIONS: handled before game-type branches ---
 
         // FORFEIT
@@ -1430,6 +1571,14 @@ io.on('connection', (socket) => {
                 console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim timeout on their own turn.`);
                 return;
             }
+            
+            // Server-enforced forfeit logic (Anti-cheat timer check)
+            const elapsed = Date.now() - (room.gameState.lastMoveTime || 0);
+            if (elapsed < 59500) { // Using 59.5s to account for slight network jitter
+                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} claimed early. Only ${elapsed}ms elapsed.`);
+                return;
+            }
+
             endGame(roomId, userId, 'Time Expired (Claimed)');
             return;
         }
@@ -1479,8 +1628,8 @@ io.on('connection', (socket) => {
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
             if (room.turn !== userId) return;
 
-            const roll1 = Math.ceil(Math.random() * 6);
-            const roll2 = Math.ceil(Math.random() * 6);
+            const roll1 = crypto.randomInt(1, 7);
+            const roll2 = crypto.randomInt(1, 7);
 
             room.gameState.roundRolls[userId] = [roll1, roll2];
 
@@ -1718,50 +1867,77 @@ io.on('connection', (socket) => {
                     }
                 }
                 // --- End chess validation ---
-
-                room.gameState = { ...room.gameState, ...action.newState };
-                if (action.newState.timers) room.gameState.timers = action.newState.timers;
-                if (action.newState.turn) room.turn = action.newState.turn;
-
-                // action.newState.winner is only a fallback for non-Chess, non-Checkers games.
-                // Chess ends via PGN validation above; Checkers ends via the piece-count check above.
-                if (action.newState.winner && room.gameType !== 'Chess' && room.gameType !== 'Checkers') {
-                    endGame(roomId, action.newState.winner, 'Win Condition');
-                    return;
-                }
-
-                // Pool — verify only the current turn player can submit moves,
-                // and sanity-check ball states to prevent fabricated pockets.
-                if (room.gameType === 'Pool' && action.newState.balls) {
-                    // Turn guard: only the player whose turn it currently is may submit
-                    if (room.turn !== userId) {
+                // --- End chess validation ---
+                
+                // --- Bug D fix: Pool Server-side Move Validation (Anti-Cheat) ---
+                if (room.gameType === 'Pool' && action.newState) {
+                    // Turn guard: only the active player can submit moves
+                    if (room.turn !== userId && action.newState.balls) {
                         console.warn(`[Pool][${roomId}] Shot from non-turn player ${userId}, turn=${room.turn}. Rejected.`);
                         return;
                     }
-
-                    const prevBalls = (room.gameState.balls || []);
-                    const newBalls = action.newState.balls;
-
-                    // Build sets of previously pocketed ball IDs (support both `pocketed` and legacy `isPotted` flags)
-                    const prevPottedIds = new Set(
-                        prevBalls.filter(b => b.pocketed || b.isPotted).map(b => b.id)
-                    );
-
-                    // Verify no already-pocketed ball was un-pocketed (cheating guard)
-                    for (const b of newBalls) {
-                        if (prevPottedIds.has(b.id) && !(b.pocketed || b.isPotted)) {
-                            console.warn(`[Pool][${roomId}] Attempt to un-pocket ball ${b.id} by ${userId}. Rejected.`);
+                    
+                    if (action.newState.balls) {
+                        const prevBalls = (room.gameState.balls || []);
+                        const newBalls = action.newState.balls;
+                        
+                        // Prevent un-pocketing balls (hacks)
+                        const prevPottedIds = new Set(prevBalls.filter(b => b.pocketed || b.isPotted).map(b => b.id));
+                        for (const b of newBalls) {
+                            if (prevPottedIds.has(b.id) && !(b.pocketed || b.isPotted)) {
+                                console.warn(`[Pool][${roomId}] Attempt to un-pocket ball ${b.id} by ${userId}. Rejected.`);
+                                return;
+                            }
+                        }
+                        
+                        // Prevent ball injection
+                        if (newBalls.length > 16) {
+                            console.warn(`[Pool][${roomId}] Invalid ball count ${newBalls.length}. Rejected.`);
                             return;
                         }
                     }
 
-                    // Verify ball count hasn't grown
-                    if (newBalls.length > 16) { // 15 numbered + 1 cue
-                        console.warn(`[Pool][${roomId}] Invalid ball count ${newBalls.length}. Rejected.`);
-                        return;
+                    // FIX C3: Ghost Win Prevention using server-authoritative ball state.
+                    // NEVER use the client-sent balls payload alone to verify the 8-ball.
+                    // Merge client proposal onto server state (blocking un-pocketing), then validate.
+                    if (action.newState.winner) {
+                        const serverBalls = room.gameState.balls || [];
+                        const proposedBalls = action.newState.balls || serverBalls;
+                        const prevPottedIds = new Set(serverBalls.filter(b => b.pocketed || b.isPotted).map(b => b.id));
+                        const authBalls = serverBalls.map(sb => {
+                            const cb = proposedBalls.find(b => b.id === sb.id);
+                            if (!cb) return sb;
+                            const wasPotted = prevPottedIds.has(sb.id);
+                            const nowPotted = wasPotted || !!(cb.pocketed || cb.isPotted);
+                            return { ...sb, pocketed: nowPotted, isPotted: nowPotted };
+                        });
+                        const eight = authBalls.find(b => b.id === 8);
+                        const eightPocketed = !!(eight && (eight.pocketed || eight.isPotted));
+                        if (!room.players.includes(action.newState.winner)) {
+                            console.warn(`[Pool][${roomId}] Winner not a room player. Rejected.`); return;
+                        }
+                        if (action.newState.winner === userId && !eightPocketed) {
+                            console.warn(`[Pool][${roomId}] Ghost win by ${userId}: 8-ball not confirmed by server state. Rejected.`); return;
+                        }
+                        const prevCount = serverBalls.filter(b => b.pocketed || b.isPotted).length;
+                        const newCount = authBalls.filter(b => b.pocketed || b.isPotted).length;
+                        if (newCount - prevCount > 3) {
+                            console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot. Rejected.`); return;
+                        }
                     }
                 }
 
+                // Apply state after passing validation
+                room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
+                if (action.newState.timers) room.gameState.timers = action.newState.timers;
+                if (action.newState.turn) room.turn = action.newState.turn;
+
+                // action.newState.winner is a fallback for non-Chess, non-Checkers games (i.e., Pool or Dice).
+                // Chess and Checkers explicitly end parsing earlier.
+                if (action.newState.winner && room.gameType !== 'Chess' && room.gameType !== 'Checkers') {
+                    endGame(roomId, action.newState.winner, 'Win Condition');
+                    return;
+                }
             }
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
                 const board = room.gameState.board;

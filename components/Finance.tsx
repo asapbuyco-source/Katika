@@ -4,7 +4,7 @@ import { User, Transaction } from '../types';
 import { getUserTransactions, creditDepositIdempotent, auth } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { useSocket } from '../services/SocketContext';
-import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight } from 'lucide-react';
+import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight, Shield } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 
@@ -293,14 +293,34 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                 </div>
                             </div>
 
-                            <div>
-                                <div className="text-slate-400 text-xs mb-1">{t('balance_label')}</div>
-                                <div className="text-4xl font-display font-bold text-white tracking-tight">
-                                    {user.balance.toLocaleString()} <span className="text-lg text-gold-500 font-sans">FCFA</span>
+                            <div className="flex items-end justify-between">
+                                <div>
+                                    <div className="text-slate-400 text-xs mb-1">{t('balance_label')} (Withdrawable)</div>
+                                    <div className="text-4xl font-display font-bold text-white tracking-tight">
+                                        {user.balance.toLocaleString()} <span className="text-lg text-gold-500 font-sans">FCFA</span>
+                                    </div>
                                 </div>
+                                
+                                {user.promoBalance !== undefined && user.promoBalance > 0 && (
+                                    <div className="text-right">
+                                        <div className="text-purple-300 text-xs mb-1 font-bold tracking-wider uppercase">Promo Balance</div>
+                                        <div className="text-2xl font-display font-bold text-white tracking-tight">
+                                            {user.promoBalance.toLocaleString()} <span className="text-sm text-purple-400 font-sans">FCFA</span>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>
+
+                    {user.promoBalance !== undefined && user.promoBalance > 0 && (
+                        <div className="bg-purple-900/30 border border-purple-500/20 rounded-xl p-4 flex gap-3 items-start">
+                            <Info size={20} className="text-purple-400 shrink-0 mt-0.5" />
+                            <p className="text-xs text-purple-200 leading-relaxed">
+                                <span className="font-bold text-purple-400">Promo Balance</span> cannot be withdrawn directly. You must wager it in games. When you win, all returns become real withdrawable cash!
+                            </p>
+                        </div>
+                    )}
 
                     {/* Action Tabs */}
                     <div className="bg-royal-900/50 border border-white/5 rounded-2xl p-1 flex">
@@ -322,9 +342,29 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
 
                     {/* TAB CONTENT */}
                     <div className="glass-panel p-6 rounded-2xl min-h-[400px]">
-                        <AnimatePresence mode="wait">
+                        {user.id.startsWith('guest-') && activeTab !== 'history' ? (
+                            <motion.div 
+                                initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+                                className="flex flex-col items-center justify-center text-center h-[350px] space-y-4"
+                            >
+                                <div className="p-5 bg-orange-500/10 rounded-full text-orange-400 mb-2">
+                                    <Shield size={48} />
+                                </div>
+                                <h2 className="text-2xl font-bold text-white">Full Account Required</h2>
+                                <p className="text-slate-400 max-w-sm text-sm">
+                                    Guest accounts cannot perform real-money operations. Please register a permanent account to deposit and withdraw funds.
+                                </p>
+                                <button 
+                                    onClick={() => { auth.signOut(); window.location.reload(); }}
+                                    className="px-6 py-3 mt-4 bg-gold-500 text-royal-950 font-bold rounded-xl hover:bg-gold-400 transition-colors shadow-lg"
+                                >
+                                    Create Free Account
+                                </button>
+                            </motion.div>
+                        ) : (
+                            <AnimatePresence mode="wait">
 
-                            {/* DEPOSIT FORM */}
+                                {/* DEPOSIT FORM */}
                             {activeTab === 'deposit' && (
                                 <motion.div
                                     key="deposit"
@@ -537,6 +577,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                             )}
 
                         </AnimatePresence>
+                        )}
                     </div>
                 </div>
 

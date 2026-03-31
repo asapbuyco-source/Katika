@@ -49,6 +49,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       streak: 0,
       totalEarnings: 0
   });
+  const [chartData, setChartData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
 
   // Edit State
   const [tempName, setTempName] = useState(user.name);
@@ -117,40 +118,43 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
               const txs = await getUserTransactions(user.id);
               setTransactions(txs);
 
-              // Calculate Stats
-              const stakes = txs.filter(t => t.type === 'stake');
+              // FIX: Use correct transaction types from server (stake_loss + winnings)
+              const stakeLosses = txs.filter(t => t.type === 'stake_loss');
               const winnings = txs.filter(t => t.type === 'winnings');
-              
-              const totalGames = stakes.length;
+              const totalGames = stakeLosses.length + winnings.length;
               const totalWins = winnings.length;
-              // Win rate calculation (simplistic)
               const winRate = totalGames > 0 ? Math.round((totalWins / totalGames) * 100) : 0;
               const totalEarnings = winnings.reduce((acc, curr) => acc + curr.amount, 0);
 
-              // Calculate Streak (Consecutive wins in recent history)
+              // Win streak: consecutive wins from most recent
               let streak = 0;
-              let pendingWins = 0;
-              
-              // Transactions are sorted desc (newest first)
-              for (const tx of txs) {
-                   if (tx.type === 'winnings') {
-                       pendingWins++;
-                   } else if (tx.type === 'stake') {
-                       if (pendingWins > 0) {
-                           streak++;
-                           pendingWins--; 
-                       } else {
-                           break; // Loss found
-                       }
-                   }
+              const gameTxs = txs.filter(t => t.type === 'winnings' || t.type === 'stake_loss');
+              for (const tx of gameTxs) {
+                  if (tx.type === 'winnings') streak++;
+                  else break;
               }
 
-              setStats({
-                  totalGames,
-                  winRate,
-                  streak,
-                  totalEarnings
-              });
+              setStats({ totalGames, winRate, streak, totalEarnings });
+
+              // Build real 7-day chart: percentage of wins per day for last 7 days
+              const days: number[] = [];
+              for (let i = 6; i >= 0; i--) {
+                  const dayStart = new Date();
+                  dayStart.setDate(dayStart.getDate() - i);
+                  dayStart.setHours(0, 0, 0, 0);
+                  const dayEnd = new Date(dayStart);
+                  dayEnd.setHours(23, 59, 59, 999);
+
+                  const dayGames = gameTxs.filter(t => {
+                      const d = new Date(t.date);
+                      return d >= dayStart && d <= dayEnd;
+                  });
+                  const dayWins = dayGames.filter(t => t.type === 'winnings').length;
+                  const dayTotal = dayGames.length;
+                  // Height as win% (min 5% so bars are visible, max 100%)
+                  days.push(dayTotal > 0 ? Math.max(5, Math.round((dayWins / dayTotal) * 100)) : 5);
+              }
+              setChartData(days);
 
           } catch (e) {
               console.error("Failed to load profile stats", e);
@@ -241,6 +245,28 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       onUpdateProfile({ name: tempName, avatar: tempAvatar });
       setIsEditing(false);
       showToast("Profile Updated Successfully");
+  };
+
+  const handleExportCSV = () => {
+      if (transactions.length === 0) { showToast('No transactions to export'); return; }
+      const header = ['ID', 'Type', 'Amount (FCFA)', 'Status', 'Date'];
+      const rows = transactions.map(tx => [
+          tx.id,
+          tx.type,
+          tx.amount,
+          tx.status,
+          tx.date
+      ]);
+      const csv = [header, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `katika_transactions_${user.name.replace(/\s+/g, '_')}_${new Date().toISOString().slice(0,10)}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+      showToast('Transactions exported!');
+      playSFX('click');
   };
 
   const handleCancelEdit = () => {
@@ -467,8 +493,8 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                   </select>
                               </div>
                               <div className="h-48 flex items-end justify-between gap-3 relative z-10 px-2">
-                                  {/* Dummy Chart Data for Visual */}
-                                  {[30, 45, 25, 60, 75, 50, 80].map((h, i) => (
+                                  {/* Real 7-day win-rate chart */}
+                                  {chartData.map((h, i) => (
                                       <div key={i} className="w-full bg-royal-800/50 rounded-t-lg relative group">
                                           <motion.div 
                                             initial={{ height: 0 }}
@@ -478,7 +504,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                           />
                                           {/* Tooltip */}
                                           <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-royal-950 text-xs font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                              {h * 100}
+                                              {h === 5 ? 'No games' : `${h}% win`}
                                           </div>
                                       </div>
                                   ))}
@@ -524,10 +550,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                           
                           <div className="p-5 rounded-2xl border border-dashed border-white/10 text-center bg-royal-900/30">
                               <p className="text-sm text-slate-400 mb-2 font-medium">{t('referral_code')}</p>
-                              <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/5 select-all">
-                                  {user.name.toUpperCase().substring(0,5)}-2024
+                              <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/5 select-all text-center">
+                                  {user.id.substring(0, 8).toUpperCase()}
                               </div>
-                              <p className="text-xs text-slate-500">{t('share_earn')} <span className="text-white font-bold">500 FCFA</span> {t('per_friend')}</p>
+                              <p className="text-xs text-slate-500">{t('share_earn')} <span className="text-white font-bold">100 FCFA Promo Bonus</span> {t('per_friend')}</p>
                           </div>
                       </motion.div>
                    </>
@@ -539,7 +565,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                        <div className="glass-panel rounded-2xl overflow-hidden border border-white/5">
                            <div className="p-4 border-b border-white/5 flex justify-between items-center bg-royal-900/50">
                                <h3 className="font-bold text-white">{t('transaction_type')}</h3>
-                               <button className="text-xs text-gold-400 font-bold uppercase hover:text-white">Export CSV</button>
+                               <button onClick={handleExportCSV} className="text-xs text-gold-400 font-bold uppercase hover:text-white">Export CSV</button>
                            </div>
                            <div className="overflow-x-auto">
                                {transactions.length > 0 ? (
@@ -800,3 +826,5 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
     </div>
   );
 };
+
+

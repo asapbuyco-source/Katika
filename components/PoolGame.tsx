@@ -496,9 +496,20 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   useEffect(()=>{
     if(isP2P&&socketGame){
       const gs=(socketGame as any).gameState;
-      // Only apply server balls if they have geometry (initial server state is geometry-less)
+      const players=(socketGame as any).players;
       if(gs?.balls&&gs.balls[0]?.x!==undefined){ballsRef.current=gs.balls;setBalls([...gs.balls]);}
       const st=gs?.turn||players[0]||myId; setTurnId(st);
+      
+      // Restore ball groups & BIH for reconnecting players
+      if (isP2P) {
+        const iAm1 = players[0] === myId;
+        const k = iAm1 ? 'myGroupP1' : 'myGroupP2';
+        const oppK = iAm1 ? 'myGroupP2' : 'myGroupP1';
+        if (gs[k]) setMyGroup(gs[k] as 'solids'|'stripes');
+        if (gs[oppK]) setBotGroup(gs[oppK] as 'solids'|'stripes');
+        if (gs.ballInHand && st === myId) setBih(true);
+      }
+      
       setMsg(st===myId?'🎱 Your Break!':`⏳ ${name2(oppId)}'s Break`);
     } else setMsg('🎱 Your Break! Hold & drag to aim');
   // eslint-disable-next-line react-hooks/exhaustive-deps

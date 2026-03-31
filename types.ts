@@ -57,6 +57,10 @@ export interface User {
   rankTier: 'Bronze' | 'Silver' | 'Gold' | 'Diamond';
   isAdmin?: boolean;
   isBanned?: boolean;
+  hasSeenOnboarding?: boolean;
+  referredBy?: string;
+  referralBonusPaid?: boolean;
+  promoBalance?: number;
 }
 
 export interface PlayerProfile {

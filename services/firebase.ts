@@ -132,8 +132,15 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
             elo: 1000,
             rankTier: 'Bronze',
             isAdmin: isAdmin,
-            isBanned: false
+            isBanned: false,
+            hasSeenOnboarding: firebaseUser.isAnonymous ? true : false,
         };
+        
+        const storedReferral = sessionStorage.getItem('pendingReferral');
+        if (storedReferral && !firebaseUser.isAnonymous) {
+            newUser.referredBy = storedReferral;
+        }
+
         await setDoc(userRef, newUser);
         return newUser;
     }
@@ -437,6 +444,10 @@ export const loginAsGuest = async (): Promise<User> => {
 };
 
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
+    const sAvailable = (sender.balance || 0) + (sender.promoBalance || 0);
+    if (sAvailable < stake) {
+        throw new Error("Insufficient total funds (Real + Promo) to send this challenge.");
+    }
     const challengeData = {
         sender: { id: sender.id, name: sender.name, avatar: sender.avatar, elo: sender.elo, rankTier: sender.rankTier },
         targetId: targetId,
@@ -484,12 +495,23 @@ export const createChallengeGame = async (challenge: Challenge, receiver: User):
     // Bug E fix: Verify both players can afford the stake before creating the game
     if (challenge.stake > 0) {
         const receiverDoc = await getDoc(doc(db, "users", receiver.id));
-        if (!receiverDoc.exists() || (receiverDoc.data() as User).balance < challenge.stake) {
+        if (!receiverDoc.exists()) {
+            throw new Error('Receiver not found.');
+        }
+        const rData = receiverDoc.data() as User;
+        const rAvailable = (rData.balance || 0) + (rData.promoBalance || 0);
+        if (rAvailable < challenge.stake) {
             throw new Error('Insufficient funds to accept this challenge.');
         }
+
         if (challenge.sender.id) {
             const senderDoc = await getDoc(doc(db, "users", challenge.sender.id));
-            if (!senderDoc.exists() || (senderDoc.data() as User).balance < challenge.stake) {
+            if (!senderDoc.exists()) {
+                throw new Error('Sender not found.');
+            }
+            const sData = senderDoc.data() as User;
+            const sAvailable = (sData.balance || 0) + (sData.promoBalance || 0);
+            if (sAvailable < challenge.stake) {
                 throw new Error('Challenge sender has insufficient funds.');
             }
         }

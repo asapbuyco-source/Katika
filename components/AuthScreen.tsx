@@ -19,15 +19,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [referralCode, setReferralCode] = useState('');
 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
     const [showGuest, setShowGuest] = useState(false);
 
-    // Google Sign In Handler
     const handleGoogleLogin = async () => {
         setIsLoading(true);
         setError('');
+        if (isRegistering && referralCode) {
+            sessionStorage.setItem('pendingReferral', referralCode);
+        }
         try {
             const firebaseUser = await signInWithGoogle();
             // If we got a simulated user back immediately, we might need to manually trigger the parent callback
@@ -69,6 +72,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
         setIsLoading(true);
         setError('');
+
+        if (isRegistering && referralCode) {
+            sessionStorage.setItem('pendingReferral', referralCode);
+        }
 
         try {
             let resultUser;
@@ -232,6 +239,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                         />
                                     </div>
                                 </div>
+                                
+                                {isRegistering && (
+                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Referral Code (Optional)</label>
+                                        <div className="relative">
+                                            <input
+                                                type="text"
+                                                placeholder="e.g. A93B2X1F"
+                                                value={referralCode}
+                                                onChange={(e) => setReferralCode(e.target.value)}
+                                                className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 px-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-mono tracking-widest uppercase"
+                                            />
+                                        </div>
+                                    </motion.div>
+                                )}
                             </div>
 
                             <div className="flex gap-3">
