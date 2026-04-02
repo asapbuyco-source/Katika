@@ -12,11 +12,11 @@ interface PoolGameProps {
   socket?: Socket|null; socketGame?: SocketGameState|null;
 }
 
-// ΓöÇΓöÇ Physics constants ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
-const TW = 900, TH = 450, BR = 11, RAIL = 18;
-const PR = 22;          // visual pocket radius
-const PD = PR + 4;      // pocket detection radius (larger than visual = no missed pockets)
-const FRICTION = 0.986, WALL_REST = 0.72, BALL_REST = 0.93, VEL_THRESH = 0.08, SUB = 8;
+// ──────────────── Physics constants ──────────────────────────────────────────────────────────
+const TW = 900, TH = 450, BR = 13, RAIL = 20;
+const PR = 26;          // visual pocket radius
+const PD = PR + 5;      // pocket detection radius (larger than visual = no missed pockets)
+const FRICTION = 0.988, WALL_REST = 0.72, BALL_REST = 0.93, VEL_THRESH = 0.08, SUB = 8;
 const TURN_TIME = 60;   // seconds per turn in P2P
 
 // Corner & side pocket positions
@@ -41,11 +41,11 @@ interface Spark { x:number; y:number; vx:number; vy:number; life:number; maxLife
 
 function buildRack(): Ball[] {
   const balls: Ball[] = [];
-  const cx = TW*0.65, cy = TH/2, dx = BR*2.05, dy = BR*1.19;
+  const cx = TW*0.66, cy = TH/2, dx = BR*2.05, dy = BR*1.18;
   [[1],[9,2],[10,8,3],[11,4,12,5],[13,6,14,7,15]].forEach((row,ri) =>
     row.forEach((id,ci) => balls.push({id, x:cx+ri*dx, y:cy+(ci-(row.length-1)/2)*dy*2, vx:0, vy:0, pocketed:false}))
   );
-  balls.push({id:0, x:TW*0.25, y:cy, vx:0, vy:0, pocketed:false});
+  balls.push({id:0, x:TW*0.22, y:cy, vx:0, vy:0, pocketed:false});
   return balls;
 }
 
@@ -127,7 +127,7 @@ function stepPhysics(
               life:30+Math.random()*20,maxLife:50,r:1+Math.random()*2.5,
               color:cols[Math.floor(Math.random()*cols.length)]});
           }
-          // Ring pulse ΓÇö 6 evenly-spaced slower outer sparks
+          // Ring pulse — 6 evenly-spaced slower outer sparks
           for(let k=0;k<8;k++){
             const ang=(k/8)*Math.PI*2;
             sparks.push({x:p.x,y:p.y,vx:Math.cos(ang)*3.5,vy:Math.sin(ang)*3.5,
@@ -167,14 +167,16 @@ function drawScene(
 
   ctx.clearRect(-10,-10,TW+20,TH+20);
 
-  // Felt
+  // Felt with deep lighting
   const felt=ctx.createRadialGradient(TW/2,TH/2,0,TW/2,TH/2,Math.max(TW,TH)*0.9);
   felt.addColorStop(0,'#2c8cc4'); felt.addColorStop(0.6,'#175a80'); felt.addColorStop(1,'#0c3650');
   ctx.fillStyle=felt; ctx.fillRect(0,0,TW,TH);
 
-  // Felt micro-grain (batched, very fast)
-  ctx.fillStyle='rgba(255,255,255,0.012)';
-  for(let x=0;x<TW;x+=14) for(let y=0;y<TH;y+=14){ ctx.fillRect(x+(y%2)*7,y,1,1); }
+  // Felt micro-grain (procedural jitter for detail)
+  ctx.fillStyle='rgba(255,255,255,0.015)';
+  for(let i=0;i<1200;i++){
+    ctx.fillRect(Math.random()*TW,Math.random()*TH,1.2,1.2);
+  }
 
   // Head string
   ctx.setLineDash([5,5]); ctx.strokeStyle='rgba(255,255,255,0.12)'; ctx.lineWidth=1;
@@ -185,13 +187,15 @@ function drawScene(
   ctx.fillStyle='rgba(255,255,255,0.22)';
   [[TW*.65,TH/2],[TW*.25,TH/2]].forEach(([sx,sy])=>{ ctx.beginPath(); ctx.arc(sx,sy,3,0,Math.PI*2); ctx.fill(); });
 
-  // Cushion rails - Uniform color
-  const railColor = '#104462'; // Slightly darker than the mid-felt to look like a raised cushion
+  // Cushion rails - Enhanced wood grain
+  const railColor = '#104462'; 
   const C=35, M=28;
   const poly = (pts: number[][]) => {
     ctx.fillStyle=railColor; ctx.beginPath(); ctx.moveTo(pts[0][0],pts[0][1]);
     for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i][0],pts[i][1]);
-    ctx.fill(); ctx.strokeStyle='rgba(255,255,255,0.06)'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fill(); 
+    // Subtle inner grain
+    ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=0.5; ctx.stroke();
   };
   poly([[C,0], [TW/2-M,0], [TW/2-M+RAIL,RAIL], [C+RAIL,RAIL]]);          // TL
   poly([[TW/2+M,0], [TW-C,0], [TW-C-RAIL,RAIL], [TW/2+M-RAIL,RAIL]]);    // TR
@@ -222,7 +226,7 @@ function drawScene(
     ctx.setLineDash([]); ctx.globalAlpha=1;
   }
 
-  // Aim guide ΓÇö dashed ghost line
+  // Aim guide — dashed ghost line
   if(showAim && !bih && cue && strikeOff===0){
     const sdx=Math.cos(angle+Math.PI), sdy=Math.sin(angle+Math.PI);
     let lx=cue.x, ly=cue.y, len=0, hitGhost:{x:number,y:number}|null=null;
@@ -300,9 +304,9 @@ function drawScene(
     if(b.id!==0){
       const nr=stripe?BR*.46:BR*.42;
       const nd=ctx.createRadialGradient(0,0,0,0,0,nr);
-      nd.addColorStop(0,'rgba(255,255,255,0.98)'); nd.addColorStop(1,'rgba(220,220,220,0.93)');
+      nd.addColorStop(0,'rgba(255,255,255,1)'); nd.addColorStop(1,'rgba(230,230,230,0.95)');
       ctx.fillStyle=nd; ctx.beginPath(); ctx.arc(0,0,nr,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle=stripe?col:'#111'; ctx.font=`bold ${b.id<10?8:7}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(b.id),0,0.5);
+      ctx.fillStyle=stripe?col:'#111'; ctx.font=`bold ${BR*0.7}px sans-serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(String(b.id),0,0.6);
     }
     // Moving specular
     ctx.globalAlpha=0.7;
@@ -312,13 +316,15 @@ function drawScene(
     ctx.globalAlpha=0.42; const rim2=ctx.createRadialGradient(0,0,BR*.6,0,0,BR); rim2.addColorStop(0,'rgba(0,0,0,0)'); rim2.addColorStop(1,'rgba(0,0,0,0.68)');
     ctx.fillStyle=rim2; ctx.fillRect(-BR,-BR,BR*2,BR*2);
     ctx.globalAlpha=1; ctx.restore();
-    // Target highlight
+    // Target highlight (Enhanced)
     if(targetBallIds&&targetBallIds.includes(b.id)){
       ctx.save(); ctx.translate(b.x,b.y);
-      const pulse=1+(Math.sin(time/150)*0.15); ctx.scale(pulse,pulse);
-      ctx.beginPath(); ctx.arc(0,0,BR+4,0,Math.PI*2);
-      ctx.strokeStyle=`rgba(239,68,68,${0.45+Math.sin(time/150)*0.3})`; ctx.lineWidth=2.5; ctx.stroke();
-      ctx.globalAlpha=0.12; ctx.fillStyle='#ef4444'; ctx.fill(); ctx.globalAlpha=1;
+      const pulse=1+(Math.sin(time/200)*0.12); ctx.scale(pulse,pulse);
+      ctx.beginPath(); ctx.arc(0,0,BR+6,0,Math.PI*2);
+      ctx.strokeStyle=`rgba(255,255,255,${0.3+Math.sin(time/200)*0.2})`; ctx.lineWidth=2; ctx.stroke();
+      const glow=ctx.createRadialGradient(0,0,BR,0,0,BR+8);
+      glow.addColorStop(0,'rgba(255,255,255,0.15)'); glow.addColorStop(1,'transparent');
+      ctx.fillStyle=glow; ctx.fill();
       ctx.restore();
     }
   });
@@ -482,7 +488,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const bihRef=useRef(bih); bihRef.current=bih;
   const turnRef=useRef(turnId); turnRef.current=turnId;
 
-  const name2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.name||'Opponent'):'Bot ≡ƒñû';
+  const name2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.name||'Opponent'):'Bot 🤖';
   const av2=(id:string)=>isP2P?((socketGame as any)?.profiles?.[id]?.avatar||`https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`):`https://api.dicebear.com/7.x/bottts/svg?seed=katika_bot`;
 
   // Orientation
@@ -534,8 +540,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   useEffect(()=>{
     if(!isP2P||moving||!isMyTurn) return;
     if(countdown<=0){
-      // Time up ΓÇö forfeit this turn
-      setMsg('ΓÅ░ Time up! Forfeited turn.');
+      // Time up — forfeit this turn
+      setMsg('⏰ Time up! Forfeited turn.');
       if(socket&&roomId) socket.emit('game_action',{roomId,action:{type:'FORFEIT'}});
       onGameEnd('loss'); return;
     }
@@ -592,13 +598,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     if(eightPot){
       playSFX(cuePot?'loss':'win');
       if(botShot){
-        if(cuePot){endGame('win','≡ƒÄ▒ Bot scratched on 8! You win!');return;}
+        if(cuePot){endGame('win','🎱 Bot scratched on 8! You win!');return;}
         const bl=ballsRef.current.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8&&((bgRef.current==='solids'&&b.id<8)||(bgRef.current==='stripes'&&b.id>8)));
-        endGame(bl.length===0&&bgRef.current?'loss':'win', bl.length===0&&bgRef.current?'Γ¼¢ Bot sinks 8! You lose.':'Bot early 8! You win!'); return;
+        endGame(bl.length===0&&bgRef.current?'loss':'win', bl.length===0&&bgRef.current?'⚫ Bot sinks 8! You lose.':'Bot early 8! You win!'); return;
       } else {
-        if(cuePot){endGame('loss','≡ƒÿ¼ Scratched on 8! You lose.');return;}
+        if(cuePot){endGame('loss','😢 Scratched on 8! You lose.');return;}
         const ml=ballsRef.current.filter(b=>!b.pocketed&&b.id!==0&&b.id!==8&&((myGrRef.current==='solids'&&b.id<8)||(myGrRef.current==='stripes'&&b.id>8)));
-        endGame(ml.length===0&&myGrRef.current?'win':'loss',ml.length===0&&myGrRef.current?'≡ƒÄ▒ 8-ball sunk! You win!':'8-ball sunk early! You lose.'); return;
+        endGame(ml.length===0&&myGrRef.current?'win':'loss',ml.length===0&&myGrRef.current?'🎱 8-ball sunk! You win!':'8-ball sunk early! You lose.'); return;
       }
     }
 
@@ -622,9 +628,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     const nextP2P=keep?myId:oppId, nextBot=keep?(botShot?'bot':myId):(botShot?myId:'bot');
     const next=isP2P?nextP2P:nextBot;
 
-    if(foul) setMsg(`ΓÜá∩╕Å FOUL: ${fr}`);
-    else if(keep) setMsg(botShot?`${name2(oppId)} continues...`:'Γ£à Good shot! Continue...');
-    else {playSFX('turn'); setMsg(next===myId?'≡ƒÄ▒ Your turn!':`${name2(oppId)}'s turn`);}
+    if(foul) setMsg(`⚠️ FOUL: ${fr}`);
+    else if(keep) setMsg(botShot?`${name2(oppId)} continues...`:'✅ Good shot! Continue...');
+    else {playSFX('turn'); setMsg(next===myId?'🎱 Your turn!':`${name2(oppId)}'s turn`);}
 
     const oppBih=foul&&!keep, humBih=foul&&botShot;
     if(!isP2P){if(humBih) setBih(true);}
@@ -701,7 +707,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
       const ok=!ballsRef.current.some(b=>b.id!==0&&!b.pocketed&&Math.hypot(b.x-pos.x,b.y-pos.y)<BR*2.1);
       if(ok&&pos.x>RAIL+BR&&pos.x<TW-RAIL-BR&&pos.y>RAIL+BR&&pos.y<TH-RAIL-BR){
         const c=ballsRef.current.find(b=>b.id===0)!; c.pocketed=false;c.x=pos.x;c.y=pos.y;c.vx=0;c.vy=0;
-        setBalls([...ballsRef.current]); setBih(false); bihRef.current=false; playSFX('click'); setMsg('≡ƒÄ▒ Take your shot!');
+        setBalls([...ballsRef.current]); setBih(false); bihRef.current=false; playSFX('click'); setMsg('🎱 Take your shot!');
       }
       return;
     }
@@ -762,8 +768,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const [lScale,setLScale]=useState(1);
   useEffect(()=>{
     const upd=()=>{
-      if(portrait) setPScale(Math.min(window.innerWidth/TH,(window.innerHeight-108)/TW)*0.97);
-      else setLScale(Math.min((window.innerWidth-40)/TW,(window.innerHeight-108)/TH)*0.97);
+      if(portrait) setPScale(Math.min(window.innerWidth/TH,(window.innerHeight-85)/TW)*0.99);
+      else setLScale(Math.min((window.innerWidth-20)/TW,(window.innerHeight-85)/TH)*0.99);
     };
     upd(); window.addEventListener('resize',upd); return ()=>window.removeEventListener('resize',upd);
   },[portrait]);
@@ -798,24 +804,24 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           <button onClick={()=>setForfeit(true)} className="p-2 bg-white/5 hover:bg-white/10 rounded-lg text-slate-400 flex-shrink-0"><ArrowLeft size={15}/></button>
 
           {/* My plate */}
-          <div className={`flex items-center gap-2 flex-1 min-w-0 p-2 rounded-xl border transition-all duration-300 ${isMyTurn?'border-emerald-500/60 bg-emerald-900/20':'border-white/8 bg-white/3'}`}>
+          <div className={`flex items-center gap-2 flex-1 min-w-0 p-1.5 rounded-xl border transition-all duration-300 ${isMyTurn?'border-emerald-500/60 bg-emerald-900/20':'border-white/8 bg-white/3'}`}>
             <div className="relative flex-shrink-0">
-              <img src={user.avatar||`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="" className="w-9 h-9 rounded-full border-2 border-emerald-500/70"/>
-              {isMyTurn&&<span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 rounded-full border-2 border-black animate-pulse"/>}
+              <img src={user.avatar||`https://api.dicebear.com/7.x/avataaars/svg?seed=${myId}`} alt="" className="w-8 h-8 rounded-full border-2 border-emerald-500/70"/>
+              {isMyTurn&&<span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-emerald-400 rounded-full border-2 border-black animate-pulse"/>}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white font-bold text-xs truncate">{user.name}</p>
-              <div className="flex gap-0.5 mt-0.5 flex-wrap">
-                {myGroup?Array.from({length:7}).map((_,i)=>{const bid=myGroup==='solids'?i+1:i+9,pk=balls.find(b=>b.id===bid)?.pocketed;return(<motion.div key={bid} className="w-3 h-3 rounded-full" animate={pk?{scale:[1.4,1]}:{}} style={{backgroundColor:pk?BALL_COLORS[bid]:'transparent',border:pk?'none':'1px solid #334155'}}/>);}): <span className="text-[9px] text-slate-500">Open table</span>}
+              <p className="text-white font-bold text-[10px] truncate leading-tight">{user.name}</p>
+              <div className="text-[10px] text-slate-400 font-mono">
+                {myGroup ? `${myPot}/7 ${myGroup}` : 'Open Table'}
               </div>
             </div>
-            <div className="text-xl font-black font-mono text-white flex-shrink-0">{myPot}</div>
+            <div className="text-lg font-black font-mono text-white flex-shrink-0 pr-1">{myPot}</div>
           </div>
 
           {/* Center */}
           <div className="flex flex-col items-center flex-shrink-0 px-2 gap-0.5">
-            <div className="text-[8px] text-yellow-400 font-black uppercase tracking-widest">Pot</div>
-            <div className="text-xs font-mono font-bold text-white">≡ƒÆ░{(table.stake*2).toLocaleString()}</div>
+            <div className="text-[8px] text-yellow-400 font-black uppercase tracking-widest">Stake</div>
+            <div className="text-[11px] font-mono font-bold text-white">💰{(table.stake*2).toLocaleString()}</div>
             {isP2P&&isMyTurn&&!moving&&(
               <motion.div animate={countdownUrgent?{scale:[1,1.1,1]}:{}} transition={{repeat:Infinity,duration:.5}} className={`flex items-center gap-1 text-[10px] font-mono font-black ${countdown<=10?'text-red-400':'text-slate-300'}`}>
                 <Clock size={9}/>{countdown}s
@@ -824,25 +830,25 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           </div>
 
           {/* Opp plate */}
-          <div className={`flex items-center gap-2 flex-1 min-w-0 flex-row-reverse p-2 rounded-xl border transition-all duration-300 ${(!isMyTurn&&!isBot)?'border-red-500/60 bg-red-900/20':isBot?'border-orange-500/60 bg-orange-900/20':'border-white/8 bg-white/3'}`}>
+          <div className={`flex items-center gap-2 flex-1 min-w-0 flex-row-reverse p-1.5 rounded-xl border transition-all duration-300 ${(!isMyTurn&&!isBot)?'border-red-500/60 bg-red-900/20':isBot?'border-orange-500/60 bg-orange-900/20':'border-white/8 bg-white/3'}`}>
             <div className="relative flex-shrink-0">
-              <img src={av2(oppId)} alt="" className="w-9 h-9 rounded-full border-2 border-red-500/70"/>
-              {(!isMyTurn&&!isBot||isBot)&&<span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-red-400 rounded-full border-2 border-black animate-pulse"/>}
+              <img src={av2(oppId)} alt="" className="w-8 h-8 rounded-full border-2 border-red-500/70"/>
+              {(!isMyTurn&&!isBot||isBot)&&<span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-red-400 rounded-full border-2 border-black animate-pulse"/>}
             </div>
             <div className="flex-1 min-w-0 text-right">
-              <p className="text-white font-bold text-xs truncate">{name2(oppId)}</p>
-              <div className="flex gap-0.5 mt-0.5 flex-wrap justify-end">
-                {myGroup?Array.from({length:7}).map((_,i)=>{const bid=myGroup==='stripes'?i+1:i+9,pk=balls.find(b=>b.id===bid)?.pocketed;return(<motion.div key={bid} className="w-3 h-3 rounded-full" animate={pk?{scale:[1.4,1]}:{}} style={{backgroundColor:pk?BALL_COLORS[bid]:'transparent',border:pk?'none':'1px solid #334155'}}/>);}): <span className="text-[9px] text-slate-500">Waiting</span>}
+              <p className="text-white font-bold text-[10px] truncate leading-tight">{name2(oppId)}</p>
+              <div className="text-[10px] text-slate-400 font-mono">
+                {myGroup ? `${oppPot}/7 ${myGroup==='solids'?'stripes':'solids'}` : 'P2 Ready'}
               </div>
             </div>
-            <div className="text-xl font-black font-mono text-white flex-shrink-0">{oppPot}</div>
+            <div className="text-lg font-black font-mono text-white flex-shrink-0 pl-1">{oppPot}</div>
           </div>
         </div>
 
         {/* Status + Power */}
         <div className="w-full px-3 py-1.5 flex flex-col gap-1 flex-shrink-0">
-          <div className={`text-center text-xs font-bold py-1 px-4 rounded-full border mx-auto max-w-xs ${isMyTurn?'bg-emerald-900/30 border-emerald-500/30 text-emerald-300':isBot?'bg-orange-900/30 border-orange-500/30 text-orange-300':'bg-slate-900/50 border-white/10 text-slate-400'}`}>
-            {msg||'ΓÇª'}{moving&&<span className="ml-2 animate-pulse text-slate-500">ΓùÅΓùÅ</span>}
+          <div className={`text-center text-[11px] font-bold py-1 px-4 rounded-full border mx-auto max-w-xs ${isMyTurn?'bg-emerald-900/30 border-emerald-500/30 text-emerald-300':isBot?'bg-orange-900/30 border-orange-500/30 text-orange-300':'bg-slate-900/50 border-white/10 text-slate-400'}`}>
+            {msg||'...'}{moving&&<span className="ml-2 animate-pulse text-slate-500">..</span>}
           </div>
           {power>2&&isMyTurn&&(
             <div className="flex items-center gap-2 mx-auto w-full max-w-xs px-2">
@@ -875,21 +881,21 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
               <div className="absolute inset-0 rounded-xl" style={{boxShadow:'inset 0 1px 0 rgba(220,160,70,0.25), inset 0 -1px 0 rgba(0,0,0,0.7), inset 1px 0 0 rgba(180,120,50,0.15), inset -1px 0 0 rgba(0,0,0,0.5)'}} />
               {/* Horizontal wood grain lines */}
               {[20,40,60,80].map(p=>(<div key={p} className="absolute" style={{top:`${p}%`,left:'4%',right:'4%',height:'1px',background:'rgba(0,0,0,0.18)'}}/>))}
-                {/* Diamonds top ΓÇö now diamond-shaped rotated squares */}
+                {/* Diamonds top — Diamond-shaped pearlescent markers */}
                 {[25,37.5,50,62.5,75].map(pct=>(
-                  <div key={pct} className="absolute w-2.5 h-2.5" style={{top:'4px',left:`${pct}%`,transform:'translateX(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
+                  <div key={pct} className="absolute w-3 h-3" style={{top:'4px',left:`${pct}%`,transform:'translateX(-50%) rotate(45deg)',background:'linear-gradient(135deg,#fff,#d4a84b)',boxShadow:'0 0 6px rgba(255,255,255,0.4), inset 0 0 2px rgba(0,0,0,0.3)'}}/>
                 ))}
                 {/* Diamonds bottom */}
                 {[25,37.5,50,62.5,75].map(pct=>(
-                  <div key={pct} className="absolute w-2.5 h-2.5" style={{bottom:'4px',left:`${pct}%`,transform:'translateX(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
+                  <div key={pct} className="absolute w-3 h-3" style={{bottom:'4px',left:`${pct}%`,transform:'translateX(-50%) rotate(45deg)',background:'linear-gradient(135deg,#fff,#d4a84b)',boxShadow:'0 0 6px rgba(255,255,255,0.4), inset 0 0 2px rgba(0,0,0,0.3)'}}/>
                 ))}
                 {/* Diamonds left */}
                 {[33,67].map(pct=>(
-                  <div key={pct} className="absolute w-2.5 h-2.5" style={{left:'4px',top:`${pct}%`,transform:'translateY(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
+                  <div key={pct} className="absolute w-3 h-3" style={{left:'4px',top:`${pct}%`,transform:'translateY(-50%) rotate(45deg)',background:'linear-gradient(135deg,#fff,#d4a84b)',boxShadow:'0 0 6px rgba(255,255,255,0.4), inset 0 0 2px rgba(0,0,0,0.3)'}}/>
                 ))}
                 {/* Diamonds right */}
                 {[33,67].map(pct=>(
-                  <div key={pct} className="absolute w-2.5 h-2.5" style={{right:'4px',top:`${pct}%`,transform:'translateY(-50%) rotate(45deg)',background:'linear-gradient(135deg,#d4a84b,#8a6020)',boxShadow:'0 0 4px rgba(200,140,40,0.6)'}}/>
+                  <div key={pct} className="absolute w-3 h-3" style={{right:'4px',top:`${pct}%`,transform:'translateY(-50%) rotate(45deg)',background:'linear-gradient(135deg,#fff,#d4a84b)',boxShadow:'0 0 6px rgba(255,255,255,0.4), inset 0 0 2px rgba(0,0,0,0.3)'}}/>
                 ))}
               {/* Canvas inset */}
               <div className="absolute rounded-lg overflow-hidden" style={{inset:'20px',boxShadow:'inset 0 0 40px 10px rgba(0,0,0,.8)'}}>
