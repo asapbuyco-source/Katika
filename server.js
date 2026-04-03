@@ -1233,6 +1233,7 @@ const endGame = (roomId, winnerId, reason) => {
     if (winnerId && room.stake > 0) settleGame(roomId, winnerId);
 
     io.to(roomId).emit('game_over', {
+        roomId,
         winner: winnerId,
         reason: reason,
         financials: {
@@ -1388,14 +1389,8 @@ io.on('connection', (socket) => {
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId)) {
                 if (room.status === 'completed') {
-                    // Game already ended — tell the client who won so they see the result
-                    socket.join(roomId);
-                    socket.emit('game_over', {
-                        winner: room.winner,
-                        reason: 'Reconnected after game ended'
-                    });
-                    console.log(`User ${userId} reconnected to completed room ${roomId}, winner: ${room.winner}`);
-                    return;
+                    // Skip completed rooms to allow user to join a new match queue
+                    continue;
                 }
 
                 if (room.status === 'active') {
@@ -1571,10 +1566,22 @@ io.on('connection', (socket) => {
                 console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim timeout on their own turn.`);
                 return;
             }
+
+            // DICE EXCEPTION: Dice games auto-roll, so timeouts shouldn't lead to forfeits via claims
+            if (room.gameType === 'Dice') {
+                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim on a Dice game.`);
+                return;
+            }
             
             // Server-enforced forfeit logic (Anti-cheat timer check)
             const elapsed = Date.now() - (room.gameState.lastMoveTime || 0);
-            if (elapsed < 59500) { // Using 59.5s to account for slight network jitter
+            
+            // Game-specific durations (matching client-side TURN_DURATION constants)
+            let requiredDuration = 59500; // Default 60s
+            if (room.gameType === 'TicTacToe') requiredDuration = 14500; // 15s
+            if (room.gameType === 'Cards') requiredDuration = 29500; // 30s
+            
+            if (elapsed < requiredDuration) { 
                 console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} claimed early. Only ${elapsed}ms elapsed.`);
                 return;
             }

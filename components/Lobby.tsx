@@ -4,7 +4,7 @@ import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X,
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
-import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs } from '../services/firebase';
+import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs, subscribeToMaintenanceMode } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 import { useToast } from '../services/toast';
@@ -71,12 +71,14 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
     // Load Maintenance State and Game Configs
     useEffect(() => {
-        const maintenance = localStorage.getItem('vantage_maintenance') === 'true';
-        setIsMaintenance(maintenance);
+        const unsubMaint = subscribeToMaintenanceMode(setIsMaintenance);
 
         // Subscribe to admin overrides
         const unsub = subscribeToGameConfigs(setGameOverrides);
-        return () => unsub();
+        return () => {
+            unsubMaint();
+            unsub();
+        };
     }, []);
 
     // Handle Initial Deep Link
@@ -127,7 +129,11 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     // Cleanup challenge listener
     useEffect(() => {
         return () => {
-            if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+            // FIX M4: Properly unsubscribe from challenge status listener
+            if (challengeUnsubscribeRef.current) {
+                challengeUnsubscribeRef.current();
+                challengeUnsubscribeRef.current = null;
+            }
         };
     }, []);
 
@@ -242,10 +248,18 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     };
 
     const handleCancelChallenge = () => {
-        if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+        // FIX M4: Ensure challenge listener is properly cleaned up
+        if (challengeUnsubscribeRef.current) {
+            challengeUnsubscribeRef.current();
+            challengeUnsubscribeRef.current = null;
+        }
         setActiveChallengeId(null);
         setChallengeStep('search');
         setShowChallengeModal(false);
+        // Reset challenge state when closing modal
+        setSelectedFriend(null);
+        setSearchQuery('');
+        setSearchResults([]);
     };
 
     const activeGameData = STATIC_GAME_LIST.find(g => g.id === selectedGame);

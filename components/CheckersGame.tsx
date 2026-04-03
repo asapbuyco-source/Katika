@@ -8,6 +8,7 @@ import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 import { createLidraughtsGame, fetchLidraughtsState, makeLidraughtsMove, toCoords, toNotation } from '../services/lidraughts';
+import { useAppState } from '../services/AppContext';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -114,6 +115,7 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighte
 });
 
 export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const [pieces, setPieces] = useState<Piece[]>([]);
     const [turn, setTurn] = useState<'me' | 'opponent'>('me');
     const [selectedPieceId, setSelectedPieceId] = useState<string | null>(null);
@@ -180,10 +182,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (socketGame.gameState && socketGame.gameState.turn) {
                 setTurn(socketGame.gameState.turn === user.id ? 'me' : 'opponent');
             }
-            if (socketGame.winner && isP2P) {
+            if (socketGame.winner) {
                 setIsGameOver(true);
-                if (socketGame.winner === user.id) onGameEnd('win');
-                else onGameEnd('loss');
+                if (!isP2P) {
+                    if (socketGame.winner === user.id) onGameEnd('win');
+                    else onGameEnd('loss');
+                }
             }
             if (socketGame.players && socketGame.players.length > 0) {
                 const isPlayer1 = socketGame.players[0] === user.id;
@@ -228,9 +232,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         
         const handleGameOver = (data: any) => {
             setIsGameOver(true);
-            if (data.winner === user.id) onGameEnd('win');
-            else if (data.winner) onGameEnd('loss');
-            else onGameEnd('quit'); // Draw or other
+            // SocketContext handles global SET_GAME_RESULT for P2P
         };
 
         socket.on('game_over', handleGameOver);
@@ -326,12 +328,14 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     useEffect(() => {
         if (isGameOver) return;
         const interval = setInterval(() => {
+            if (state.opponentDisconnected) return;
             setTimeRemaining(prev => {
                 if (turn === 'me') {
                     if (prev.me <= 0) {
                         clearInterval(interval);
                         if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        onGameEnd('loss');
+                        // Let Server handle settlement via WebSocket
+                        if (!isP2P) onGameEnd('loss');
                         return prev;
                     }
                     return { ...prev, me: Math.max(0, prev.me - 1) };
@@ -341,7 +345,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             });
         }, 1000);
         return () => clearInterval(interval);
-    }, [turn, isGameOver, isP2P, socket, socketGame]);
+    }, [turn, isGameOver, isP2P, socket, socketGame, state.opponentDisconnected]);
 
     const handleQuit = () => {
         if (isP2P && socket) {

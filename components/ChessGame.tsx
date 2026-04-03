@@ -1,9 +1,9 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
+import { useAppState } from '../services/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
@@ -179,6 +179,7 @@ const getBestMove = (game: Chess, difficulty: string): { from: string, to: strin
 };
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const [game, setGame] = useState(new Chess());
     const [viewIndex, setViewIndex] = useState<number>(-1);
     const [myColor, setMyColor] = useState<'w' | 'b'>('w');
@@ -263,10 +264,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
             // Bug B fix: condition was inverted — in P2P games (!isP2P === false)
             // so the winner was NEVER declared through this path. Fixed to `isP2P`.
-            if (socketGame.winner && isP2P) {
+            if (socketGame.winner) {
                 setIsGameOver(true);
-                if (socketGame.winner === user.id) onGameEnd('win');
-                else onGameEnd('loss');
+                if (!isP2P) {
+                    if (socketGame.winner === user.id) onGameEnd('win');
+                    else onGameEnd('loss');
+                }
             }
         }
     }, [socketGame, user.id, isP2P]);
@@ -277,9 +280,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         
         const handleGameOver = (data: any) => {
             setIsGameOver(true);
-            if (data.winner === user.id) onGameEnd('win');
-            else if (data.winner) onGameEnd('loss');
-            else onGameEnd('quit'); // Draw or other
+            // SocketContext handles global SET_GAME_RESULT for P2P
         };
 
         socket.on('game_over', handleGameOver);
@@ -289,16 +290,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     }, [isP2P, socket, user.id, onGameEnd]);
 
     useEffect(() => {
-        if (isGameOver) return;
+        if (isGameOver || viewIndex !== -1) return;
+        
         const interval = setInterval(() => {
-            const activeColor = game.turn();
+            if (state.opponentDisconnected) return;
             setTimeRemaining(prev => {
-                if (prev[activeColor] <= 0) return prev;
-                return { ...prev, [activeColor]: Math.max(0, prev[activeColor] - 1) };
+                const turnColor = displayGame.turn();
+                
+                if (turnColor === myColor) {
+                    if (prev[myColor] <= 0) {
+                        clearInterval(interval);
+                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+                        // Let Server handle settlement via WebSocket
+                        if (!isP2P) onGameEnd('loss');
+                        return prev;
+                    }
+                    return { ...prev, [myColor]: Math.max(0, prev[myColor] - 1) };
+                } else {
+                    return { ...prev, [turnColor]: Math.max(0, prev[turnColor] - 1) };
+                }
             });
         }, 1000);
         return () => clearInterval(interval);
-    }, [game, isGameOver]);
+    }, [displayGame.turn(), isGameOver, viewIndex, myColor, isP2P, socket, socketGame, state.opponentDisconnected]);
 
     const checkGameOver = useCallback((currentGamState: Chess) => {
         // Bug A fix: read from stateRef so this callback never captures a stale

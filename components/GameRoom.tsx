@@ -4,12 +4,15 @@ import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
+import { useAppState } from '../services/AppContext';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
+
+const TURN_TIME_LIMIT = 60;
 
 interface GameRoomProps {
     table: Table;
@@ -63,12 +66,14 @@ const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) 
 };
 
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const [pieces, setPieces] = useState<Piece[]>([]);
     const [currentTurn, setCurrentTurn] = useState<PlayerColor>('Red');
     const [diceValue, setDiceValue] = useState<number | null>(null);
     const [diceRolled, setDiceRolled] = useState(false);
     const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
     const [lastMovedPieceId, setLastMovedPieceId] = useState<number | null>(null);
+    const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
 
     const isP2P = !!socket && !!socketGame;
     const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
@@ -99,6 +104,43 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             }
         }
     }, [socketGame, user.id, isP2P]);
+
+    // Timer Logic
+    useEffect(() => {
+        if (socketGame?.winner) return;
+
+        setTimeLeft(TURN_TIME_LIMIT);
+        let timeoutId: any;
+
+        const timer = setInterval(() => {
+            if (state.opponentDisconnected) return;
+
+            setTimeLeft((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    timeoutId = setTimeout(() => handleTimeout(), 0);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => {
+            clearInterval(timer);
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [currentTurn, diceRolled, socketGame?.winner, state.opponentDisconnected]);
+
+    const handleTimeout = () => {
+        if (!isP2P || !socket || !socketGame) return;
+        playSFX('error');
+        if (currentTurn === myColor) {
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+            onGameEnd('loss');
+        } else {
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+        }
+    };
 
     const handleQuit = () => {
         if (isP2P && socket) {
@@ -215,10 +257,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
             </div>
 
-            <div className="text-white text-center mb-4">
+            <div className="text-white text-center mb-4 flex flex-col items-center gap-2">
                 <h2 className={`text-2xl font-bold ${currentTurn === myColor ? 'text-gold-400' : 'text-slate-500'}`}>
                     {currentTurn === myColor ? "YOUR TURN" : "OPPONENT'S TURN"}
                 </h2>
+                <div className={`px-4 py-1 rounded-full text-xs font-mono font-bold border ${timeLeft <= 10 ? 'bg-red-500/20 border-red-500 text-red-500 animate-pulse' : 'bg-black/20 border-white/10 text-slate-400'}`}>
+                    {timeLeft}s
+                </div>
             </div>
 
             <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-xl shadow-2xl overflow-hidden border-8 border-royal-800">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { ArrowLeft, AlertTriangle, Clock } from 'lucide-react';
 import { Table, User } from '../types';
+import { useAppState } from '../services/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { playSFX, playPoolSound } from '../services/sound';
 import { Socket } from 'socket.io-client';
@@ -449,6 +450,7 @@ function findBotShot(balls:Ball[], grp:'solids'|'stripes'|null){
 }
 
 export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,socketGame}) => {
+  const { state } = useAppState();
   const canvasRef=useRef<HTMLCanvasElement>(null);
   const ballsRef=useRef<Ball[]>(buildRack());
   const sparksRef=useRef<Spark[]>([]);
@@ -538,16 +540,28 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
 
   // Countdown timer
   useEffect(()=>{
-    if(!isP2P||moving||!isMyTurn) return;
+    if(!isP2P||moving) return; // Only run timer when balls are at rest
+    if(state.opponentDisconnected) return;
+    
     if(countdown<=0){
-      // Time up — forfeit this turn
-      setMsg('⏰ Time up! Forfeited turn.');
-      if(socket&&roomId) socket.emit('game_action',{roomId,action:{type:'FORFEIT'}});
-      onGameEnd('loss'); return;
+      handleTimeout();
+      return;
     }
     const t=setTimeout(()=>setCountdown(c=>c-1),1000);
     return ()=>clearTimeout(t);
-  },[isP2P,moving,isMyTurn,countdown,socket,roomId]);
+  },[isP2P,moving,countdown,socket,roomId,state.opponentDisconnected]);
+
+  const handleTimeout = () => {
+    if (!isP2P || !socket || !roomId) return;
+    playSFX('error');
+    if (isMyTurn) {
+      setMsg('⏰ Time up! Forfeited turn.');
+      socket.emit('game_action', { roomId, action: { type: 'FORFEIT' } });
+      onGameEnd('loss');
+    } else {
+      socket.emit('game_action', { roomId, action: { type: 'TIMEOUT_CLAIM' } });
+    }
+  };
 
   // Reset countdown on turn change
   useEffect(()=>{setCountdown(TURN_TIME);},[turnId]);

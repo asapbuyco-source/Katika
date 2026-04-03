@@ -1,5 +1,5 @@
 
-import React, { useEffect, useRef, ReactNode, ErrorInfo, Component, lazy, Suspense, useCallback } from 'react';
+import React, { useEffect, useRef, ReactNode, ErrorInfo, Component, lazy, Suspense, useCallback, useState } from 'react';
 import { ViewState, Table, SocketGameState, GameAction } from '../types';
 import { Navigation } from './Navigation';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -21,6 +21,7 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { Tournament } from '../types';
 import { ChallengeRequestModal } from './ChallengeRequestModal';
+import { useGameController } from '../hooks/useGameController.ts';
 import { GameResultOverlay } from './GameResultOverlay';
 import { Onboarding } from './Onboarding';
 
@@ -191,11 +192,39 @@ const MV = ({ children, k }: { children: ReactNode; k: string }) => (
 // ─── AppContent — the main routing/logic shell ─────────────────────────────────
 const AppContent = () => {
     const { state, dispatch, viewRef, lastForumMsgId } = useAppState();
-    const { socket, isConnected, hasConnectedOnce, socketGame, setSocketGame, bypassConnection, setBypassConnection } = useSocket();
-    const toast = useToast();
+    const { socket, isConnected, hasConnectedOnce, socketGame, bypassConnection, setBypassConnection } = useSocket();
     const { theme } = useTheme();
 
-    const { user, currentView, activeTable, matchmakingConfig, authLoading, gameResult, rematchStatus, opponentDisconnected, opponentTimeout, preSelectedGame, incomingChallenge, unreadForum } = state;
+    const { user, currentView, matchmakingConfig, authLoading, gameResult, rematchStatus, opponentDisconnected, opponentTimeout, preSelectedGame, incomingChallenge, unreadForum } = state;
+
+    const {
+        activeGameTable,
+        isTransitioningRef,
+        startMatchmaking,
+        cancelMatchmaking,
+        handleAcceptChallenge,
+        handleMatchFound,
+        handleGameEnd,
+        finalizeGameEnd,
+        handleRematchRequest,
+        handleLogout,
+        handleDashboardQuickMatch,
+        handleTournamentMatchJoin,
+        setView
+    } = useGameController();
+
+    // Rejoining State
+    const [isRejoining, setIsRejoining] = React.useState(false);
+    useEffect(() => {
+        const storedRoom = sessionStorage.getItem('vantage_active_room');
+        if (storedRoom && !socketGame && isConnected) {
+            setIsRejoining(true);
+            const timer = setTimeout(() => setIsRejoining(false), 5000); // Timeout fallback
+            return () => clearTimeout(timer);
+        } else if (socketGame) {
+            setIsRejoining(false);
+        }
+    }, [socketGame, isConnected]);
 
     // ── Apply Theme CSS Variables ────────────────────────────────────────────
     useEffect(() => {
@@ -277,7 +306,19 @@ const AppContent = () => {
     useEffect(() => {
         if (authLoading) return;
         if (user) {
-            if (currentView === 'landing' || currentView === 'auth') dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
+            // FIX M2 + M5: Check if user was in an active game before page refresh
+            const activeTournamentMatch = localStorage.getItem('vantage_active_tournament_match');
+            if (activeTournamentMatch && currentView === 'dashboard') {
+                // Restore tournament match
+                dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: activeTournamentMatch.split('-')[1] });
+                dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
+                return;
+            }
+
+            // Auto-navigate to appropriate view on first auth
+            if (currentView === 'landing' || currentView === 'auth') {
+                dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
+            }
         } else {
             const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
             if (!publicViews.includes(currentView)) dispatch({ type: 'SET_VIEW', payload: 'landing' });
@@ -298,177 +339,14 @@ const AppContent = () => {
     }, [currentView, socketGame, gameResult]);
 
 
-    // ── Matchmaking ───────────────────────────────────────────────────────────
-    const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
-        if (!user) return;
-        const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
-        if (!validGames.includes(gameType)) { toast.info('This game is coming soon!'); return; }
-
-        if ((!isConnected || bypassConnection) && stake !== -1) {
-            toast.error('Offline mode active. P2P matchmaking unavailable.');
-            return;
-        }
-
-        if (stake === -1) {
-            try {
-                const gameId = await createBotMatch(user, gameType, difficulty);
-                const gameData = await getGame(gameId);
-                if (gameData) {
-                    const table: Table = {
-                        id: gameData.id, gameType: gameData.gameType, stake: gameData.stake,
-                        players: 2, maxPlayers: 2, status: 'active',
-                        host: gameData.host, guest: gameData.guest
-                    };
-                    dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
-                    dispatch({ type: 'SET_VIEW', payload: 'game' });
-                }
-            } catch (error) {
-                console.error('[App] Bot match failed:', error);
-                toast.error('Could not start bot match. Try again.');
-            }
-            return;
-        }
-
-        if (!socket) return;
-        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: { stake, gameType } });
-        dispatch({ type: 'SET_VIEW', payload: 'matchmaking' });
-        socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
-    }, [user, isConnected, bypassConnection, socket, dispatch, toast]);
-
-    const cancelMatchmaking = useCallback(() => {
-        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
-        dispatch({ type: 'SET_VIEW', payload: 'lobby' });
-    }, [dispatch]);
-
-    const handleAcceptChallenge = useCallback(async () => {
-        if (!incomingChallenge || !user) return;
-        try {
-            // Create the actual game room first, then use its ID to join via socket
-            const gameId = await createChallengeGame(incomingChallenge, user);
-            await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
-            startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
-        } catch (e) {
-            console.error('[App] Failed to create challenge game:', e);
-            toast.error('Could not accept challenge. Please try again.');
-        }
-        dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
-    }, [incomingChallenge, user, startMatchmaking, dispatch, toast]);
-
-    const handleMatchFound = useCallback((table: Table) => {
-        dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
-        if (table.tournamentMatchId) setTournamentMatchActive(table.tournamentMatchId);
-        dispatch({ type: 'SET_VIEW', payload: 'game' });
-    }, [dispatch]);
-
-    const constructTableFromSocket = useCallback((game: SocketGameState): Table => {
-        if (!user) return {} as Table;
-        const opponentId = game.players.find(id => id !== user.id) ?? '';
-        const hostProfile = game.profiles?.[opponentId] ?? { id: opponentId, name: 'Opponent', avatar: 'https://i.pravatar.cc/150?u=opp', elo: 0, rankTier: 'Silver' as const };
-        return {
-            id: game.roomId || game.id || '',
-            gameType: game.gameType as any,
-            stake: game.stake, players: 2, maxPlayers: 2, status: 'active',
-            host: hostProfile,
-            tournamentMatchId: game.tournamentMatchId || game.privateRoomId
-        };
-    }, [user]);
-
-    const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
-
     // ── Safety guard: if view is 'game' but no table exists (e.g. after page
     // refresh or stale state), redirect to lobby immediately ───────────────
     useEffect(() => {
+        if (isTransitioningRef.current) return;
         if (currentView === 'game' && !activeGameTable && !gameResult) {
             dispatch({ type: 'SET_VIEW', payload: 'lobby' });
         }
     }, [currentView, activeGameTable, gameResult, dispatch]);
-
-    const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit' | 'draw') => {
-        let tournamentPot = 0;
-        const tournamentMatchId = activeGameTable?.tournamentMatchId;
-
-        if (tournamentMatchId && user) {
-            try {
-                // Extract tournamentId from matchId convention: "m-{tournamentId}-r{round}-{idx}"
-                const parts = tournamentMatchId.split('-');
-                if (parts.length > 1) {
-                    const tId = parts[1];
-                    const tDoc = await getDoc(doc(db, 'tournaments', tId));
-                    if (tDoc.exists()) {
-                        const tData = tDoc.data() as Tournament;
-                        tournamentPot = tData.prizePool || 0;
-                    }
-                }
-            } catch (e) { console.error('[App] Error fetching tournament pot:', e); }
-
-            // NOTE: Tournament match result is reported EXCLUSIVELY by the server's endGame() hook.
-            // The server calls recordTournamentMatchResult() which advances the bracket atomically.
-            // The client must NOT call reportTournamentMatchResult() here — that would cause
-            // race conditions and double-advancement. Server authority is maintained.
-        }
-
-        dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
-    }, [activeGameTable, user, dispatch]);
-
-    const finalizeGameEnd = useCallback(() => {
-        if (socket && socketGame) {
-            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
-        }
-        const tournamentMatchId = activeGameTable?.tournamentMatchId;
-        const isTournament = !!tournamentMatchId;
-
-        // Extract tournamentId from matchId ("m-{tournamentId}-r{round}-{idx}")
-        // so the Tournaments page can auto-open the correct bracket.
-        let pendingTournamentId: string | null = null;
-        if (tournamentMatchId) {
-            const parts = tournamentMatchId.split('-');
-            if (parts.length > 1) pendingTournamentId = parts[1];
-        }
-
-        // Navigate FIRST to prevent blank screen (game view with no table)
-        if (isTournament) {
-            // Store which tournament to re-open, then navigate
-            dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: pendingTournamentId });
-            dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
-        } else {
-            dispatch({ type: 'SET_VIEW', payload: 'lobby' });
-        }
-        // Then clear all game state
-        setSocketGame(null);
-        dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
-        dispatch({ type: 'SET_GAME_RESULT', payload: null });
-        dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
-        dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
-        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
-    }, [socket, socketGame, activeGameTable, setSocketGame, dispatch]);
-
-    const handleRematchRequest = useCallback(() => {
-        if (!user || !socket || !socketGame) return;
-        if (user.balance < (socketGame.stake || 0)) {
-            toast.error(`Insufficient funds for rematch. You need ${socketGame.stake} FCFA.`);
-            return;
-        }
-        dispatch({ type: 'SET_REMATCH_STATUS', payload: 'requested' });
-        socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_REQUEST' } });
-    }, [user, socket, socketGame, toast, dispatch]);
-
-    const handleLogout = useCallback(async () => {
-        await logout();
-        dispatch({ type: 'SET_USER', payload: null });
-        dispatch({ type: 'SET_VIEW', payload: 'landing' });
-    }, [dispatch]);
-
-    const handleDashboardQuickMatch = useCallback((gameId?: string) => {
-        dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: gameId || null });
-        dispatch({ type: 'SET_VIEW', payload: 'lobby' });
-    }, [dispatch]);
-
-    const handleTournamentMatchJoin = useCallback((gameType: string, tournamentMatchId: string) => {
-        if (!user || !socket) return;
-        startMatchmaking(0, gameType, tournamentMatchId);
-    }, [user, socket, startMatchmaking]);
-
-    const setView = useCallback((view: ViewState) => dispatch({ type: 'SET_VIEW', payload: view }), [dispatch]);
 
     // ── Find opponent for reconnection modal ─────────────────────────────────
     let opponentProfile = null;
@@ -516,10 +394,27 @@ const AppContent = () => {
                 <Navigation currentView={currentView} setView={setView} user={user} hasUnreadMessages={unreadForum} />
             )}
 
+            {isRejoining && (
+                <div className="fixed inset-0 z-[200] bg-royal-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
+                    <motion.div 
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="flex flex-col items-center"
+                    >
+                        <div className="relative mb-6">
+                            <div className="absolute inset-0 bg-gold-500/20 blur-2xl rounded-full animate-pulse"></div>
+                            <Loader2 className="w-16 h-16 text-gold-500 animate-spin relative z-10" />
+                        </div>
+                        <h2 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase">Resuming Match</h2>
+                        <p className="text-slate-400 text-sm max-w-xs">Wait a moment while we reconnect you to your active game session...</p>
+                    </motion.div>
+                </div>
+            )}
+
             <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
                 <GameErrorBoundary onReset={() => { dispatch({ type: 'RESET_GAME_STATE' }); dispatch({ type: 'SET_VIEW', payload: user ? 'dashboard' : 'landing' }); }}>
                     <Suspense fallback={<ViewLoader />}>
-                        <AnimatePresence mode="wait">
+                        <AnimatePresence>
                             {currentView === 'landing' && <MV k="landing">    <LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></MV>}
                             {currentView === 'auth' && <MV k="auth">       <AuthScreen onAuthenticated={u => dispatch({ type: 'SET_USER', payload: u || null })} onNavigate={setView} /></MV>}
                             {currentView === 'dashboard' && user && <MV k="dashboard">  <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></MV>}
@@ -530,16 +425,25 @@ const AppContent = () => {
                                 </MV>
                             )}
                             {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} pendingTournamentId={preSelectedGame} onClearPendingTournament={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
-                            {currentView === 'game' && user && activeGameTable && (
+                            {currentView === 'game' && user && (
                                 <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
-                                    {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                        activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                            activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                    activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                        activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                            activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                                <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
+                                    {activeGameTable ? (
+                                        <>
+                                            {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                    activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                        activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                            activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                    activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                        <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
+                                        </>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center h-full gap-4">
+                                            <Loader2 className="w-8 h-8 text-gold-500 animate-spin" />
+                                            <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Finalizing Match Result...</p>
+                                        </div>
+                                    )}
                                 </motion.div>
                             )}
                             {currentView === 'profile' && user && <MV k="profile">     <Profile user={user} onLogout={handleLogout} onUpdateProfile={u => dispatch({ type: 'UPDATE_USER', payload: u })} onNavigate={setView} /></MV>}

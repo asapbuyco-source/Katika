@@ -38,7 +38,16 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
     const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
-    const [socketGame, setSocketGame] = useState<SocketGameState | null>(null);
+    const [socketGame, setSocketGameRaw] = useState<SocketGameState | null>(null);
+
+    const setSocketGame = React.useCallback((gameOrUpdater: SocketGameState | null | ((prev: SocketGameState | null) => SocketGameState | null)) => {
+        if (gameOrUpdater === null) {
+            sessionStorage.removeItem('vantage_active_room');
+        } else if (typeof gameOrUpdater === 'object' && (gameOrUpdater as SocketGameState).roomId) {
+            sessionStorage.setItem('vantage_active_room', (gameOrUpdater as SocketGameState).roomId!);
+        }
+        setSocketGameRaw(gameOrUpdater);
+    }, []);
     const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [bypassConnection, setBypassConnection] = useState(false);
@@ -90,6 +99,17 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
     }, []);
 
+    // ── Session Re-entry ──────────────────────────────────────────────────────
+    useEffect(() => {
+        if (!socket || !isConnected || !state.user) return;
+
+        const storedRoom = sessionStorage.getItem('vantage_active_room');
+        if (storedRoom) {
+            console.log(`[Socket] Attempting re-entry for room: ${storedRoom}`);
+            socket.emit('rejoin_game', { userProfile: state.user });
+        }
+    }, [socket, isConnected, !!state.user]);
+
     // ── Attach Game Event Handlers ─────────────────────────────────────────────
     useEffect(() => {
         if (!socket) return;
@@ -134,10 +154,17 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             }
         };
 
-        const handleGameOver = ({ winner, financials }: { winner: string; financials?: any }) => {
+        const handleGameOver = ({ roomId, winner, financials }: { roomId?: string; winner: string; financials?: any }) => {
             dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
+            
             const currentGame = socketGameRef.current;
             const currentUser = userRef.current;
+
+            // FIX: Stop old match results from popping up in new matches
+            if (roomId && currentGame?.roomId && roomId !== currentGame.roomId) {
+                console.warn(`[Socket] Ignored stale game_over for room ${roomId}. Current room: ${currentGame.roomId}`);
+                return;
+            }
 
             // Report tournament match result via server API (server also handles bracket advancement)
             if (currentUser && winner === currentUser.id && currentGame?.tournamentMatchId) {

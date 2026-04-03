@@ -3,6 +3,7 @@ import { ArrowLeft, Club, Diamond, Heart, Spade, Layers, Zap, X, Check } from 'l
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
+import { useAppState } from '../services/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
@@ -18,6 +19,8 @@ interface CardGameProps {
 type Suit = 'H' | 'D' | 'C' | 'S';
 type Rank = '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | 'J' | 'Q' | 'K' | 'A';
 interface Card { id: string; suit: Suit; rank: Rank; }
+
+const TURN_DURATION = 30;
 
 const SuitIcon = ({ suit, size = 16 }: { suit: Suit, size?: number }) => {
     switch (suit) {
@@ -65,6 +68,7 @@ const CardView = ({ card, isFaceDown, isPlayable, onClick, style }: any) => {
 };
 
 export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const [myHand, setMyHand] = useState<Card[]>([]);
     const [oppHandCount, setOppHandCount] = useState(0);
     const [discardPile, setDiscardPile] = useState<Card[]>([]);
@@ -75,6 +79,7 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
     const [pendingCard, setPendingCard] = useState<Card | null>(null);
     const [deckSize, setDeckSize] = useState(0);
     const [showForfeitModal, setShowForfeitModal] = useState(false);
+    const [timeLeft, setTimeLeft] = useState(TURN_DURATION);
 
     const isP2P = !!socket && !!socketGame;
 
@@ -100,6 +105,43 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
             }
         }
     }, [socketGame, user.id, isP2P]);
+
+    // Timer Logic
+    useEffect(() => {
+        if (socketGame?.winner) return;
+
+        setTimeLeft(TURN_DURATION);
+        let timeoutId: any;
+
+        const timer = setInterval(() => {
+            if (state.opponentDisconnected) return;
+
+            setTimeLeft((prev) => {
+                if (prev <= 1) {
+                    clearInterval(timer);
+                    timeoutId = setTimeout(() => handleTimeout(), 0);
+                    return 0;
+                }
+                return prev - 1;
+            });
+        }, 1000);
+
+        return () => {
+            clearInterval(timer);
+            if (timeoutId) clearTimeout(timeoutId);
+        };
+    }, [turn, socketGame?.winner, state.opponentDisconnected]);
+
+    const handleTimeout = () => {
+        if (!isP2P || !socket || !socketGame) return;
+        playSFX('error');
+        if (turn === 'me') {
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+            onGameEnd('loss');
+        } else {
+            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+        }
+    };
 
     const playCard = (card: Card) => {
         if (turn !== 'me') return;
@@ -277,12 +319,17 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
 
             {/* Player Hand */}
             <div className="w-full max-w-4xl mt-8">
-                <div className="text-center text-white font-bold mb-4 flex justify-center items-center gap-2">
-                    {turn === 'me' ? (
-                        <span className="text-gold-400 flex items-center gap-2"><Zap size={16} /> Your Turn</span>
-                    ) : (
-                        <span className="text-slate-500">Opponent's Turn...</span>
-                    )}
+                <div className="text-center text-white font-bold mb-4 flex flex-col items-center gap-2">
+                    <div className="flex justify-center items-center gap-2">
+                        {turn === 'me' ? (
+                            <span className="text-gold-400 flex items-center gap-2"><Zap size={16} /> Your Turn</span>
+                        ) : (
+                            <span className="text-slate-500">Opponent's Turn...</span>
+                        )}
+                    </div>
+                    <div className={`px-4 py-1 rounded-full text-xs font-mono font-bold border ${timeLeft <= 5 ? 'bg-red-500/20 border-red-500 text-red-500 animate-pulse' : 'bg-black/20 border-white/10 text-slate-400'}`}>
+                        {timeLeft}s remaining
+                    </div>
                 </div>
 
                 <div className="flex justify-center -space-x-8 md:-space-x-6 overflow-x-auto pb-8 pt-4 px-4 min-h-[160px]">

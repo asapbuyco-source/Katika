@@ -4,6 +4,7 @@ import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw, BookOpen
 import { Table, User as AppUser, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
+import { useAppState } from '../services/AppContext';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 
@@ -88,6 +89,7 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 };
 
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const isP2P = !!socket && !!socketGame;
     const opponentId = isP2P && Array.isArray(socketGame?.players)
         ? socketGame.players.find((id: string) => id !== user.id)
@@ -238,6 +240,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         let timeoutId: any;
 
         const timer = setInterval(() => {
+            if (state.opponentDisconnected) return;
             setTimeLeft(prev => {
                 if (prev <= 1) {
                     clearInterval(timer);
@@ -252,7 +255,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             clearInterval(timer);
             if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [isMyTurn, round, phase]);
+    }, [isMyTurn, round, phase, state.opponentDisconnected]);
 
     const handleTimeout = () => {
         if (phase !== 'waiting') return;

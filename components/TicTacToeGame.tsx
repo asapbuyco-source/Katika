@@ -4,6 +4,7 @@ import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from '
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
+import { useAppState } from '../services/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 
@@ -21,6 +22,7 @@ type WinningLine = number[] | null;
 const TURN_DURATION = 15;
 
 export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
+    const { state } = useAppState();
     const [board, setBoard] = useState<CellValue[]>(Array(9).fill(null));
     const [isXNext, setIsXNext] = useState(true);
     const [winner, setWinner] = useState<CellValue>(null);
@@ -93,6 +95,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
         let timeoutId: any;
 
         const timer = setInterval(() => {
+            if (state.opponentDisconnected) return;
             setTimeLeft((prev) => {
                 if (prev <= 1) {
                     clearInterval(timer);
@@ -107,7 +110,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
             clearInterval(timer);
             if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [isXNext, winner, isDraw]);
+    }, [isXNext, winner, isDraw, isP2P, state.opponentDisconnected]);
 
     const handleQuit = () => {
         if (isP2P && socket && socketGame) {
