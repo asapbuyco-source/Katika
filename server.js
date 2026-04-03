@@ -976,6 +976,45 @@ app.post('/api/tournaments/start', verifyAdmin, async (req, res) => {
     }
 });
 
+// --- ADMIN: CREATE TOURNAMENT (Fix for strict Firestore rules) ---
+app.post('/api/tournaments/create', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    try {
+        const docRef = await db.collection('tournaments').add({
+            ...req.body,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            status: 'registration',
+            participants: []
+        });
+        res.json({ success: true, id: docRef.id });
+    } catch (err) {
+        console.error('Tournament creation error:', err);
+        res.status(500).json({ error: err.message || 'Failed to create tournament' });
+    }
+});
+
+// --- ADMIN: DELETE TOURNAMENT (Fix for strict Firestore rules) ---
+app.delete('/api/tournaments/:id', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { id } = req.params;
+    try {
+        const batch = db.batch();
+        
+        // 1. Delete associated matches
+        const matchesSnap = await db.collection('tournament_matches').where('tournamentId', '==', id).get();
+        matchesSnap.forEach(d => batch.delete(d.ref));
+        
+        // 2. Delete tournament document
+        batch.delete(db.collection('tournaments').doc(id));
+        
+        await batch.commit();
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Tournament deletion error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete tournament' });
+    }
+});
+
 // --- ADMIN: FORCE TOURNAMENT MATCH RESULT ---
 app.post('/api/tournaments/force-result', verifyAdmin, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database unavailable' });

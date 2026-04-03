@@ -223,17 +223,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             setShowCreateTourney(false);
             setNewTourney({ name: '', gameType: 'Ludo', entryFee: 1000, maxPlayers: 16, startInHours: 0, startInMinutes: 30, prizePool: 0, type: 'dynamic' });
             fetchAdminTournaments();
-        } catch (err) {
-            alert('Failed to create tournament');
+        } catch (err: any) {
+            console.error('Tournament creation error:', err);
+            alert(err.message || 'Failed to create tournament');
         }
     };
 
     const handleDeleteTournament = async (id: string) => {
         if (!window.confirm("Delete this tournament? This cannot be undone.")) return;
-        await deleteTournament(id);
-        fetchAdminTournaments();
-        if (selectedTourneyId === id) setSelectedTourneyId(null);
-        addLog("Tournament Deleted", id, "critical");
+        try {
+            await deleteTournament(id);
+            fetchAdminTournaments();
+            if (selectedTourneyId === id) setSelectedTourneyId(null);
+            addLog("Tournament Deleted", id, "critical");
+        } catch (e: any) {
+            console.error('Tournament deletion failed:', e);
+            alert(e.message || 'Failed to delete tournament');
+        }
     };
 
     const handleStartTournament = async (id: string) => {

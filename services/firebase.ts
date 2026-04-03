@@ -562,16 +562,38 @@ export const subscribeToTournamentMatches = (tournamentId: string, callback: (ma
 };
 
 export const createTournament = async (data: Omit<Tournament, 'id'>) => {
-    await addDoc(collection(db, "tournaments"), data);
+    const SOCKET_URL = getApiUrl();
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/tournaments/create`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(data)
+    });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to create tournament');
+    }
+    return res.json();
 };
 
 export const deleteTournament = async (tournamentId: string) => {
-    await deleteDoc(doc(db, "tournaments", tournamentId));
-    const q = query(collection(db, "tournament_matches"), where("tournamentId", "==", tournamentId));
-    const snapshot = await getDocs(q);
-    const batch = writeBatch(db);
-    snapshot.docs.forEach(d => batch.delete(d.ref));
-    await batch.commit();
+    const SOCKET_URL = getApiUrl();
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/tournaments/${tournamentId}`, {
+        method: 'DELETE',
+        headers: {
+            'Authorization': `Bearer ${token}`
+        }
+    });
+    if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || 'Failed to delete tournament');
+    }
 };
 
 export const updateTournamentStatus = async (tournamentId: string, status: 'active' | 'completed' | 'registration') => {
