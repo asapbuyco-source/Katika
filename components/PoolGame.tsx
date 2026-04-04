@@ -479,6 +479,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const [shake,setShake]=useState(0);
   const [portrait,setPortrait]=useState(false);
   const [countdown,setCountdown]=useState(TURN_TIME);
+  const [oppAngle,setOppAngle]=useState(0);
+  const [oppPower,setOppPower]=useState(0);
+  const [oppGhost,setOppGhost]=useState<{x:number;y:number}|null>(null);
+  const lastSync=useRef(0);
   // pocketFlash removed ΓÇö sparkles now drawn on canvas
 
   const drag=useRef(false), dragStart=useRef<{x:number;y:number}|null>(null);
@@ -535,7 +539,21 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
       if(gs.ballInHand&&gs.turn===myId) setBih(true);
       if(gs.message) setMsg(gs.message);
     };
-    socket.on('game_update',h); return ()=>{socket.off('game_update',h);};
+    socket.on('game_update',h); 
+
+    const hSync=(data:any)=>{
+      if(data.type==='aim_sync'){
+        setOppAngle(data.angle);
+        setOppPower(data.power);
+        setOppGhost(data.ghost);
+      }
+    };
+    socket.on('aim_sync',hSync);
+
+    return ()=>{
+      socket.off('game_update',h);
+      socket.off('aim_sync',hSync);
+    };
   },[socket,isP2P,roomId,myId,iAmP1]);
 
   // Countdown timer
@@ -734,7 +752,15 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     const c=ballsRef.current.find(b=>b.id===0&&!b.pocketed);
     if(c) setAngle(Math.atan2(pos.y-c.y,pos.x-c.x));
     if(bihRef.current){setGhost(pos);return;}
-    if(drag.current&&dragStart.current) setPower(Math.min(100,Math.hypot(pos.x-dragStart.current.x,pos.y-dragStart.current.y)/1.3));
+    const pow=Math.min(100,Math.hypot(pos.x-dragStart.current.x,pos.y-dragStart.current.y)/1.3);
+    if(drag.current&&dragStart.current) setPower(pow);
+
+    // Sync emission (throttled to ~20Hz)
+    const now=Date.now();
+    if(isP2P && socket && now-lastSync.current > 50){
+      socket.emit('aim_sync', { roomId, type:'aim_sync', angle: Math.atan2(pos.y-c.y,pos.x-c.x), power: drag.current?pow:0, ghost: bihRef.current?pos:null });
+      lastSync.current=now;
+    }
   };
 
   const onUp=()=>{
@@ -766,7 +792,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           .filter(id=>!ballsRef.current.find(b=>b.id===id)?.pocketed)
         :[];
       const targetBallIds=(tids.length===0&&grp)?[8]:tids;
-      drawScene(ctx,ballsRef.current,sparksRef.current,angleRef.current,powerRef.current,(mt||ib)&&!mv,bihRef2.current,ghostRef.current,strikeOffRef.current,shakeRef.current,targetBallIds);
+      
+      const drawAngle = mt ? angleRef.current : (ib ? angleRef.current : oppAngle);
+      const drawPower = mt ? powerRef.current : (ib ? powerRef.current : oppPower);
+      const drawGhost = mt ? ghostRef.current : (ib ? ghostRef.current : oppGhost);
+      const showCue = (mt || ib || !movingRef2.current) && !mv;
+
+      drawScene(ctx,ballsRef.current,sparksRef.current,drawAngle,drawPower,showCue,bihRef2.current,drawGhost,strikeOffRef.current,shakeRef.current,targetBallIds);
       renderRaf.current=requestAnimationFrame(loop);
     };
     loop();
@@ -782,7 +814,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
   const [lScale,setLScale]=useState(1);
   useEffect(()=>{
     const upd=()=>{
-      if(portrait) setPScale(Math.min(window.innerWidth/TH,(window.innerHeight-85)/TW)*0.99);
+      if(portrait) setPScale(Math.min(window.innerWidth/TH,(window.innerHeight-85)/TW)*1.10);
       else setLScale(Math.min((window.innerWidth-20)/TW,(window.innerHeight-85)/TH)*0.99);
     };
     upd(); window.addEventListener('resize',upd); return ()=>window.removeEventListener('resize',upd);
@@ -836,7 +868,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
           <div className="flex flex-col items-center flex-shrink-0 px-2 gap-0.5">
             <div className="text-[8px] text-yellow-400 font-black uppercase tracking-widest">Stake</div>
             <div className="text-[11px] font-mono font-bold text-white">💰{(table.stake*2).toLocaleString()}</div>
-            {isP2P&&isMyTurn&&!moving&&(
+            {isP2P&&!moving&&(
               <motion.div animate={countdownUrgent?{scale:[1,1.1,1]}:{}} transition={{repeat:Infinity,duration:.5}} className={`flex items-center gap-1 text-[10px] font-mono font-black ${countdown<=10?'text-red-400':'text-slate-300'}`}>
                 <Clock size={9}/>{countdown}s
               </motion.div>

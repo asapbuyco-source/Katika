@@ -16,7 +16,13 @@ export const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
 
     const steps = [
         {
-            icon: <Gamepad2 size={40} className="text-gold-400" />,
+            icon: <Coins size={50} className="text-amber-400 drop-shadow-[0_0_15px_rgba(251,191,36,0.5)]" />,
+            title: "Welcome Gift: 100 FCFA",
+            description: "Thanks for joining Katika! We've credited your account with 100 FCFA to get you started. Use it to play your first match and win real cash!",
+            bg: "from-amber-600/40 to-royal-900/40"
+        },
+        {
+            icon: <Gamepad2 size={40} className="text-blue-400" />,
             title: "Play Real Matches",
             description: "Compete against real people in Ludo, Chess, Checkers, and more. 100% fair play guaranteed by our AI Referee.",
             bg: "from-blue-900/40 to-royal-900/40"
@@ -29,8 +35,8 @@ export const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
         },
         {
             icon: <Users size={40} className="text-purple-400" />,
-            title: "100 FCFA Promo Bonus",
-            description: "Share your referral code! When a friend deposits, you earn a 100 FCFA Promo Bonus. Wager it in matches, and when you win, it becomes real withdrawable cash!",
+            title: "100 FCFA Referral Bonus",
+            description: "Share your referral code! When a friend deposits, you earn 100 FCFA. Wager it in matches, and when you win, it becomes real withdrawable cash!",
             bg: "from-purple-900/40 to-royal-900/40"
         }
     ];

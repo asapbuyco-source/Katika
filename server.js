@@ -56,6 +56,7 @@ const db = admin.apps.length > 0 ? admin.firestore() : null;
 
 
 const app = express();
+app.set('trust proxy', 1); // For accurate rate limiting behind Railway's proxy
 
 // Security Headers
 app.use(helmet());
@@ -2140,6 +2141,13 @@ io.on('connection', (socket) => {
                     io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
                 }
             }
+        }
+    });
+
+    // --- REAL-TIME POOL SYNC (Visual Only) ---
+    socket.on('aim_sync', (data) => {
+        if (data.roomId) {
+            socket.to(data.roomId).emit('aim_sync', data);
         }
     });
 

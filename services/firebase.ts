@@ -128,7 +128,7 @@ export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User>
             id: firebaseUser.uid,
             name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
             avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            balance: isAdmin ? 1000000 : 1000,
+            balance: isAdmin ? 1000000 : 100,
             elo: 1000,
             rankTier: 'Bronze',
             isAdmin: isAdmin,
