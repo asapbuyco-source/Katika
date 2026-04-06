@@ -752,12 +752,12 @@ export const PoolGame: React.FC<PoolGameProps> = ({table,user,onGameEnd,socket,s
     const c=ballsRef.current.find(b=>b.id===0&&!b.pocketed);
     if(c) setAngle(Math.atan2(pos.y-c.y,pos.x-c.x));
     if(bihRef.current){setGhost(pos);return;}
-    const pow=Math.min(100,Math.hypot(pos.x-dragStart.current.x,pos.y-dragStart.current.y)/1.3);
+    const pow=dragStart.current?Math.min(100,Math.hypot(pos.x-dragStart.current.x,pos.y-dragStart.current.y)/1.3):0;
     if(drag.current&&dragStart.current) setPower(pow);
 
     // Sync emission (throttled to ~20Hz)
     const now=Date.now();
-    if(isP2P && socket && now-lastSync.current > 50){
+    if(isP2P && socket && now-lastSync.current > 50 && c){
       socket.emit('aim_sync', { roomId, type:'aim_sync', angle: Math.atan2(pos.y-c.y,pos.x-c.x), power: drag.current?pow:0, ghost: bihRef.current?pos:null });
       lastSync.current=now;
     }
