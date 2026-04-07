@@ -331,15 +331,20 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (state.opponentDisconnected) return;
             setTimeRemaining(prev => {
                 if (turn === 'me') {
-                    if (prev.me <= 0) {
+                    if (prev.me <= 1) {
                         clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        // Let Server handle settlement via WebSocket
+                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
                         if (!isP2P) onGameEnd('loss');
-                        return prev;
+                        return { ...prev, me: 0 };
                     }
                     return { ...prev, me: Math.max(0, prev.me - 1) };
                 } else {
+                    if (prev.opponent <= 1) {
+                        clearInterval(interval);
+                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+                        if (!isP2P) onGameEnd('win');
+                        return { ...prev, opponent: 0 };
+                    }
                     return { ...prev, opponent: Math.max(0, prev.opponent - 1) };
                 }
             });
@@ -472,6 +477,11 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 roomId: socketGame.roomId,
                 action: {
                     type: 'MOVE',
+                    fromR: move.fromR,
+                    fromC: move.fromC,
+                    toR: move.r,
+                    toC: move.c,
+                    isJump: move.isJump,
                     newState: {
                         pieces: serverPieces,
                         turn: nextTurn === 'me' ? user.id : opponentId,

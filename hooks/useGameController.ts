@@ -31,7 +31,7 @@ export const useGameController = () => {
     const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
 
     // ── Matchmaking ───────────────────────────────────────────────────────────
-    const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string) => {
+    const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string, isTournament = false) => {
         if (!user) return;
         const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
         if (!validGames.includes(gameType)) { toast.info('This game is coming soon!'); return; }
@@ -62,15 +62,16 @@ export const useGameController = () => {
         }
 
         if (!socket) return;
-        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: { stake, gameType } });
+        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: { stake, gameType, isTournament } });
         dispatch({ type: 'SET_VIEW', payload: 'matchmaking' });
         socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
     }, [user, isConnected, bypassConnection, socket, dispatch, toast]);
 
     const cancelMatchmaking = useCallback(() => {
+        if (socket) socket.emit('leave_queue');
         dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
         dispatch({ type: 'SET_VIEW', payload: 'lobby' });
-    }, [dispatch]);
+    }, [dispatch, socket]);
 
     const handleAcceptChallenge = useCallback(async () => {
         if (!incomingChallenge || !user) return;
@@ -174,7 +175,7 @@ export const useGameController = () => {
 
     const handleTournamentMatchJoin = useCallback((gameType: string, tournamentMatchId: string) => {
         if (!user || !socket) return;
-        startMatchmaking(0, gameType, tournamentMatchId);
+        startMatchmaking(0, gameType, tournamentMatchId, undefined, true);
     }, [user, socket, startMatchmaking]);
 
     const setView = useCallback((view: ViewState) => dispatch({ type: 'SET_VIEW', payload: view }), [dispatch]);

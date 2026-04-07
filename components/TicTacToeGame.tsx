@@ -99,7 +99,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
             setTimeLeft((prev) => {
                 if (prev <= 1) {
                     clearInterval(timer);
-                    timeoutId = setTimeout(() => !isP2P && handleTimeout(), 0);
+                    timeoutId = setTimeout(() => handleTimeout(), 0);
                     return 0;
                 }
                 return prev - 1;

@@ -298,15 +298,20 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 const turnColor = displayGame.turn();
                 
                 if (turnColor === myColor) {
-                    if (prev[myColor] <= 0) {
+                    if (prev[myColor] <= 1) {
                         clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        // Let Server handle settlement via WebSocket
+                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
                         if (!isP2P) onGameEnd('loss');
-                        return prev;
+                        return { ...prev, [myColor]: 0 };
                     }
                     return { ...prev, [myColor]: Math.max(0, prev[myColor] - 1) };
                 } else {
+                    if (prev[turnColor] <= 1) {
+                        clearInterval(interval);
+                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+                        if (!isP2P) onGameEnd('win');
+                        return { ...prev, [turnColor]: 0 };
+                    }
                     return { ...prev, [turnColor]: Math.max(0, prev[turnColor] - 1) };
                 }
             });

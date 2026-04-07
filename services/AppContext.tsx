@@ -16,7 +16,7 @@ export interface AppState {
     user: User | null;
     currentView: ViewState;
     activeTable: Table | null;
-    matchmakingConfig: { stake: number; gameType: string } | null;
+    matchmakingConfig: { stake: number; gameType: string; isTournament?: boolean } | null;
     authLoading: boolean;
 
     // Game End
@@ -50,7 +50,7 @@ export type AppAction =
     | { type: 'SET_USER'; payload: User | null }
     | { type: 'SET_VIEW'; payload: ViewState }
     | { type: 'SET_ACTIVE_TABLE'; payload: Table | null }
-    | { type: 'SET_MATCHMAKING_CONFIG'; payload: { stake: number; gameType: string } | null }
+    | { type: 'SET_MATCHMAKING_CONFIG'; payload: { stake: number; gameType: string; isTournament?: boolean } | null }
     | { type: 'SET_AUTH_LOADING'; payload: boolean }
     | { type: 'SET_GAME_RESULT'; payload: AppState['gameResult'] }
     | { type: 'SET_REMATCH_STATUS'; payload: AppState['rematchStatus'] }

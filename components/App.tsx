@@ -450,7 +450,7 @@ const AppContent = () => {
                             {currentView === 'lobby' && user && <MV k="lobby">      <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
                             {currentView === 'matchmaking' && matchmakingConfig && user && (
                                 <MV k="matchmaking">
-                                    <MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} />
+                                    <MatchmakingScreen user={user} gameType={matchmakingConfig.gameType} stake={matchmakingConfig.stake} onMatchFound={handleMatchFound} onCancel={cancelMatchmaking} isSocketMode={matchmakingConfig.stake !== -1} isTournament={matchmakingConfig.isTournament} />
                                 </MV>
                             )}
                             {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} pendingTournamentId={preSelectedGame} onClearPendingTournament={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}

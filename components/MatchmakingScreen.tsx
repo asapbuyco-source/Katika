@@ -15,9 +15,10 @@ interface MatchmakingScreenProps {
   onMatchFound: (table: Table) => void;
   onCancel: () => void;
   isSocketMode?: boolean; // New prop to toggle behavior
+  isTournament?: boolean;
 }
 
-export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, gameType, stake, onMatchFound, onCancel, isSocketMode = false }) => {
+export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, gameType, stake, onMatchFound, onCancel, isSocketMode = false, isTournament = false }) => {
   const [status, setStatus] = useState<'connecting' | 'waiting' | 'found'>('connecting');
   const [gameId, setGameId] = useState<string | null>(null);
   const [opponent, setOpponent] = useState<PlayerProfile | null>(null);
@@ -196,7 +197,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         <div className="mt-16 w-full max-w-sm">
             {status !== 'found' && (
                 <>
-                    {isSocketMode ? (
+                    {/* ONLY SHOW ARENA RULES COUNTDOWN FOR TOURNAMENTS */}
+                    {isTournament ? (
                         <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
                             <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={18} />
                             <div className="space-y-1">

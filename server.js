@@ -1160,30 +1160,13 @@ const settleGame = async (roomId, winnerId) => {
                 });
             }
             if (loserDoc.exists) {
-                const loserData = loserDoc.data();
-                const promoBal = loserData.promoBalance || 0;
-                const realBal = loserData.balance || 0;
-
-                let remainingStake = room.stake;
-                let newPromo = promoBal;
-                if (newPromo >= remainingStake) {
-                    newPromo -= remainingStake;
-                    remainingStake = 0;
-                } else {
-                    remainingStake -= newPromo;
-                    newPromo = 0;
-                }
-                const newReal = Math.max(0, realBal - remainingStake);
-
-                const updates = { balance: newReal };
-                if (newPromo !== promoBal) updates.promoBalance = newPromo;
-
-                tx.update(loserRef, updates);
+                // Loser deduction is no longer needed here explicitly as they paid Escrow upfront.
+                // We just log the completion of the loss.
                 tx.set(loserRef.collection('transactions').doc(), {
                     type: 'stake_loss', amount: -room.stake, status: 'completed',
                     date: new Date().toISOString(),
                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    gameType: room.gameType
+                    note: `Settled loss for ${room.gameType}`
                 });
             }
             tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
@@ -1422,6 +1405,30 @@ const calculatePayouts = (stake) => {
     return { totalPot, platformFee, winnings };
 };
 
+const refundEscrow = async (userId, realDeducted, promoDeducted) => {
+    if (!db || (!realDeducted && !promoDeducted)) return;
+    try {
+        const userRef = db.collection('users').doc(userId);
+        await db.runTransaction(async tx => {
+            const snap = await tx.get(userRef);
+            if (!snap.exists) return;
+            const d = snap.data();
+            tx.update(userRef, {
+                balance: (d.balance || 0) + realDeducted,
+                promoBalance: (d.promoBalance || 0) + promoDeducted
+            });
+            tx.set(userRef.collection('transactions').doc(), {
+                type: 'escrow_refund', amount: realDeducted + promoDeducted, status: 'completed',
+                date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                note: `Refunded matchmaking entry fee`
+            });
+        });
+        console.log(`Refunded escrow to ${userId}: ${realDeducted} real, ${promoDeducted} promo`);
+    } catch (e) {
+        console.error(`Failed to refund escrow for ${userId}:`, e);
+    }
+};
+
 const endGame = (roomId, winnerId, reason) => {
     const room = rooms.get(roomId);
     if (!room || room.status === 'completed') return;
@@ -1432,7 +1439,16 @@ const endGame = (roomId, winnerId, reason) => {
     const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
 
     // Settle finances server-side (non-blocking)
-    if (winnerId && room.stake > 0) settleGame(roomId, winnerId);
+    if (winnerId && room.stake > 0) {
+        settleGame(roomId, winnerId);
+    } else if (!winnerId && room.stake > 0) {
+        // Draw: Refund escrows
+        const splits = room.escrowSplits || {};
+        room.players.forEach(pid => {
+            const split = splits[pid];
+            if (split) refundEscrow(pid, split.real, split.promo);
+        });
+    }
 
     io.to(roomId).emit('game_over', {
         roomId,
@@ -1599,7 +1615,7 @@ io.on('connection', (socket) => {
     // Will be set on join_game; tracked via Firestore in that handler.
 
     // 1. JOIN GAME (MATCHMAKING)
-    socket.on('join_game', ({ stake, userProfile, gameType, privateRoomId }) => {
+    socket.on('join_game', async ({ stake, userProfile, gameType, privateRoomId }) => {
         if (!userProfile?.id || !gameType || typeof stake !== 'number') {
             console.error('Invalid join_game payload');
             return;
@@ -1647,19 +1663,6 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
-        // --- ASYNC BALANCE VALIDATION ---
-        db.collection('users').doc(userId).get().then((userDoc) => {
-            if (!userDoc.exists) return;
-            const userData = userDoc.data();
-            const totalAvailable = (userData.balance || 0) + (userData.promoBalance || 0);
-            
-            if (stake > 0 && totalAvailable < stake) {
-                socket.emit('game_error', { message: 'Insufficient funds (Real + Promo) to join this match.' });
-                return;
-            }
-
-            console.log(`Matchmaking request: ${userProfile.name} for ${gameType} (${stake})`);
-
         // Check if reconnecting to active or recently-completed room
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId)) {
@@ -1691,6 +1694,56 @@ io.on('connection', (socket) => {
             }
         }
 
+        // --- UPFRONT ESCROW DEDUCTION ---
+        let realDeducted = 0;
+        let promoDeducted = 0;
+
+        if (stake > 0 && db) {
+            const userRef = db.collection('users').doc(userId);
+            try {
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(userRef);
+                    if (!snap.exists) throw new Error("User not found");
+                    const data = snap.data();
+                    const pb = data.promoBalance || 0;
+                    const rb = data.balance || 0;
+
+                    if (pb + rb < stake) {
+                        throw new Error('Insufficient funds (Real + Promo) to join this match.');
+                    }
+
+                    let remaining = stake;
+                    let newPb = pb;
+                    let newRb = rb;
+
+                    if (newPb >= remaining) {
+                        promoDeducted = remaining;
+                        newPb -= remaining;
+                        remaining = 0;
+                    } else {
+                        promoDeducted = newPb;
+                        remaining -= newPb;
+                        newPb = 0;
+                    }
+
+                    realDeducted = remaining;
+                    newRb -= remaining;
+
+                    tx.update(userRef, { balance: newRb, promoBalance: newPb });
+                    tx.set(userRef.collection('transactions').doc(), {
+                        type: 'escrow_lock', amount: -stake, status: 'completed',
+                        date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: `Matchmaking entry fee for ${gameType}`
+                    });
+                });
+            } catch (err) {
+                socket.emit('game_error', { message: err.message || 'Failed to process entry fee.' });
+                return;
+            }
+        }
+
+        console.log(`Matchmaking escrow locked: ${userProfile.name} for ${gameType} (${stake})`);
+
         // Public Matchmaking Queue vs Private Room Queue
         const queueKey = privateRoomId ? `private_${privateRoomId}` : `${gameType}_${stake}`;
         if (!queues.has(queueKey)) queues.set(queueKey, []);
@@ -1721,6 +1774,10 @@ io.on('connection', (socket) => {
                 privateRoomId: privateRoomId || undefined,
                 tournamentMatchId: privateRoomId?.startsWith('m-') ? privateRoomId : undefined,
                 players: [opponentId, userId], // Player 0 (Host), Player 1 (Joiner)
+                escrowSplits: {
+                    [userId]: { real: realDeducted, promo: promoDeducted },
+                    [opponentId]: { real: opponent.realDeducted || 0, promo: opponent.promoDeducted || 0 }
+                },
                 profiles: {
                     [opponentId]: opponent.userProfile,
                     [userId]: userProfile
@@ -1758,14 +1815,26 @@ io.on('connection', (socket) => {
 
         } else {
             // ADD TO QUEUE — include RTT bucket for latency-aware matchmaking
-            // latencyBucket is internal only; never displayed to the player
+            // Store realDeducted and promoDeducted for targeted refunds if they leave
             const rttMs = Date.now() - (socket.handshake.issued || Date.now());
             const latencyBucket = rttMs < 120 ? 'fast' : rttMs < 350 ? 'medium' : 'slow';
-            queue.push({ socketId: socket.id, userProfile, latencyBucket, queuedAt: Date.now() });
+            queue.push({ socketId: socket.id, userProfile, latencyBucket, queuedAt: Date.now(), realDeducted, promoDeducted });
             socket.emit('waiting_for_opponent');
             console.log(`Added to queue: ${queueKey} [latency=${latencyBucket}]`);
         }
-        }).catch(err => console.error("Balance validation error:", err));
+    });
+
+    // 1b. LEAVE QUEUE
+    socket.on('leave_queue', () => {
+        const userId = socketUsers.get(socket.id);
+        if (!userId) return;
+        queues.forEach((queue, key) => {
+            const idx = queue.findIndex(i => i.userProfile.id === userId);
+            if (idx > -1) {
+                const removed = queue.splice(idx, 1)[0];
+                refundEscrow(userId, removed.realDeducted, removed.promoDeducted);
+            }
+        });
     });
 
     // 2. REJOIN EXPLICIT
@@ -2433,10 +2502,13 @@ io.on('connection', (socket) => {
             userSockets.delete(userId);
             socketUsers.delete(socket.id);
 
-            // Remove from matchmaking queues
+            // Remove from matchmaking queues and refund escrow
             queues.forEach((queue, key) => {
                 const idx = queue.findIndex(i => i.userProfile.id === userId);
-                if (idx > -1) queue.splice(idx, 1);
+                if (idx > -1) {
+                    const removed = queue.splice(idx, 1)[0];
+                    refundEscrow(userId, removed.realDeducted, removed.promoDeducted);
+                }
             });
         }
     });
