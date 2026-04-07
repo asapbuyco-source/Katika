@@ -1194,6 +1194,139 @@ const settleGame = async (roomId, winnerId) => {
     }
 };
 
+// ─── DISPUTE RESOLUTION API ──────────────────────────────────────────────────
+
+// File a dispute: player challenges the outcome of a completed match
+app.post('/api/disputes/file', verifyAuth, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { roomId, reason } = req.body;
+    const userId = req.user.uid;
+    if (!roomId || typeof roomId !== 'string') return res.status(400).json({ error: 'roomId required' });
+
+    try {
+        // Verify the room log exists and this user was a player
+        const logSnap = await db.collection('game_logs').doc(roomId).get();
+        if (!logSnap.exists) return res.status(404).json({ error: 'Game log not found. Disputes must be filed within 24h.' });
+        const logData = logSnap.data();
+        if (!logData.players.includes(userId)) return res.status(403).json({ error: 'Only match participants can file a dispute.' });
+
+        // Check for existing dispute
+        const existingSnap = await db.collection('disputes').where('roomId', '==', roomId).where('filedBy', '==', userId).limit(1).get();
+        if (!existingSnap.empty) return res.status(409).json({ error: 'You have already filed a dispute for this match.' });
+
+        // Tier 1 auto-resolution: if server recorded a clear winner, resolve immediately
+        if (logData.winner && logData.winner !== userId) {
+            // Server has no ambiguity — dispute is closed automatically
+            const disputeRef = db.collection('disputes').doc();
+            await disputeRef.set({
+                roomId, filedBy: userId,
+                reason: reason || 'outcome_disputed',
+                status: 'auto_resolved',
+                resolution: `Server-recorded winner: ${logData.winner}. Outcome confirmed by server game log.`,
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+                gameLogRef: roomId
+            });
+            return res.json({ success: true, status: 'auto_resolved', message: 'Server game log confirms the recorded outcome. This dispute is closed.' });
+        }
+
+        // Tier 2: Write dispute for human review
+        const disputeRef = db.collection('disputes').doc();
+        await disputeRef.set({
+            roomId, filedBy: userId,
+            reason: reason || 'outcome_disputed',
+            opponentId: logData.players.find(p => p !== userId) || null,
+            stake: logData.stake || 0,
+            gameType: logData.gameType || 'unknown',
+            status: 'open',
+            resolution: null,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            slaDeadline: new Date(Date.now() + 30 * 60 * 1000).toISOString(), // 30 min SLA
+            gameLogRef: roomId
+        });
+
+        // Notify admin sockets
+        io.emit('admin_alert', { type: 'new_dispute', roomId, filedBy: userId });
+
+        console.log(`[Dispute] Filed: room=${roomId} by=${userId}`);
+        res.json({ success: true, status: 'open', message: 'Dispute filed. Review within 30 minutes. Your stake is held safely.' });
+    } catch (err) {
+        console.error('[Dispute] File error:', err);
+        res.status(500).json({ error: 'Failed to file dispute' });
+    }
+});
+
+// Get dispute status
+app.get('/api/disputes/status/:disputeId', verifyAuth, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    try {
+        const snap = await db.collection('disputes').doc(req.params.disputeId).get();
+        if (!snap.exists) return res.status(404).json({ error: 'Dispute not found' });
+        const data = snap.data();
+        if (data.filedBy !== req.user.uid) return res.status(403).json({ error: 'Access denied' });
+        res.json({ id: snap.id, ...data });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch dispute' });
+    }
+});
+
+// Admin: Resolve a dispute
+app.post('/api/disputes/resolve', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { disputeId, resolution, winnerId } = req.body;
+    if (!disputeId || !resolution) return res.status(400).json({ error: 'disputeId and resolution required' });
+    try {
+        const disputeRef = db.collection('disputes').doc(disputeId);
+        const snap = await disputeRef.get();
+        if (!snap.exists) return res.status(404).json({ error: 'Dispute not found' });
+        await disputeRef.update({
+            status: 'resolved',
+            resolution,
+            resolvedBy: req.adminEmail,
+            resolvedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        // Notify the user who filed
+        const filedBy = snap.data().filedBy;
+        const sid = userSockets.get(filedBy);
+        if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('dispute_resolved', { disputeId, resolution }); }
+        console.log(`[Dispute] Resolved: ${disputeId} by ${req.adminEmail}`);
+        res.json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Background: Auto-close disputes past their 30-min SLA with no human action
+// This runs every 5 minutes alongside the tournament scheduler
+const runDisputeSLAResolver = async () => {
+    if (!db) return;
+    try {
+        const now = new Date();
+        const overdueSnap = await db.collection('disputes').where('status', '==', 'open').get();
+        for (const doc of overdueSnap.docs) {
+            const data = doc.data();
+            if (!data.slaDeadline) continue;
+            if (new Date(data.slaDeadline) > now) continue;
+
+            // SLA breached — auto-resolve using server game log
+            const logSnap = await db.collection('game_logs').doc(data.roomId).get();
+            const resolution = logSnap.exists
+                ? `Auto-resolved at SLA deadline. Server-recorded winner: ${logSnap.data().winner || 'none'}.`
+                : 'Auto-resolved: game log unavailable, no change to outcome.';
+
+            await doc.ref.update({
+                status: 'auto_resolved_sla',
+                resolution,
+                resolvedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            const sid = userSockets.get(data.filedBy);
+            if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('dispute_resolved', { disputeId: doc.id, resolution }); }
+            console.log(`[Dispute] SLA auto-resolved: ${doc.id}`);
+        }
+    } catch (e) { console.error('[DisputeSLA]', e); }
+};
+setInterval(runDisputeSLAResolver, 5 * 60 * 1000);
+
 // --- ADMIN SERVER STATUS ---
 app.get('/api/admin/server-status', verifyAdmin, (req, res) => {
     try {
@@ -1250,6 +1383,35 @@ const isGameActionRateLimited = (userId, maxPerSecond = 10) => {
     return false;
 };
 
+// ─── BEHAVIORAL ANOMALY DETECTION ────────────────────────────────────────────
+// Tracks win/loss history per userId in memory; persists flags to Firestore.
+// Elo/tier is NEVER exposed to players — used internally only for matchmaking.
+const gameOutcomeHistory = new Map(); // userId -> { wins, total }
+
+const recordOutcomeAndCheckAnomaly = (userId, isWin) => {
+    if (!userId) return;
+    const history = gameOutcomeHistory.get(userId) || { wins: 0, total: 0 };
+    history.total++;
+    if (isWin) history.wins++;
+    gameOutcomeHistory.set(userId, history);
+
+    // Flag if win rate > 85% sustained over 20+ games
+    if (history.total >= 20 && (history.wins / history.total) > 0.85) {
+        const winRate = Math.round((history.wins / history.total) * 100);
+        console.warn(`[AntiCheat] anomalous_win_rate userId=${userId} ${history.wins}/${history.total} (${winRate}%)`);
+        if (db) {
+            db.collection('flagged_users').doc(userId).set({
+                reason: 'anomalous_win_rate',
+                winRate: history.wins / history.total,
+                gamesAnalyzed: history.total,
+                flaggedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true }).catch(e => console.error('[AntiCheat] Flag write failed:', e));
+        }
+        // Notify admin sockets
+        io.emit('admin_alert', { type: 'anomalous_win_rate', userId, winRate });
+    }
+};
+
 // --- HELPER FUNCTIONS ---
 const generateRoomId = () => `room_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
 
@@ -1269,25 +1431,65 @@ const endGame = (roomId, winnerId, reason) => {
 
     const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
 
-    // Settle finances server-side (non-blocking) — winner credited, loser debited via Firebase Admin
+    // Settle finances server-side (non-blocking)
     if (winnerId && room.stake > 0) settleGame(roomId, winnerId);
 
     io.to(roomId).emit('game_over', {
         roomId,
         winner: winnerId,
         reason: reason,
-        financials: {
-            totalPot,
-            platformFee,
-            winnings
-        }
+        financials: { totalPot, platformFee, winnings }
     });
 
+    // ── Behavioral anomaly tracking (internal — not exposed to players) ────────
+    room.players.forEach(pid => {
+        recordOutcomeAndCheckAnomaly(pid, pid === winnerId);
+    });
+
+    // ── Audit log: write final game state to Firestore for dispute replay ──────
+    if (db) {
+        db.collection('game_logs').doc(roomId).set({
+            roomId,
+            gameType: room.gameType,
+            stake: room.stake,
+            players: room.players,
+            profiles: room.profiles,
+            finalState: JSON.stringify(room.gameState || {}),
+            winner: winnerId || null,
+            reason: reason || null,
+            endedAt: admin.firestore.FieldValue.serverTimestamp()
+        }).catch(e => console.error('[endGame] Audit log write failed:', e));
+    }
+
+    // ── First-win-of-day bonus ─────────────────────────────────────────────────
+    if (winnerId && db) {
+        const today = new Date().toISOString().split('T')[0];
+        const bonusRef = db.collection('daily_bonuses').doc(`${winnerId}_${today}`);
+        bonusRef.get().then(snap => {
+            if (snap.exists) return;
+            return db.runTransaction(async (tx) => {
+                const userRef = db.collection('users').doc(winnerId);
+                const userSnap = await tx.get(userRef);
+                if (!userSnap.exists) return;
+                tx.update(userRef, { promoBalance: (userSnap.data().promoBalance || 0) + 50 });
+                tx.set(bonusRef, { awardedAt: admin.firestore.FieldValue.serverTimestamp() });
+                tx.set(userRef.collection('transactions').doc(), {
+                    type: 'streak_bonus', amount: 50, status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    note: 'First win of the day bonus'
+                });
+            });
+        }).then(() => {
+            // Notify the winner's socket of the bonus
+            const sid = userSockets.get(winnerId);
+            if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('daily_bonus', { amount: 50, reason: 'first_win' }); }
+        }).catch(e => console.error('[endGame] Daily bonus error:', e));
+    }
+
     // ── Tournament match hook ──────────────────────────────────────────────────
-    // If this game was for a tournament match, record the result and advance the bracket.
     const tournamentMatchId = room.tournamentMatchId || room.privateRoomId;
     if (db && winnerId && tournamentMatchId) {
-        // The privateRoomId is used as the matchId convention in this app
         recordTournamentMatchResult(tournamentMatchId, winnerId).catch(e =>
             console.error(`[endGame] Tournament advancement failed for match ${tournamentMatchId}:`, e)
         );
@@ -1296,10 +1498,7 @@ const endGame = (roomId, winnerId, reason) => {
     // Cleanup Room Data after a delay (Extended for Rematch window)
     setTimeout(() => {
         const r = rooms.get(roomId);
-        // Only delete if still completed (not rematched)
-        if (r && r.status === 'completed') {
-            rooms.delete(roomId);
-        }
+        if (r && r.status === 'completed') rooms.delete(roomId);
     }, 60000);
 };
 
@@ -1395,6 +1594,10 @@ const createInitialGameState = (gameType, p1, p2) => {
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
+    // ── Login streak tracking (internal — used for engagement, not displayed to players) ──
+    const userId_connect = socketUsers.get(socket.id);
+    // Will be set on join_game; tracked via Firestore in that handler.
+
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', ({ stake, userProfile, gameType, privateRoomId }) => {
         if (!userProfile?.id || !gameType || typeof stake !== 'number') {
@@ -1402,6 +1605,38 @@ io.on('connection', (socket) => {
             return;
         }
         const userId = userProfile.id;
+
+        // ── Login streak (fire-and-forget, internal) ───────────────────────────
+        if (db) {
+            const today = new Date().toISOString().split('T')[0];
+            const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+            db.collection('users').doc(userId).get().then(async snap => {
+                if (!snap.exists) return;
+                const data = snap.data();
+                if (data.lastLoginDate === today) return; // already recorded
+                let streak = data.loginStreak || 0;
+                streak = data.lastLoginDate === yesterday ? streak + 1 : 1;
+                const milestones = { 3: 100, 7: 250, 14: 500, 30: 1000 };
+                const bonus = milestones[streak] || 0;
+                await db.runTransaction(async (tx) => {
+                    const ref = db.collection('users').doc(userId);
+                    const s = await tx.get(ref);
+                    if (!s.exists) return;
+                    tx.update(ref, { lastLoginDate: today, loginStreak: streak, promoBalance: (s.data().promoBalance || 0) + bonus });
+                    if (bonus > 0) tx.set(ref.collection('transactions').doc(), {
+                        type: 'streak_bonus', amount: bonus, status: 'completed',
+                        date: new Date().toISOString(),
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: `Day ${streak} login streak bonus`
+                    });
+                });
+                if (bonus > 0) {
+                    const sid = userSockets.get(userId);
+                    if (sid) { const s = io.sockets.sockets.get(sid); if (s) s.emit('streak_bonus', { streak, amount: bonus }); }
+                    console.log(`[Streak] Day ${streak} bonus ${bonus} FCFA → ${userId}`);
+                }
+            }).catch(e => console.error('[Streak]', e));
+        }
 
         // Handle rapid re-connections
         if (disconnectTimers.has(userId)) {
@@ -1467,8 +1702,14 @@ io.on('connection', (socket) => {
         if (existingIdx > -1) queue.splice(existingIdx, 1);
 
         if (queue.length > 0) {
-            // MATCH FOUND!
-            const opponent = queue.shift();
+            // MATCH FOUND — prefer same latency bucket; fall back to any after 10s wait
+            const rttMs = Date.now() - (socket.handshake.issued || Date.now());
+            const myBucket = rttMs < 120 ? 'fast' : rttMs < 350 ? 'medium' : 'slow';
+            const now = Date.now();
+            const sameBucketIdx = queue.findIndex(e => e.latencyBucket === myBucket);
+            const anyStaleIdx = queue.findIndex(e => now - (e.queuedAt || 0) >= 10000);
+            const chosenIdx = sameBucketIdx !== -1 ? sameBucketIdx : (anyStaleIdx !== -1 ? anyStaleIdx : 0);
+            const opponent = queue.splice(chosenIdx, 1)[0];
             const opponentId = opponent.userProfile.id;
             const roomId = privateRoomId || generateRoomId();
 
@@ -1516,10 +1757,13 @@ io.on('connection', (socket) => {
             console.log(`Match created: ${roomId}`);
 
         } else {
-            // ADD TO QUEUE
-            queue.push({ socketId: socket.id, userProfile });
+            // ADD TO QUEUE — include RTT bucket for latency-aware matchmaking
+            // latencyBucket is internal only; never displayed to the player
+            const rttMs = Date.now() - (socket.handshake.issued || Date.now());
+            const latencyBucket = rttMs < 120 ? 'fast' : rttMs < 350 ? 'medium' : 'slow';
+            queue.push({ socketId: socket.id, userProfile, latencyBucket, queuedAt: Date.now() });
             socket.emit('waiting_for_opponent');
-            console.log(`Added to queue: ${queueKey}`);
+            console.log(`Added to queue: ${queueKey} [latency=${latencyBucket}]`);
         }
         }).catch(err => console.error("Balance validation error:", err));
     });

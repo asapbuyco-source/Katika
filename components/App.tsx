@@ -194,6 +194,7 @@ const AppContent = () => {
     const { state, dispatch, viewRef, lastForumMsgId } = useAppState();
     const { socket, isConnected, hasConnectedOnce, socketGame, bypassConnection, setBypassConnection } = useSocket();
     const { theme } = useTheme();
+    const toast = useToast();
 
     const { user, currentView, matchmakingConfig, authLoading, gameResult, rematchStatus, opponentDisconnected, opponentTimeout, preSelectedGame, incomingChallenge, unreadForum } = state;
 
@@ -244,7 +245,6 @@ const AppContent = () => {
         }
     }, [theme]);
 
-    // ── Scroll to top on view change ─────────────────────────────────────────
     useEffect(() => {
         if (currentView === 'forum') dispatch({ type: 'SET_UNREAD_FORUM', payload: false });
         const container = document.getElementById('main-scroll-container');
@@ -252,6 +252,35 @@ const AppContent = () => {
             container ? container.scrollTo({ top: 0, behavior: 'instant' }) : window.scrollTo(0, 0);
         }, 50);
     }, [currentView, dispatch]);
+
+    // ── Global socket listeners (bonuses, etc.) ──────────────────────────────
+    useEffect(() => {
+        if (!socket) return;
+        
+        const handleDailyBonus = (data: { amount: number; message?: string }) => {
+            playSFX('win');
+            toast.success(`🎁 Daily First Win Bonus: +${data.amount} FCFA!`);
+            if (user) {
+                dispatch({ type: 'UPDATE_USER', payload: { balance: user.balance + data.amount } });
+            }
+        };
+
+        const handleStreakBonus = (data: { streak: number; amount: number }) => {
+            playSFX('notification');
+            toast.success(`🔥 Login Streak x${data.streak}! +${data.amount} FCFA unlocked!`);
+            if (user) {
+                dispatch({ type: 'UPDATE_USER', payload: { balance: user.balance + data.amount } });
+            }
+        };
+
+        socket.on('daily_bonus', handleDailyBonus);
+        socket.on('streak_bonus', handleStreakBonus);
+
+        return () => {
+            socket.off('daily_bonus', handleDailyBonus);
+            socket.off('streak_bonus', handleStreakBonus);
+        };
+    }, [socket, user, dispatch, toast]);
 
     // ─── EFFECTS ────────────────────────────────────────────────────────────────
     // Escape key handler removed (Bug M1 fix): it was clearing

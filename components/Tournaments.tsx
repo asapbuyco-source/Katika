@@ -5,6 +5,7 @@ import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, Refresh
 import { User, Tournament, TournamentMatch } from '../types';
 import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn, fetchServerTimeOffset, getServerTime } from '../services/firebase';
 import { playSFX } from '../services/sound';
+import { useLanguage } from '../services/i18n';
 
 interface TournamentsProps {
     user: User;
@@ -15,6 +16,7 @@ interface TournamentsProps {
 }
 
 export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, socket, pendingTournamentId, onClearPendingTournament }) => {
+    const { t } = useLanguage();
     const [activeTab, setActiveTab] = useState<'list' | 'detail'>('list');
     const [tournaments, setTournaments] = useState<Tournament[]>([]);
     const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -482,9 +484,16 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                             const isRegistered = t.participants.includes(user.id);
                             const isFull = t.participants.length >= t.maxPlayers;
                             const isFixed = t.type === 'fixed';
-
-                            // prizePool is the live running total (already net of 10% platform fee)
                             const currentPool = t.prizePool || 0;
+
+                            // Tier badge: based on entry fee, NOT player rank
+                            const getTier = (fee: number) => {
+                                if (fee === 0) return { label: t('tier_bronze'), cls: 'text-amber-500 bg-amber-500/10 border-amber-500/30' };
+                                if (fee <= 2000) return { label: t('tier_silver'), cls: 'text-slate-300 bg-slate-300/10 border-slate-500/30' };
+                                if (fee <= 20000) return { label: t('tier_gold'), cls: 'text-yellow-400 bg-yellow-400/10 border-yellow-500/30' };
+                                return { label: t('tier_cup'), cls: 'text-purple-400 bg-purple-400/10 border-purple-500/30' };
+                            };
+                            const tier = getTier(t.entryFee);
 
                             return (
                                 <motion.div
@@ -499,7 +508,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         <div className="p-3 bg-white/5 rounded-xl border border-white/10 text-gold-400">
                                             <Trophy size={24} />
                                         </div>
-                                        <div className="flex gap-2">
+                                        <div className="flex gap-2 flex-wrap justify-end">
+                                            {/* Tier badge: tournament entry tier, not player rank */}
+                                            <span className={`px-2 py-1 rounded-full text-[10px] font-bold border ${tier.cls}`}>
+                                                {tier.label}
+                                            </span>
                                             {isFixed ? (
                                                 <div className="px-2 py-1 bg-purple-500/20 text-purple-300 text-[10px] font-bold rounded-full border border-purple-500/30 flex items-center gap-1">
                                                     <Crown size={10} /> Fixed

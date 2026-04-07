@@ -90,6 +90,16 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         return () => { socket.off('payment_confirmed', handlePaymentConfirmed); };
     }, [socket, user.id, onTopUp]);
 
+    // Auto-detect MTN vs Orange from phone prefix (Cameroon prefixes)
+    // MTN: 650-659, 670-679, 680-689 → starts with 65x or 67x or 68x
+    // Orange: 690-699 → starts with 69x
+    const detectCarrier = (phone: string): 'mtn' | 'orange' | null => {
+        const cleaned = phone.replace(/\s/g, '');
+        if (/^6[578]/.test(cleaned)) return 'mtn';
+        if (/^69/.test(cleaned)) return 'orange';
+        return null;
+    };
+
     const handleDeposit = async () => {
         if (!amount) return;
         const depositAmount = parseInt(amount);
@@ -411,10 +421,22 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                                     className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-4 text-white font-mono font-bold text-xl focus:border-gold-500 transition-colors"
                                                     placeholder="500"
                                                 />
-                                                <div className="flex gap-2 mt-2">
-                                                    {[500, 1000, 5000, 10000].map(amt => (
-                                                        <button key={amt} onClick={() => setAmount(amt.toString())} className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-mono text-slate-400 transition-colors">
-                                                            {amt}
+                                                <div className="flex gap-2 mt-2 flex-wrap">
+                                                    {[
+                                                        { amt: 100, label: t('starter') },
+                                                        { amt: 500, label: t('popular') },
+                                                        { amt: 1000, label: t('best_value'), highlight: true },
+                                                        { amt: 2000, label: '' },
+                                                        { amt: 5000, label: '' },
+                                                    ].map(({ amt, label, highlight }) => (
+                                                        <button key={amt} onClick={() => setAmount(amt.toString())}
+                                                            className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-colors flex flex-col items-center gap-0.5 ${
+                                                                highlight
+                                                                    ? 'bg-gold-500/20 hover:bg-gold-500/30 text-gold-400 border border-gold-500/30'
+                                                                    : 'bg-white/5 hover:bg-white/10 text-slate-400'
+                                                            }`}>
+                                                            <span className="font-bold">{amt.toLocaleString()}</span>
+                                                            {label && <span className="text-[9px] uppercase tracking-wider opacity-70">{label}</span>}
                                                         </button>
                                                     ))}
                                                 </div>
@@ -455,7 +477,9 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                             <h3 className="text-xl font-bold text-white mb-2">{t('payment_initiated')}</h3>
                                             <p className="text-slate-400 text-sm mb-6 max-w-xs mx-auto">
                                                 Please verify the transaction on your phone. <br />
-                                                <span className="text-xs text-slate-500">(Use code *126# for MTN or #150# for Orange if prompt doesn't appear)</span>
+                                                <span className="text-xs text-yellow-400 font-bold">
+                                                    {provider === 'mtn' ? t('ussd_hint_mtn') : t('ussd_hint_orange')}
+                                                </span>
                                             </p>
 
                                             <div className="flex flex-col gap-3">
@@ -519,7 +543,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex gap-3 items-start">
                                         <Info className="text-yellow-500 shrink-0 mt-0.5" size={16} />
                                         <p className="text-xs text-yellow-200/80 leading-relaxed">
-                                            Withdrawals are processed instantly but may take up to 30 mins during network congestion. Ensure your number matches your account verification.
+                                            {t('withdrawal_info')}. Ensure your number matches your Mobile Money account.
                                         </p>
                                     </div>
 

@@ -140,6 +140,34 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ─── GAME AUDIT LOGS (for dispute replay) ────────────────────────────────
+    // Players can read their own game logs to file disputes.
+    // Only the server Admin SDK can write these.
+    match /game_logs/{roomId} {
+      allow read: if isAuth() && request.auth.uid in resource.data.players;
+      allow write: if false; // Server Admin SDK only
+    }
+
+    // ─── DISPUTES ────────────────────────────────────────────────────────────
+    // Players can file disputes (create) and read their own dispute status.
+    // Only the server resolves disputes (no client updates).
+    match /disputes/{disputeId} {
+      allow create: if isFullAccount();
+      allow read: if isAuth() && request.auth.uid == resource.data.filedBy;
+      allow update, delete: if false; // Server Admin SDK only
+    }
+
+    // ─── DAILY BONUSES — SERVER ADMIN SDK ONLY ───────────────────────────────
+    match /daily_bonuses/{bonusId} {
+      allow read, write: if false;
+    }
+
+    // ─── FLAGGED USERS — SERVER ADMIN SDK ONLY ───────────────────────────────
+    // Anti-cheat anomaly flags — never readable by clients
+    match /flagged_users/{userId} {
+      allow read, write: if false;
+    }
+
     // ─── DENY EVERYTHING ELSE ────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

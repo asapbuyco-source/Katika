@@ -111,6 +111,32 @@ const translations = {
     transaction_type: "Transaction Type",
     date_time: "Date & Time",
     status: "Status",
+    // Dispute strings
+    file_dispute: "Dispute this result",
+    dispute_filed: "Dispute submitted. Review within 30 min.",
+    dispute_resolved: "Your dispute has been resolved.",
+    // Engagement / bonuses
+    daily_bonus: "🎉 First Win Bonus!",
+    daily_bonus_msg: "+50 FCFA promo added to your account",
+    streak_bonus: "🔥 Login Streak Bonus!",
+    streak_day: "Day {n} streak — keep it up!",
+    // Finance extras
+    ussd_hint_mtn: "Dial *126# on your phone to confirm",
+    ussd_hint_orange: "Dial #150# on your phone to confirm",
+    withdrawal_info: "Withdrawals processed within 30 minutes",
+    payment_verifying: "Verifying payment with network...",
+    insufficient_balance: "Insufficient balance",
+    starter: "Starter",
+    popular: "Popular",
+    best_value: "Best Value",
+    // Share
+    share_win: "Share Win",
+    share_text: "I just won {amount} FCFA on Vantage Gaming! 🏆",
+    // Tournament tiers
+    tier_bronze: "🥉 Bronze",
+    tier_silver: "🥈 Silver",
+    tier_gold: "🥇 Gold",
+    tier_cup: "🏆 Vantage Cup",
   },
   fr: {
     // General
@@ -219,6 +245,32 @@ const translations = {
     transaction_type: "Type Transaction",
     date_time: "Date & Heure",
     status: "Statut",
+    // Dispute strings
+    file_dispute: "Contester ce résultat",
+    dispute_filed: "Litige soumis. Révision sous 30 min.",
+    dispute_resolved: "Votre litige a été résolu.",
+    // Engagement / bonuses
+    daily_bonus: "🎉 Bonus Première Victoire !",
+    daily_bonus_msg: "+50 FCFA promo ajoutés à votre compte",
+    streak_bonus: "🔥 Bonus Connexion Consécutive !",
+    streak_day: "Jour {n} de suite — continuez !",
+    // Finance extras
+    ussd_hint_mtn: "Composez *126# pour confirmer sur MTN",
+    ussd_hint_orange: "Composez #150# pour confirmer sur Orange",
+    withdrawal_info: "Retraits traités en 30 minutes",
+    payment_verifying: "Vérification du paiement en cours...",
+    insufficient_balance: "Solde insuffisant",
+    starter: "Découverte",
+    popular: "Populaire",
+    best_value: "Meilleur Prix",
+    // Share
+    share_win: "Partager",
+    share_text: "Je viens de gagner {amount} FCFA sur Vantage Gaming ! 🏆",
+    // Tournament tiers
+    tier_bronze: "🥉 Bronze",
+    tier_silver: "🥈 Argent",
+    tier_gold: "🥇 Or",
+    tier_cup: "🏆 Vantage Cup",
   }
 };
 

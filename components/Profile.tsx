@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
@@ -188,7 +188,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       const lang = e.target.value as 'en' | 'fr';
       setLanguage(lang);
       playSFX('click');
-      showToast(`Language changed to ${lang === 'en' ? 'English' : 'Français'}`);
+      showToast(`Language changed to ${lang === 'en' ? 'English' : 'FranÃ§ais'}`);
   };
 
   // --- ACCOUNT HANDLERS ---
@@ -358,11 +358,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                    {user.name}
                                    <Shield size={18} className="text-blue-400" fill="currentColor" fillOpacity={0.2} />
                                </h1>
-                               <div className="flex items-center justify-center md:justify-start gap-3 text-sm">
-                                   <span className={`px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider ${getRankColor(user.rankTier)}`}>
-                                       {user.rankTier} Tier
-                                   </span>
-                                   <span className="text-slate-400 font-mono flex items-center gap-1">
+                               <div className="flex items-center justify-center md:justify-start gap-3 text-sm">                                   <span className="text-slate-400 font-mono flex items-center gap-1">
                                        ID: <span className="text-slate-200">{user.id.substring(0, 12)}...</span>
                                    </span>
                                </div>
@@ -471,7 +467,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                               {[
                                   { label: t('total_games'), value: stats.totalGames.toString(), icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
                                   { label: t('win_rate'), value: `${stats.winRate}%`, icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
-                                  { label: t('current_streak'), value: `${stats.streak} 🔥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
+                                  { label: t('current_streak'), value: `${stats.streak} ðŸ”¥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
                                   { label: t('total_earnings'), value: formatEarnings(stats.totalEarnings), icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
                               ].map((stat, idx) => (
                                   <div key={idx} className={`glass-panel p-4 rounded-2xl border ${stat.border} hover:bg-white/5 transition-colors`}>
@@ -554,6 +550,18 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                   {user.id.substring(0, 8).toUpperCase()}
                               </div>
                               <p className="text-xs text-slate-500">{t('share_earn')} <span className="text-white font-bold">100 FCFA Promo Bonus</span> {t('per_friend')}</p>
+                              <button
+                                  onClick={() => {
+                                      const code = user.id.substring(0, 8).toUpperCase();
+                                      const text = `🎮 Join Vantage Gaming! Use code ${code} for 100 FCFA FREE bonus. vantage.gg`;
+                                      if (navigator.share) { navigator.share({ title: 'Vantage Gaming', text, url: window.location.origin }).catch(() => {}); }
+                                      else { window.open('https://wa.me/?text=' + encodeURIComponent(text), '_blank', 'noopener'); }
+                                      playSFX('click');
+                                  }}
+                                  className="w-full mt-3 py-2.5 bg-green-500/10 hover:bg-green-500/20 border border-green-500/30 text-green-400 font-bold rounded-xl text-sm transition-colors flex items-center justify-center gap-2"
+                              >
+                                  📤 Share via WhatsApp
+                              </button>
                           </div>
                       </motion.div>
                    </>
@@ -733,7 +741,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                           className="bg-royal-950 text-xs font-bold text-white border border-white/10 rounded-lg px-3 py-2 outline-none focus:border-gold-500 transition-colors"
                                        >
                                            <option value="en">English</option>
-                                           <option value="fr">Français</option>
+                                           <option value="fr">FranÃ§ais</option>
                                        </select>
                                    </div>
 
@@ -826,5 +834,6 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
     </div>
   );
 };
+
 
 

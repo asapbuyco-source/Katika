@@ -249,6 +249,28 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                             >
                                 {isTournament ? 'Return to Bracket' : result === 'win' ? 'Claim Winnings' : 'Return to Lobby'} <ArrowRight size={20} />
                             </button>
+
+                            {/* Share Win Button */}
+                            {result === 'win' && !isTournament && (
+                                <button
+                                    onClick={() => {
+                                         const shareMessage = `I just won ${displayAmount.toLocaleString()} FCFA playing on Vantage Gaming!\n\nJoin me for a FREE signup bonus! 🎮\n👉 vantage.gg`;
+                                         if (navigator.share) {
+                                             navigator.share({
+                                                 title: 'Vantage Gaming — I Won!',
+                                                 text: shareMessage,
+                                                 url: window.location.origin
+                                             }).catch(() => {});
+                                         } else {
+                                             window.open(`https://wa.me/?text=${encodeURIComponent(shareMessage)}`, '_blank', 'noopener');
+                                         }
+                                         import('../services/sound').then(m => m.playSFX('click'));
+                                    }}
+                                    className="w-full py-3 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 rounded-xl font-bold flex items-center justify-center gap-2 transition-all mt-3"
+                                >
+                                    📤 Share Win on WhatsApp
+                                </button>
+                            )}
                         </div>
                     </div>
                 </div>
