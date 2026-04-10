@@ -249,8 +249,6 @@ app.post('/api/pay/initiate', verifyAuth, blockGuests, async (req, res) => {
 
 // --- FAPSHI WEBHOOK (server-side deposit confirmation) ---
 // Fapshi POST-es this endpoint when a payment status changes.
-// We credit the balance here using Firebase Admin so the deposit is processed
-// even when the user's browser tab is closed.
 app.post('/api/pay/webhook', async (req, res) => {
     // Immediately acknowledge so Fapshi doesn't retry
     res.status(200).json({ received: true });
@@ -259,38 +257,50 @@ app.post('/api/pay/webhook', async (req, res) => {
         const { transId, status } = req.body || {};
         if (!transId || status !== 'SUCCESSFUL') return;
 
-        // Look up pending deposit (in-memory first, then verify with Fapshi)
-        let userId, depositAmount;
-        const pending = pendingDeposits.get(transId);
-        if (pending) {
-            userId = pending.userId;
-            depositAmount = pending.depositAmount;
-        } else {
-            // FIX C5: Try Firestore persistent pending_payments first (survives server restarts)
-            if (db) {
+        // FIX: Webhook MUST ALWAYS verify with the Fapshi API directly to prevent spoofing.
+        // Even if we know the pending deposit locally, we cannot trust req.body.status without verification.
+        const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+            headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
+        });
+        
+        if (!verifyRes.ok) {
+            console.error(`[Webhook Security] Fapshi returned ${verifyRes.status} for transId ${transId}`);
+            return;
+        }
+
+        const verifyData = await verifyRes.json();
+        
+        // Final ultimate source of truth check
+        if (verifyData.status !== 'SUCCESSFUL') {
+            console.warn(`[Webhook Security] Rejecting transId ${transId} - Verify API returned ${verifyData.status}`);
+            return;
+        }
+
+        let userId = verifyData.userId || verifyData.externalId;
+        let depositAmount = verifyData.amount;
+
+        // If Fapshi's status object doesn't include the userId, fallback to our internal pending records
+        // This is safe because we already cryptographically proved status === 'SUCCESSFUL' above
+        if (!userId) {
+            const pending = pendingDeposits.get(transId);
+            if (pending) {
+                userId = pending.userId;
+                depositAmount = pending.depositAmount;
+            } else if (db) {
                 const pendingDoc = await db.collection('pending_payments').doc(transId).get();
                 if (pendingDoc.exists()) {
                     const pData = pendingDoc.data();
                     userId = pData.userId;
                     depositAmount = pData.depositAmount;
-                    console.log(`[Webhook] Recovered pending deposit from Firestore: transId=${transId}`);
                 }
-            }
-            // If still not found, fall back to Fapshi verification API
-            if (!userId) {
-                const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
-                    headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
-                });
-                if (!verifyRes.ok) {
-                    console.error(`[Webhook] Could not verify transId ${transId}`);
-                    return;
-                }
-                const verifyData = await verifyRes.json();
-                if (verifyData.status !== 'SUCCESSFUL') return;
-                userId = verifyData.userId || verifyData.externalId;
-                depositAmount = verifyData.amount;
             }
         }
+
+        if (!userId) {
+            console.error(`[Webhook] Could not resolve userId for verified transId ${transId}`);
+            return;
+        }
+
 
         if (!userId || !depositAmount) {
             console.error(`[Webhook] Missing userId or amount for transId=${transId}`);
@@ -530,13 +540,17 @@ app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) 
 
             // Update tournament
             if (tData.type === 'fixed') {
-                transaction.update(tRef, { participants: admin.firestore.FieldValue.arrayUnion(userId) });
+                transaction.update(tRef, { 
+                    participants: admin.firestore.FieldValue.arrayUnion(userId),
+                    [`participantSplits.${userId}`]: { real: realDeducted, promo: promoDeducted }
+                });
             } else {
                 const platformFee = Math.floor(tData.entryFee * 0.10);
                 const netContribution = tData.entryFee - platformFee;
                 transaction.update(tRef, {
                     participants: admin.firestore.FieldValue.arrayUnion(userId),
-                    prizePool: (tData.prizePool || 0) + netContribution
+                    prizePool: (tData.prizePool || 0) + netContribution,
+                    [`participantSplits.${userId}`]: { real: realDeducted, promo: promoDeducted }
                 });
             }
             return true;
@@ -1082,6 +1096,7 @@ app.post('/api/tournaments/cancel', verifyAdmin, async (req, res) => {
 
         const entryFee = tData.entryFee || 0;
         const participants = tData.participants || [];
+        const splits = tData.participantSplits || {};
 
         if (entryFee > 0 && participants.length > 0) {
             // Batch refund all entry fees (Firestore batch max is 500 ops)
@@ -1093,14 +1108,21 @@ app.post('/api/tournaments/cancel', verifyAdmin, async (req, res) => {
                     const userRef = db.collection('users').doc(uid);
                     const userSnap = await userRef.get();
                     if (userSnap.exists) {
-                        batch.update(userRef, { balance: (userSnap.data().balance || 0) + entryFee });
+                        // FIX: Refund using the exact split they paid, preventing real balance inflation
+                        const split = splits[uid] || { real: entryFee, promo: 0 };
+                        
+                        batch.update(userRef, { 
+                            balance: (userSnap.data().balance || 0) + split.real,
+                            promoBalance: (userSnap.data().promoBalance || 0) + split.promo
+                        });
+                        
                         batch.set(userRef.collection('transactions').doc(), {
                             type: 'tournament_refund',
                             amount: entryFee,
                             status: 'completed',
                             date: new Date().toISOString(),
                             timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                            note: `Refund: "${tData.name}" cancelled`
+                            note: `Refund: "${tData.name}" cancelled` // ${split.real} R / ${split.promo} P
                         });
                     }
                 }
@@ -1164,8 +1186,19 @@ const settleGame = async (roomId, winnerId) => {
                 tx.get(winnerRef), tx.get(loserRef)
             ]);
 
+            // Elo update logic
+            const K = 32;
+            const wElo = winnerDoc.exists ? (winnerDoc.data().elo || 1200) : 1200;
+            const lElo = loserDoc.exists ? (loserDoc.data().elo || 1200) : 1200;
+            const expectedWin = 1 / (1 + Math.pow(10, (lElo - wElo) / 400));
+            const newWinnerElo = Math.round(wElo + K * (1 - expectedWin));
+            const newLoserElo = Math.round(lElo - K * (1 - expectedWin));
+
             if (winnerDoc.exists) {
-                tx.update(winnerRef, { balance: (winnerDoc.data().balance || 0) + winnings });
+                tx.update(winnerRef, { 
+                    balance: (winnerDoc.data().balance || 0) + winnings,
+                    elo: newWinnerElo 
+                });
                 tx.set(winnerRef.collection('transactions').doc(), {
                     type: 'winnings', amount: winnings, status: 'completed',
                     date: new Date().toISOString(),
@@ -1174,8 +1207,7 @@ const settleGame = async (roomId, winnerId) => {
                 });
             }
             if (loserDoc.exists) {
-                // Loser deduction is no longer needed here explicitly as they paid Escrow upfront.
-                // We just log the completion of the loss.
+                tx.update(loserRef, { elo: newLoserElo });
                 tx.set(loserRef.collection('transactions').doc(), {
                     type: 'stake_loss', amount: -room.stake, status: 'completed',
                     date: new Date().toISOString(),
@@ -2533,10 +2565,80 @@ io.on('connection', (socket) => {
         }
     });
 });
+// --- STARTUP RECONCILIATION SCRIPT ---
+// Scans for orphaned escrows resulting from dirty server restarts (OOM, Deployments)
+const reconcileOrphanedEscrows = async () => {
+    if (!db) return;
+    try {
+        console.log('[Reconciliation] Scanning for orphaned escrows from the last 24h...');
+        const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+        
+        // Collection group query to find recent escrow locks
+        const lockSnap = await db.collectionGroup('transactions')
+            .where('type', '==', 'escrow_lock')
+            .where('date', '>=', yesterday)
+            .get();
+
+        if (lockSnap.empty) {
+            console.log('[Reconciliation] No orphaned escrows found.');
+            return;
+        }
+
+        let refundCount = 0;
+        let totalRefunded = 0;
+
+        for (const doc of lockSnap.docs) {
+            const txData = doc.data();
+            const userRef = doc.ref.parent.parent; 
+            if (!userRef) continue;
+
+            // Look for any resolution (refund, winnings, loss) occurring after this lock
+            const txsSnap = await userRef.collection('transactions')
+                .where('date', '>=', txData.date)
+                .get();
+            
+            let resolved = false;
+            txsSnap.forEach(txd => {
+                const td = txd.data();
+                if ((td.type === 'escrow_refund' || td.type === 'winnings' || td.type === 'stake_loss') && 
+                     new Date(td.date).getTime() >= new Date(txData.date).getTime()) {
+                    resolved = true;
+                }
+            });
+
+            if (!resolved) {
+                const stake = Math.abs(txData.amount);
+                console.log(`[Reconciliation] Refunding unresolved escrow of ${stake} FCFA to ${userRef.id}`);
+                
+                await db.runTransaction(async (tx) => {
+                    const usr = await tx.get(userRef);
+                    if (!usr.exists) return; // double check
+                    tx.update(userRef, { balance: (usr.data().balance || 0) + stake });
+                    tx.set(userRef.collection('transactions').doc(), {
+                        type: 'escrow_refund',
+                        amount: stake,
+                        status: 'completed',
+                        date: new Date().toISOString(),
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: 'Auto-refund: Server Reboot / Orphaned Escrow'
+                    });
+                });
+                refundCount++;
+                totalRefunded += stake;
+            }
+        }
+        console.log(`[Reconciliation] Complete. Refunded ${refundCount} users a total of ${totalRefunded} FCFA.`);
+    } catch (e) {
+        console.warn('[Reconciliation] Check skipped or failed (may require Firestore composite index):', e.message);
+    }
+};
 
 httpServer.listen(PORT, () => {
     console.log(`Vantage Game Server running on port ${PORT}`);
     if (!process.env.FAPSHI_API_KEY) console.warn('WARNING: FAPSHI_API_KEY not set.');
+    
+    // Trigger reconciliation asynchronously
+    reconcileOrphanedEscrows();
 });
 
 // Graceful shutdown
