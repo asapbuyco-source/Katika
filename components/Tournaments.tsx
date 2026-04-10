@@ -480,11 +480,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                     </header>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        {tournaments.map((t) => {
-                            const isRegistered = t.participants.includes(user.id);
-                            const isFull = t.participants.length >= t.maxPlayers;
-                            const isFixed = t.type === 'fixed';
-                            const currentPool = t.prizePool || 0;
+                        {tournaments.map((tourn) => {
+                            const isRegistered = tourn.participants.includes(user.id);
+                            const isFull = tourn.participants.length >= tourn.maxPlayers;
+                            const isFixed = tourn.type === 'fixed';
+                            const currentPool = tourn.prizePool || 0;
 
                             // Tier badge: based on entry fee, NOT player rank
                             const getTier = (fee: number) => {
@@ -493,13 +493,13 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                 if (fee <= 20000) return { label: t('tier_gold'), cls: 'text-yellow-400 bg-yellow-400/10 border-yellow-500/30' };
                                 return { label: t('tier_cup'), cls: 'text-purple-400 bg-purple-400/10 border-purple-500/30' };
                             };
-                            const tier = getTier(t.entryFee);
+                            const tier = getTier(tourn.entryFee);
 
                             return (
                                 <motion.div
-                                    key={t.id}
+                                    key={tourn.id}
                                     whileHover={{ y: -5 }}
-                                    onClick={() => handleSelectTournament(t)}
+                                    onClick={() => handleSelectTournament(tourn)}
                                     className="bg-royal-900 border border-white/10 rounded-2xl p-6 relative overflow-hidden group cursor-pointer hover:border-gold-500/50 transition-all"
                                 >
                                     <div className={`absolute top-0 right-0 p-12 bg-gold-500/5 rounded-full blur-3xl transition-opacity ${isRegistered ? 'opacity-100' : 'opacity-0 group-hover:opacity-50'}`}></div>
@@ -530,11 +530,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         </div>
                                     </div>
 
-                                    <h3 className="text-xl font-bold text-white mb-1 relative z-10">{t.name}</h3>
+                                    <h3 className="text-xl font-bold text-white mb-1 relative z-10">{tourn.name}</h3>
                                     <div className="flex items-center gap-2 mb-6">
-                                        <span className="text-[10px] px-2 py-0.5 bg-white/10 rounded text-slate-300 font-mono">{t.participants.length}/{t.maxPlayers} Players</span>
+                                        <span className="text-[10px] px-2 py-0.5 bg-white/10 rounded text-slate-300 font-mono">{tourn.participants.length}/{tourn.maxPlayers} Players</span>
                                         <span className="text-slate-500 text-[10px]">|</span>
-                                        <span className="text-slate-400 text-[10px] font-mono">{new Date(t.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                        <span className="text-slate-400 text-[10px] font-mono">{new Date(tourn.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </div>
 
                                     <div className="space-y-3 relative z-10 bg-black/20 p-3 rounded-xl border border-white/5">
@@ -544,35 +544,35 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         </div>
                                         <div className="flex justify-between items-center text-sm">
                                             <span className="text-slate-500">Entry Fee</span>
-                                            <span className="font-bold text-white">{t.entryFee.toLocaleString()}</span>
+                                            <span className="font-bold text-white">{tourn.entryFee.toLocaleString()}</span>
                                         </div>
                                     </div>
 
                                     <div className="mt-4 relative z-10">
-                                        {t.status === 'registration' && !isRegistered && !isFull && (
+                                        {tourn.status === 'registration' && !isRegistered && !isFull && (
                                             <button
-                                                onClick={(e) => { e.stopPropagation(); initiateRegistration(t); }}
+                                                onClick={(e) => { e.stopPropagation(); initiateRegistration(tourn); }}
                                                 className="w-full py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-bold rounded-xl transition-colors shadow-lg shadow-gold-500/20"
                                             >
                                                 Join Tournament
                                             </button>
                                         )}
-                                        {t.status === 'registration' && isRegistered && (
+                                        {tourn.status === 'registration' && isRegistered && (
                                             <div className="w-full py-3 bg-white/5 text-slate-300 font-bold rounded-xl text-center border border-white/10">
                                                 Waiting for Start
                                             </div>
                                         )}
-                                        {t.status === 'active' && (
+                                        {tourn.status === 'active' && (
                                             <button className="w-full py-3 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl transition-colors animate-pulse">
                                                 View Live Bracket
                                             </button>
                                         )}
-                                        {t.status === 'completed' && (
+                                        {tourn.status === 'completed' && (
                                             <div className="w-full py-3 bg-gold-500/20 text-gold-400 font-bold rounded-xl text-center border border-gold-500/30 flex items-center justify-center gap-2">
                                                 <Crown size={16} /> Winner Declared
                                             </div>
                                         )}
-                                        {isFull && !isRegistered && t.status === 'registration' && (
+                                        {isFull && !isRegistered && tourn.status === 'registration' && (
                                             <div className="w-full py-3 bg-red-500/10 text-red-400 font-bold rounded-xl text-center border border-red-500/20">
                                                 Full
                                             </div>

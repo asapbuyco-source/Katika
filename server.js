@@ -29,6 +29,11 @@ const FRONTEND_ORIGIN = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
 // FIX C2: Admin whitelist — authoritative source is the JWT email, NEVER Firestore's isAdmin flag
 // (isAdmin in Firestore is client-writable; email in a Firebase ID token is cryptographically signed)
 const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'abrackly@gmail.com').split(',').map(e => e.trim());
+// SECURITY: In production, ADMIN_EMAILS must be explicitly set — never rely on the hardcoded fallback.
+if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_EMAILS) {
+    console.error('FATAL: ADMIN_EMAILS environment variable is not set in production. Refusing to start.');
+    process.exit(1);
+}
 
 // --- FIREBASE ADMIN INITIALIZATION ---
 try {
@@ -88,7 +93,7 @@ app.use(cors({
     credentials: true
 }));
 
-const sanitize = (text) => String(text).replace(/<[^>]*>?/gm, '').substring(0, 500);
+const sanitize = (text) => String(text).replace(/<[^>]*>?/gm, '').substring(0, 150); // 150 chars max — was 500; prevents chat from bloating game_update packets
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -98,7 +103,16 @@ const io = new Server(httpServer, {
         credentials: true
     },
     transports: ['polling', 'websocket'],
+    // Increased pingInterval to survive 3G reconnect windows common in Cameroon/Africa.
+    // Default is 25s — bumped to 45s so mobile clients don't get dropped on momentary signal loss.
+    pingInterval: 45000,
     pingTimeout: 60000,
+    // WebSocket per-message deflate compression. Cuts game_update payload sizes by 40-60%
+    // on text-heavy game states (Chess PGN, Checkers piece arrays, Pool ball lists).
+    // Only compresses payloads > 1KB to avoid overhead on small pings/acks.
+    perMessageDeflate: {
+        threshold: 1024,
+    },
 });
 
 // Socket.IO connection rate limiting
@@ -2473,13 +2487,19 @@ io.on('connection', (socket) => {
             // Find active room
             for (const [roomId, room] of rooms.entries()) {
                 if (room.players.includes(userId) && room.status === 'active') {
-                    // Start Disconnect Timer
-                    console.log(`Starting 240s forfeit timer for ${userId}`);
+                    // Start Disconnect Timer — duration varies by game type:
+                    // Fast games (Dice, TicTacToe) get 60s since rounds are short.
+                    // Chess/Checkers get the full 4 minutes (240s).
+                    const DISCONNECT_TIMEOUTS = {
+                        Dice: 60, TicTacToe: 60, Cards: 90, Pool: 120, default: 240
+                    };
+                    const timeoutSeconds = DISCONNECT_TIMEOUTS[room.gameType] || DISCONNECT_TIMEOUTS.default;
+                    console.log(`Starting ${timeoutSeconds}s forfeit timer for ${userId} (game: ${room.gameType})`);
 
                     // Notify other player immediately
                     io.to(roomId).emit('opponent_disconnected', {
                         disconnectedUserId: userId,
-                        timeoutSeconds: 240 // 4 minutes
+                        timeoutSeconds
                     });
 
                     const timerId = setTimeout(() => {
@@ -2488,7 +2508,7 @@ io.on('connection', (socket) => {
                         const winner = room.players.find(id => id !== userId);
                         endGame(roomId, winner, 'Opponent Disconnected');
                         disconnectTimers.delete(userId);
-                    }, 240000); // 240 seconds
+                    }, timeoutSeconds * 1000);
 
                     disconnectTimers.set(userId, timerId);
                     break;

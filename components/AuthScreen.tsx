@@ -1,8 +1,8 @@
 
 import React, { useState } from 'react';
 import { motion as originalMotion } from 'framer-motion';
-import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft } from 'lucide-react';
-import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile } from '../services/firebase';
+import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft, KeyRound, CheckCircle } from 'lucide-react';
+import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile, triggerPasswordReset } from '../services/firebase';
 import { User as AppUser, ViewState } from '../types';
 
 // Fix for Framer Motion type mismatches in current environment
@@ -14,12 +14,14 @@ interface AuthScreenProps {
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavigate }) => {
-    const [method, setMethod] = useState<'menu' | 'email'>('menu');
+    const [method, setMethod] = useState<'menu' | 'email' | 'forgotPassword'>('menu');
     const [isRegistering, setIsRegistering] = useState(false);
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [referralCode, setReferralCode] = useState('');
+    const [resetEmail, setResetEmail] = useState('');
+    const [resetSent, setResetSent] = useState(false);
 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
@@ -33,17 +35,42 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
         }
         try {
             const firebaseUser = await signInWithGoogle();
-            // If we got a simulated user back immediately, we might need to manually trigger the parent callback
-            // because onAuthStateChanged might not fire for custom mock objects
-            if (firebaseUser && (firebaseUser as any).uid.startsWith('google-user-')) {
-                const appUser = await syncUserProfile(firebaseUser as any);
-                onAuthenticated(appUser);
+            // For real Firebase users, onAuthStateChanged in App.tsx handles navigation.
+            // No manual onAuthenticated call needed here.
+            if (!firebaseUser) {
+                // Popup was closed without signing in
+                setError('');
+                setIsLoading(false);
             }
-            // For real firebase users, the listener in App.tsx handles it
         } catch (err: any) {
-            console.error("Auth Error:", err);
-            setError("Login failed. Trying Guest Mode...");
-            setTimeout(handleGuestLogin, 1500);
+            console.error("Google Auth Error:", err);
+            if (err.code === 'auth/popup-blocked') {
+                setError('Popup was blocked. Please allow popups for this site, or use Email & Password instead.');
+            } else if (err.code === 'auth/popup-closed-by-user') {
+                setError(''); // User cancelled — not an error
+            } else if (err.code === 'auth/network-request-failed') {
+                setError('Network error. Check your connection and try again.');
+            } else {
+                setError('Google sign-in failed. Please try Email & Password or Guest Mode.');
+            }
+            setIsLoading(false);
+        }
+    };
+
+    const handleForgotPassword = async () => {
+        if (!resetEmail) { setError('Please enter your email address.'); return; }
+        setIsLoading(true);
+        setError('');
+        try {
+            await triggerPasswordReset(resetEmail);
+            setResetSent(true);
+        } catch (err: any) {
+            if (err.code === 'auth/user-not-found') {
+                setError('No account found with this email.');
+            } else {
+                setError('Failed to send reset email. Try again.');
+            }
+        } finally {
             setIsLoading(false);
         }
     };
@@ -92,12 +119,17 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
         } catch (err: any) {
             console.error(err);
             if (err.code === 'auth/email-already-in-use') {
-                setError("Email already registered. Please login.");
+                setError('This email is already registered. Please sign in instead.');
             } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-                setError("Invalid email or password.");
+                setError('Incorrect email or password. Please try again.');
+            } else if (err.code === 'auth/too-many-requests') {
+                setError('Too many failed attempts. Please reset your password or try again later.');
+            } else if (err.code === 'auth/network-request-failed') {
+                setError('Network error. Check your connection and try again.');
+            } else if (err.code === 'auth/weak-password') {
+                setError('Password is too weak. Use at least 6 characters.');
             } else {
-                setError("Authentication failed. Try Guest Mode.");
-                setShowGuest(true);
+                setError(`Authentication failed: ${err.message || 'Unknown error'}`);
             }
             setIsLoading(false);
         }
@@ -272,15 +304,83 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                 </button>
                             </div>
 
-                            <div className="mt-6 text-center">
+                            <div className="mt-4 flex flex-col items-center gap-2">
                                 <button
                                     onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
                                     className="text-xs text-gold-400 hover:text-white transition-colors font-medium underline-offset-4 hover:underline"
                                 >
-                                    {isRegistering ? "Already have an account? Sign In" : "Don't have an account? Sign Up"}
+                                    {isRegistering ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
                                 </button>
+                                {!isRegistering && (
+                                    <button
+                                        onClick={() => { setMethod('forgotPassword'); setError(''); setResetSent(false); setResetEmail(email); }}
+                                        className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+                                    >
+                                        Forgot password?
+                                    </button>
+                                )}
                             </div>
 
+                        </motion.div>
+                    )}
+
+                    {/* FORGOT PASSWORD FLOW */}
+                    {method === 'forgotPassword' && (
+                        <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
+                            <div className="text-center mb-6">
+                                <KeyRound size={32} className="text-gold-400 mx-auto mb-3" />
+                                <h3 className="text-white font-bold text-xl">Reset Password</h3>
+                                <p className="text-xs text-slate-400 mt-1">We'll send a reset link to your email</p>
+                            </div>
+
+                            {resetSent ? (
+                                <div className="flex flex-col items-center gap-3 py-4">
+                                    <CheckCircle size={40} className="text-green-400" />
+                                    <p className="text-white font-bold text-center">Reset email sent!</p>
+                                    <p className="text-slate-400 text-xs text-center">Check your inbox and follow the instructions.</p>
+                                    <button
+                                        onClick={() => { setMethod('email'); setError(''); setIsRegistering(false); }}
+                                        className="mt-3 text-gold-400 text-sm font-bold hover:text-white transition-colors"
+                                    >
+                                        Back to Sign In
+                                    </button>
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="space-y-4 mb-6">
+                                        <div>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+                                            <div className="relative">
+                                                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
+                                                <input
+                                                    type="email"
+                                                    placeholder="name@example.com"
+                                                    value={resetEmail}
+                                                    onChange={(e) => setResetEmail(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && handleForgotPassword()}
+                                                    className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-12 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-sans"
+                                                    autoFocus
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="flex gap-3">
+                                        <button
+                                            onClick={() => { setMethod('email'); setError(''); }}
+                                            className="px-4 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 transition-colors"
+                                        >
+                                            <ArrowLeft size={20} />
+                                        </button>
+                                        <button
+                                            onClick={handleForgotPassword}
+                                            disabled={isLoading}
+                                            className="flex-1 bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                                        >
+                                            {isLoading ? <span className="animate-pulse">Sending...</span> : 'Send Reset Link'}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </motion.div>
                     )}
                 </div>

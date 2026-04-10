@@ -33,6 +33,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        // SPA offline fallback: serve index.html when network is unavailable
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

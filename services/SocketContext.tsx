@@ -220,8 +220,10 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }, [socket, isConnected, state.user, viewRef]);
 
     // ── Auto-bypass if connection takes too long ───────────────────────────────
+    // 45s gives 3G connections (common in Cameroon) enough time for the
+    // polling → WebSocket upgrade handshake to complete before we give up.
     useEffect(() => {
-        if (connectionTime >= 20 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+        if (connectionTime >= 45 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
             setBypassConnection(true);
         }
     }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);

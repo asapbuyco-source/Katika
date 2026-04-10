@@ -40,8 +40,11 @@ const ChessSquare = React.memo(({
     fileLabel
 }: any) => {
 
-    // Stable symbol map
-    const symbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+    // Separate symbol maps so white and black pieces look visually distinct
+    // White pieces use hollow/outline unicode characters; black use filled variants.
+    const whiteSymbolMap: Record<string, string> = { p: '♙', r: '♖', n: '♘', b: '♗', q: '♕', k: '♔' };
+    const blackSymbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
+    const symbol = piece ? (piece.color === 'w' ? whiteSymbolMap[piece.type] : blackSymbolMap[piece.type]) : null;
 
     const handleClick = () => {
         onClick(square);
@@ -70,12 +73,15 @@ const ChessSquare = React.memo(({
             {/* Piece Render */}
             {piece && (
                 <motion.span
-                    layoutId={`piece-${square}`} // Framer Motion layout animation for smooth sliding
+                    layoutId={`piece-${square}`}
                     transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                    className={`text-3xl md:text-5xl select-none relative z-20 ${piece.color === 'w' ? 'text-[#e2e8f0] drop-shadow-md' : 'text-[#a855f7] drop-shadow-md'}`}
-                    style={{ textShadow: piece.color === 'w' ? '0 2px 4px rgba(0,0,0,0.5)' : '0 2px 4px rgba(0,0,0,0.8)' }}
+                    className={`text-3xl md:text-5xl select-none relative z-20 drop-shadow-md leading-none ${
+                        piece.color === 'w'
+                            ? 'text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]'
+                            : 'text-[#1a1a2e] drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]'
+                    }`}
                 >
-                    {symbolMap[piece.type]}
+                    {symbol}
                 </motion.span>
             )}
 
@@ -591,7 +597,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <img src={opponent.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="Opponent" />
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">{opponent.name}</span>
-                        <span className="text-[10px] text-slate-400 font-bold">{opponentColor === 'w' ? 'White' : 'Black'}</span>
+                        <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                            opponentColor === 'w' ? 'text-slate-100' : 'text-purple-400'
+                        }`}>
+                            <span className="text-base leading-none">
+                                {opponentColor === 'w' ? '♙' : '♟'}
+                            </span>
+                            {opponentColor === 'w' ? 'White' : 'Black'}
+                        </span>
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === opponentColor ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
@@ -654,7 +667,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <img src={user.avatar} className="w-10 h-10 rounded-full border border-gold-500" alt="Me" />
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">You</span>
-                        <span className="text-[10px] text-slate-400 font-bold">{myColor === 'w' ? 'White' : 'Black'}</span>
+                        <span className={`text-[10px] font-bold flex items-center gap-1 ${
+                            myColor === 'w' ? 'text-slate-100' : 'text-purple-400'
+                        }`}>
+                            <span className="text-base leading-none">
+                                {myColor === 'w' ? '♙' : '♟'}
+                            </span>
+                            {myColor === 'w' ? 'White' : 'Black'}
+                        </span>
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === myColor ? 'bg-gold-500/20 border-gold-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>

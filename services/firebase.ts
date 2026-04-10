@@ -23,6 +23,7 @@ import {
     where,
     orderBy,
     limit,
+    startAfter,
     getDocs,
     addDoc,
     updateDoc,
@@ -183,7 +184,8 @@ export const getAllUsers = async (lastId?: string): Promise<User[]> => {
     let q = query(collection(db, "users"), orderBy("name"), limit(100));
     if (lastId) {
         const lastDoc = await getDoc(doc(db, "users", lastId));
-        if (lastDoc.exists()) q = query(collection(db, "users"), orderBy("name"), limit(100));
+        // FIX: was missing startAfter(lastDoc) — pagination never advanced past page 1
+        if (lastDoc.exists()) q = query(collection(db, "users"), orderBy("name"), startAfter(lastDoc), limit(100));
     }
     const snapshot = await getDocs(q);
     return snapshot.docs.map(doc => doc.data() as User);
