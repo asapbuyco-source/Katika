@@ -1,18 +1,11 @@
-
-import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Dice5, Crown, Shield, Star } from 'lucide-react';
-import { Table, User, AIRefereeLog } from '../types';
-import { AIReferee } from './AIReferee';
-import { playSFX } from '../services/sound';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { ArrowLeft, Dice1, Dice2, Dice3, Dice4, Dice5, Dice6 } from 'lucide-react';
+import { Table, User } from '../types';
 import { useAppState } from '../services/AppContext';
-import { motion as originalMotion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { playSFX } from '../services/sound';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-
-// Fix for Framer Motion type mismatches in current environment
-const motion = originalMotion as any;
-
-const TURN_TIME_LIMIT = 60;
 
 interface GameRoomProps {
     table: Table;
@@ -22,372 +15,624 @@ interface GameRoomProps {
     socketGame?: any;
 }
 
-type PlayerColor = 'Red' | 'Yellow';
-interface Piece { id: number; color: PlayerColor; step: number; owner?: string; }
+// ─── Board Constants ──────────────────────────────────────────────────────────
+// Standard 15×15 Ludo, 2-player variant (Red = bottom-right, Blue = top-left)
+// Track: 52 cells (clockwise for Red), Home stretch: 6 cells each
 
-// Safe Zones on the 0-51 track (Absolute indices)
-const SAFE_ZONES = [0, 8, 13, 21, 26, 34, 39, 47];
+// Main track — 52 positions [row, col]. Position 0 = Red's start just outside home.
+const MAIN_TRACK: [number, number][] = [
+    // 0-4: Up right column of bottom arm
+    [13,8],[12,8],[11,8],[10,8],[9,8],
+    // 5-10: Right across right arm (row 8, cols 9→14)
+    [8,9],[8,10],[8,11],[8,12],[8,13],[8,14],
+    // 11-12: Down right side of right arm to row 6
+    [7,14],[6,14],
+    // 13-17: Left across top of right arm (row 6, cols 13→9)
+    [6,13],[6,12],[6,11],[6,10],[6,9],
+    // 18-23: Up right column of top arm (col 8, rows 5→0)
+    [5,8],[4,8],[3,8],[2,8],[1,8],[0,8],
+    // 24-25: Left across top
+    [0,7],[0,6],
+    // 26-30: Down left column of top arm (col 6, rows 1→5)
+    [1,6],[2,6],[3,6],[4,6],[5,6],
+    // 31-36: Left across left arm (row 6, cols 5→0)
+    [6,5],[6,4],[6,3],[6,2],[6,1],[6,0],
+    // 37-38: Down left side of left arm
+    [7,0],[8,0],
+    // 39-43: Right across bottom of left arm (row 8, cols 1→5)
+    [8,1],[8,2],[8,3],[8,4],[8,5],
+    // 44-49: Down left column of bottom arm (col 6, rows 9→14)
+    [9,6],[10,6],[11,6],[12,6],[13,6],[14,6],
+    // 50-51: Right across bottom
+    [14,7],[14,8],
+];
 
-// Board Waypoints for visual interpolation
-const getPiecePosition = (color: PlayerColor, step: number, pieceIndex: number) => {
-    // 1. Base Positions (Home)
-    if (step === -1) {
-        if (color === 'Red') {
-            const positions = [{ x: 12, y: 12 }, { x: 28, y: 12 }, { x: 12, y: 28 }, { x: 28, y: 28 }];
-            return positions[pieceIndex % 4];
-        } else {
-            const positions = [{ x: 72, y: 72 }, { x: 88, y: 72 }, { x: 72, y: 88 }, { x: 88, y: 88 }];
-            return positions[pieceIndex % 4];
-        }
+// Red home stretch: after pos 51, enters col 7 going UP toward center
+const RED_HOME_STRETCH: [number, number][] = [
+    [13,7],[12,7],[11,7],[10,7],[9,7],[8,7]
+];
+// Blue home stretch: after pos 25 (Blue's "51"), enters col 7 going DOWN
+const BLUE_HOME_STRETCH: [number, number][] = [
+    [1,7],[2,7],[3,7],[4,7],[5,7],[6,7]
+];
+
+// Safe squares (main track indices)
+const SAFE_POSITIONS = new Set([0, 8, 13, 21, 26, 34, 39, 47]);
+
+// Total steps to reach goal: 52 (main) + 6 (home stretch) = 58 → index 57 = finished
+const GOAL_STEP = 57;
+
+type PieceColor = 'Red' | 'Blue';
+
+interface Piece {
+    id: number;       // 0-3 = Red pieces, 4-7 = Blue pieces
+    color: PieceColor;
+    step: number;     // -1 = at home base, 0-51 = main track position (for this player), 52-57 = home stretch
+    finished: boolean;
+}
+
+// Convert a piece's step to a board [row, col]
+function getBoardPosition(piece: Piece): [number, number] | null {
+    if (piece.step === -1) return null; // in home base, rendered separately
+    if (piece.finished) return null;
+
+    const trackOffset = piece.color === 'Blue' ? 26 : 0;
+
+    if (piece.step <= 51) {
+        const trackIdx = (piece.step + trackOffset) % 52;
+        return MAIN_TRACK[trackIdx];
     }
+    // Home stretch
+    const hsIdx = piece.step - 52;
+    if (piece.color === 'Red') return RED_HOME_STRETCH[hsIdx] ?? null;
+    return BLUE_HOME_STRETCH[hsIdx] ?? null;
+}
 
-    // 2. Home Straight (Victory Road)
-    if (step >= 51) {
-        const homeIndex = step - 51;
-        const progress = 10 + (homeIndex * 6.5);
+// Starting home-base positions on the board (visual placeholders)
+const RED_BASE_POSITIONS: [number, number][] = [
+    [10,10],[10,12],[12,10],[12,12]
+];
+const BLUE_BASE_POSITIONS: [number, number][] = [
+    [2,2],[2,4],[4,2],[4,4]
+];
 
-        if (color === 'Red') return { x: progress, y: 50 };
-        if (color === 'Yellow') return { x: 100 - progress, y: 50 };
-    }
+// Build initial pieces
+function buildPieces(): Piece[] {
+    return [
+        ...([0,1,2,3] as const).map(i => ({ id: i, color: 'Red' as PieceColor, step: -1, finished: false })),
+        ...([4,5,6,7] as const).map(i => ({ id: i, color: 'Blue' as PieceColor, step: -1, finished: false })),
+    ];
+}
 
-    // 3. Main Track
-    let normalizedIndex = step;
-    if (color === 'Yellow') normalizedIndex = (step + 26) % 52;
+// ─── Dice icon component ───────────────────────────────────────────────────
+const DICE_ICONS = [Dice1, Dice2, Dice3, Dice4, Dice5, Dice6];
 
-    if (normalizedIndex < 13) {
-        return { x: 15 + (normalizedIndex * 5.8), y: 10 };
-    } else if (normalizedIndex < 26) {
-        return { x: 90, y: 15 + ((normalizedIndex - 13) * 5.8) };
-    } else if (normalizedIndex < 39) {
-        return { x: 85 - ((normalizedIndex - 26) * 5.8), y: 90 };
-    } else {
-        return { x: 10, y: 85 - ((normalizedIndex - 39) * 5.8) };
-    }
+const AnimatedDice: React.FC<{ value: number | null; rolling: boolean }> = ({ value, rolling }) => {
+    const Icon = value ? DICE_ICONS[value - 1] : Dice1;
+    return (
+        <motion.div
+            animate={rolling ? { rotate: [0, 90, 180, 270, 360], scale: [1, 1.2, 0.9, 1.1, 1] } : {}}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+            className="flex items-center justify-center"
+        >
+            <Icon
+                size={56}
+                className={rolling ? 'text-gold-300' : value === 6 ? 'text-gold-400' : 'text-white'}
+                strokeWidth={1.5}
+            />
+        </motion.div>
+    );
 };
 
+// ─── Cell type definitions ─────────────────────────────────────────────────
+type CellType =
+    | 'red_home' | 'blue_home' | 'empty_home'          // corner homes
+    | 'track' | 'safe'                                   // main path
+    | 'red_stretch' | 'blue_stretch'                     // home runs
+    | 'center'                                           // goal
+    | 'border';                                          // border/decoration
+
+function getCellType(r: number, c: number): CellType {
+    // Home areas (6×6 corners)
+    if (r <= 5 && c <= 5) return 'blue_home';
+    if (r <= 5 && c >= 9) return 'empty_home';
+    if (r >= 9 && c <= 5) return 'empty_home';
+    if (r >= 9 && c >= 9) return 'red_home';
+
+    // Center
+    if (r === 7 && c === 7) return 'center';
+
+    // Home stretches
+    if (c === 7 && r >= 1 && r <= 6) return 'blue_stretch';
+    if (c === 7 && r >= 8 && r <= 13) return 'red_stretch';
+
+    // Track cells — everything in cross arms
+    const inBottomArm = r >= 9 && r <= 14 && c >= 6 && c <= 8;
+    const inTopArm    = r >= 0 && r <= 5  && c >= 6 && c <= 8;
+    const inLeftArm   = r >= 6 && r <= 8  && c >= 0 && c <= 5;
+    const inRightArm  = r >= 6 && r <= 8  && c >= 9 && c <= 14;
+    const inCenter    = r >= 6 && r <= 8  && c >= 6 && c <= 8;
+
+    if (inBottomArm || inTopArm || inLeftArm || inRightArm || inCenter) {
+        // Check if this is a safe square
+        for (const idx of SAFE_POSITIONS) {
+            if (r === MAIN_TRACK[idx][0] && c === MAIN_TRACK[idx][1]) return 'safe';
+        }
+        return 'track';
+    }
+
+    return 'border';
+}
+
+// ─── Cell colors ───────────────────────────────────────────────────────────
+function getCellStyle(type: CellType): string {
+    switch (type) {
+        case 'red_home':     return 'bg-red-950/80 border border-red-800/30';
+        case 'blue_home':    return 'bg-blue-950/80 border border-blue-800/30';
+        case 'empty_home':   return 'bg-slate-900/60 border border-white/5';
+        case 'track':        return 'bg-slate-100/90 border border-slate-300/50';
+        case 'safe':         return 'bg-emerald-100 border border-emerald-400/60';
+        case 'red_stretch':  return 'bg-red-200 border border-red-300/70';
+        case 'blue_stretch': return 'bg-blue-200 border border-blue-300/70';
+        case 'center':       return 'bg-gradient-to-br from-gold-400 to-amber-500 border-2 border-gold-300';
+        case 'border':       return 'bg-transparent';
+        default:             return '';
+    }
+}
+
+// Inline icon renderers for special cells
+function getCellContent(r: number, c: number, type: CellType): React.ReactNode {
+    if (type === 'safe') return <span className="text-[8px] select-none opacity-60">⭐</span>;
+    if (type === 'center') return <span className="text-base select-none">⭐</span>;
+    return null;
+}
+
+// ─── Main component ────────────────────────────────────────────────────────
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
     const { state } = useAppState();
-    const [pieces, setPieces] = useState<Piece[]>([]);
-    const [currentTurn, setCurrentTurn] = useState<PlayerColor>('Red');
+    const [pieces, setPieces] = useState<Piece[]>(buildPieces());
+    const [turn, setTurn] = useState<PieceColor>('Red');
     const [diceValue, setDiceValue] = useState<number | null>(null);
     const [diceRolled, setDiceRolled] = useState(false);
-    const [refereeLog, setRefereeLog] = useState<AIRefereeLog | null>(null);
-    const [lastMovedPieceId, setLastMovedPieceId] = useState<number | null>(null);
-    const [timeLeft, setTimeLeft] = useState(TURN_TIME_LIMIT);
+    const [rolling, setRolling] = useState(false);
+    const [message, setMessage] = useState('');
+    const [timeLeft, setTimeLeft] = useState(60);
+    const [showQuitModal, setShowQuitModal] = useState(false);
 
     const isP2P = !!socket && !!socketGame;
-    const myColor: PlayerColor = socketGame && socketGame.players[0] === user.id ? 'Red' : 'Yellow';
+    const myColor: PieceColor = isP2P && socketGame?.players?.[0] === user.id ? 'Red' : 'Blue';
 
-    // Initialize Pieces
+    // ── P2P Sync ──────────────────────────────────────────────────────────
     useEffect(() => {
-        // If synced state is empty or local play, init
-        if ((!isP2P || (isP2P && socketGame?.gameState?.pieces?.length === 0)) && pieces.length === 0) {
-            const initPieces: Piece[] = [];
-            for (let i = 0; i < 4; i++) initPieces.push({ id: i, color: 'Red', step: -1 });
-            for (let i = 0; i < 4; i++) initPieces.push({ id: i + 4, color: 'Yellow', step: -1 });
-            setPieces(initPieces);
-        }
-    }, [isP2P, socketGame]);
+        if (!isP2P || !socketGame) return;
+        if (socketGame.gameState?.pieces?.length > 0) setPieces(socketGame.gameState.pieces);
+        if (socketGame.gameState?.diceValue != null) setDiceValue(socketGame.gameState.diceValue);
+        if (socketGame.gameState) setDiceRolled(!!socketGame.gameState.diceRolled);
+        if (socketGame.turn) setTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Blue');
+    }, [socketGame]);
 
-    // --- SYNC ---
-    useEffect(() => {
-        if (isP2P && socketGame) {
-            if (socketGame.gameState && socketGame.gameState.pieces && socketGame.gameState.pieces.length > 0) setPieces(socketGame.gameState.pieces);
-            if (socketGame.gameState && socketGame.gameState.diceValue) setDiceValue(socketGame.gameState.diceValue);
-            if (socketGame.gameState) setDiceRolled(socketGame.gameState.diceRolled);
-            if (socketGame.turn) setCurrentTurn(socketGame.turn === socketGame.players[0] ? 'Red' : 'Yellow');
-
-            // In P2P mode, SocketContext's 'game_over' handler dispatches the result.
-            // Calling onGameEnd here too would cause a double result dispatch.
-            if (socketGame.winner && !isP2P) {
-                onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
-            }
-        }
-    }, [socketGame, user.id, isP2P]);
-
-    // Timer Logic
+    // ── Turn Timer ────────────────────────────────────────────────────────
     useEffect(() => {
         if (socketGame?.winner) return;
-
-        setTimeLeft(TURN_TIME_LIMIT);
-        let timeoutId: any;
-
+        setTimeLeft(60);
         const timer = setInterval(() => {
             if (state.opponentDisconnected) return;
-
-            setTimeLeft((prev) => {
+            setTimeLeft(prev => {
                 if (prev <= 1) {
                     clearInterval(timer);
-                    timeoutId = setTimeout(() => handleTimeout(), 0);
+                    handleTimeout();
                     return 0;
                 }
                 return prev - 1;
             });
         }, 1000);
+        return () => clearInterval(timer);
+    }, [turn, diceRolled, socketGame?.winner, state.opponentDisconnected]);
 
-        return () => {
-            clearInterval(timer);
-            if (timeoutId) clearTimeout(timeoutId);
-        };
-    }, [currentTurn, diceRolled, socketGame?.winner, state.opponentDisconnected]);
-
-    const handleTimeout = () => {
+    const handleTimeout = useCallback(() => {
         if (!isP2P || !socket || !socketGame) return;
         playSFX('error');
-        if (currentTurn === myColor) {
+        if (turn === myColor) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
             onGameEnd('loss');
         } else {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
         }
-    };
+    }, [isP2P, socket, socketGame, turn, myColor, onGameEnd]);
 
-    const handleQuit = () => {
-        if (isP2P && socket) {
-            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
-        }
-        onGameEnd('quit');
-    };
-
+    // ── Roll Dice ─────────────────────────────────────────────────────────
     const handleRoll = () => {
-        if (currentTurn !== myColor || diceRolled) return;
-
-        if (socket) {
+        if (turn !== myColor || diceRolled) return;
+        playSFX('dice');
+        setRolling(true);
+        if (isP2P && socket) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
         } else {
-            const val = Math.ceil(Math.random() * 6);
-            setDiceValue(val);
-            setDiceRolled(true);
+            setTimeout(() => {
+                const val = Math.ceil(Math.random() * 6);
+                setDiceValue(val);
+                setDiceRolled(true);
+                setRolling(false);
+                const myPieces = pieces.filter(p => p.color === myColor && !p.finished);
+                const canMove = myPieces.some(p => {
+                    if (p.step === -1 && val === 6) return true;
+                    if (p.step === -1) return false;
+                    return p.step + val <= GOAL_STEP;
+                });
+                if (!canMove) {
+                    setMessage("No valid moves! Passing turn...");
+                    setTimeout(() => {
+                        setDiceRolled(false);
+                        setDiceValue(null);
+                        setMessage('');
+                        setTurn(t => t === 'Red' ? 'Blue' : 'Red');
+                    }, 1500);
+                }
+            }, 600);
         }
-        playSFX('dice');
+        setTimeout(() => setRolling(false), 700);
     };
 
-    const handlePieceClick = (p: Piece) => {
-        if (currentTurn !== myColor || !diceRolled || !diceValue) return;
-        if (p.color !== myColor) return;
+    // ── Move Piece ──────────────────────────────────────────────────────
+    const handlePieceClick = (piece: Piece) => {
+        if (turn !== myColor || !diceRolled || !diceValue) return;
+        if (piece.color !== myColor || piece.finished) return;
 
-        if (p.step === -1 && diceValue !== 6) {
+        // entering board from base requires a 6
+        if (piece.step === -1 && diceValue !== 6) {
             playSFX('error');
+            setMessage('Need a 6 to enter!');
+            setTimeout(() => setMessage(''), 1200);
             return;
         }
 
-        const nextStep = p.step === -1 ? 0 : p.step + diceValue;
-        if (nextStep > 56) {
+        // overshoot guard
+        const nextStep = piece.step === -1 ? 0 : piece.step + diceValue;
+        if (nextStep > GOAL_STEP) {
             playSFX('error');
+            setMessage("Can't move — would overshoot home!");
+            setTimeout(() => setMessage(''), 1200);
             return;
         }
 
-        let newPieces = pieces.map(piece => piece.id === p.id ? { ...piece, step: nextStep } : piece);
-        let captured = false;
-
-        if (nextStep >= 0 && nextStep <= 50) {
-            const myNormalized = p.color === 'Red' ? nextStep : (nextStep + 26) % 52;
-
-            newPieces = newPieces.map(other => {
-                if (other.id === p.id) return other;
-                if (other.color === p.color) return other;
-                if (other.step === -1 || other.step > 50) return other;
-
-                const otherNormalized = other.color === 'Red' ? other.step : (other.step + 26) % 52;
-
-                if (myNormalized === otherNormalized) {
-                    if (SAFE_ZONES.includes(myNormalized)) {
-                        return other;
-                    } else {
-                        playSFX('capture');
-                        captured = true;
-                        return { ...other, step: -1 };
-                    }
-                }
-                return other;
-            });
-        }
-
-        setLastMovedPieceId(p.id);
-
-        const bonusTurn = diceValue === 6 || captured;
-
-        if (socket) {
+        if (isP2P && socket) {
+            const newPieces = pieces.map(p => p.id === piece.id ? { ...p, step: nextStep, finished: nextStep === GOAL_STEP } : p);
+            const captured = checkCaptures(newPieces, piece, nextStep);
+            const bonusTurn = diceValue === 6 || captured || nextStep === GOAL_STEP;
             socket.emit('game_action', {
                 roomId: socketGame.roomId,
-                action: {
-                    type: 'MOVE_PIECE',
-                    pieces: newPieces,
-                    bonusTurn: bonusTurn
-                }
+                action: { type: 'MOVE_PIECE', pieces: newPieces, bonusTurn }
             });
-        } else {
-            setPieces(newPieces);
-            setDiceRolled(false);
-            setDiceValue(null);
-
-            // Local win detection (for bot/local games)
-            if (!isP2P) {
-                const myFinishCount = newPieces.filter(p => p.color === myColor && p.step === 56).length;
-                if (myFinishCount === 4) {
-                    onGameEnd('win');
-                    return;
-                }
-                const oppColor = myColor === 'Red' ? 'Yellow' : 'Red';
-                const oppFinishCount = newPieces.filter(p => p.color === oppColor && p.step === 56).length;
-                if (oppFinishCount === 4) {
-                    onGameEnd('loss');
-                    return;
-                }
-            }
-
-            if (!bonusTurn) {
-                setCurrentTurn(currentTurn === 'Red' ? 'Yellow' : 'Red');
-            }
+            return;
         }
+
+        // Local / bot game
+        let newPieces = pieces.map(p => p.id === piece.id
+            ? { ...p, step: nextStep, finished: nextStep === GOAL_STEP }
+            : p
+        );
+
+        const captured = checkCaptures(newPieces, piece, nextStep);
+        if (captured) { playSFX('capture'); }
+
+        const bonusTurn = diceValue === 6 || captured || nextStep === GOAL_STEP;
+
+        // win check
+        const myFinished = newPieces.filter(p => p.color === myColor && p.finished).length;
+        if (myFinished === 4) { setPieces(newPieces); onGameEnd('win'); return; }
+        const oppColor: PieceColor = myColor === 'Red' ? 'Blue' : 'Red';
+        const oppFinished = newPieces.filter(p => p.color === oppColor && p.finished).length;
+        if (oppFinished === 4) { setPieces(newPieces); onGameEnd('loss'); return; }
+
+        setPieces(newPieces);
+        setDiceRolled(false);
+        setDiceValue(null);
+        setMessage('');
         playSFX('move');
+        if (!bonusTurn) setTurn(t => t === 'Red' ? 'Blue' : 'Red');
+        else setMessage(nextStep === GOAL_STEP ? '🎉 Piece home! Bonus turn!' : '🎲 Bonus turn!');
     };
 
+    // Capture logic: if a piece lands on an occupied non-safe track cell, send opponents home
+    function checkCaptures(newPieces: Piece[], movedPiece: Piece, nextStep: number): boolean {
+        if (nextStep <= -1 || nextStep > 51) return false; // can't capture in home stretch or base
+        const trackOffset = movedPiece.color === 'Blue' ? 26 : 0;
+        const myBoardIdx = (nextStep + trackOffset) % 52;
+        const myCell = MAIN_TRACK[myBoardIdx];
+        if (!myCell) return false;
+        if (SAFE_POSITIONS.has(myBoardIdx)) return false;
+
+        let captured = false;
+        const oppColor: PieceColor = movedPiece.color === 'Red' ? 'Blue' : 'Red';
+        newPieces.forEach(p => {
+            if (p.color !== oppColor || p.step <= -1 || p.step > 51 || p.finished) return;
+            const oppOffset = p.color === 'Blue' ? 26 : 0;
+            const oppBoardIdx = (p.step + oppOffset) % 52;
+            const oppCell = MAIN_TRACK[oppBoardIdx];
+            if (oppCell && oppCell[0] === myCell[0] && oppCell[1] === myCell[1]) {
+                p.step = -1; captured = true;
+            }
+        });
+        return captured;
+    }
+
+    // ── Board Rendering ───────────────────────────────────────────────────
+    // Collect which pieces are on each cell for multi-piece stacking
+    const cellPieces: Map<string, Piece[]> = new Map();
+    pieces.forEach(p => {
+        if (p.step === -1 || p.finished) return;
+        const pos = getBoardPosition(p);
+        if (!pos) return;
+        const key = `${pos[0]},${pos[1]}`;
+        if (!cellPieces.has(key)) cellPieces.set(key, []);
+        cellPieces.get(key)!.push(p);
+    });
+
+    const isMyTurn = turn === myColor;
+
     return (
-        <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
-            {/* Header */}
-            <div className="w-full max-w-2xl flex justify-between items-center mb-6 mt-2">
-                <button onClick={handleQuit} className="flex items-center gap-2 text-slate-400 hover:text-white">
-                    <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
+        <div className="min-h-screen bg-gradient-to-b from-[#0a0a1a] to-[#060618] flex flex-col items-center pt-3 pb-6 px-2 select-none">
+
+            {/* ── Quit Modal ── */}
+            <AnimatePresence>
+                {showQuitModal && (
+                    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                            onClick={() => setShowQuitModal(false)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                        <motion.div initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.85, opacity: 0 }}
+                            className="relative bg-[#12122a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl z-10">
+                            <h2 className="text-white font-bold text-xl mb-2 text-center">Forfeit Match?</h2>
+                            <p className="text-slate-400 text-sm text-center mb-6">Leaving now counts as an <span className="text-red-400 font-bold">immediate loss</span>.</p>
+                            <div className="flex gap-3">
+                                <button onClick={() => setShowQuitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10 transition-colors">Resume</button>
+                                <button onClick={() => { if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } }); onGameEnd('quit'); }} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors">Forfeit</button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* ── Header ── */}
+            <div className="w-full max-w-[520px] flex justify-between items-center mb-3">
+                <button onClick={() => setShowQuitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
+                    <ArrowLeft size={18} className="text-slate-400" />
                 </button>
                 <div className="flex flex-col items-center">
-                    <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
-                    <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-gold-400 font-bold uppercase tracking-widest text-[10px]">Prize Pool</div>
+                    <div className="text-white font-black text-lg">{(table.stake * 2).toLocaleString()} FCFA</div>
                 </div>
-                <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
-            </div>
-
-            <div className="text-white text-center mb-4 flex flex-col items-center gap-2">
-                <h2 className={`text-2xl font-bold ${currentTurn === myColor ? 'text-gold-400' : 'text-slate-500'}`}>
-                    {currentTurn === myColor ? "YOUR TURN" : "OPPONENT'S TURN"}
-                </h2>
-                <div className={`px-4 py-1 rounded-full text-xs font-mono font-bold border ${timeLeft <= 10 ? 'bg-red-500/20 border-red-500 text-red-500 animate-pulse' : 'bg-black/20 border-white/10 text-slate-400'}`}>
+                {/* Turn indicator */}
+                <div className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${timeLeft <= 10
+                    ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse'
+                    : 'bg-white/5 border-white/10 text-slate-400'}`}>
                     {timeLeft}s
                 </div>
             </div>
 
-            <div className="relative w-full max-w-[600px] aspect-square bg-royal-900 rounded-xl shadow-2xl overflow-hidden border-8 border-royal-800">
-                {/* Ludo Board Art */}
-                <div className="absolute inset-0 grid grid-cols-15 grid-rows-15 bg-[#e0f2fe]">
+            {/* ── Turn Banner ── */}
+            <div className={`w-full max-w-[520px] mb-3 py-2 rounded-xl text-center text-sm font-bold tracking-wide transition-all duration-300 ${isMyTurn
+                ? 'bg-gold-500/20 border border-gold-500/50 text-gold-300'
+                : 'bg-white/4 border border-white/10 text-slate-500'}`}>
+                {isMyTurn ? `✨ Your Turn (${myColor})` : `Opponent's Turn (${turn})...`}
+            </div>
 
-                    {/* Red Base (Top Left) */}
-                    <div className="absolute top-0 left-0 w-[40%] h-[40%] bg-white border-r-4 border-b-4 border-royal-800 p-4">
-                        <div className="w-full h-full bg-red-100 rounded-3xl border-4 border-red-500 flex items-center justify-center relative">
-                            <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
-                                {[0, 1, 2, 3].map(i => <div key={i} className="bg-red-200 rounded-full border-2 border-red-400 opacity-50"></div>)}
-                            </div>
-                            <Crown className="text-red-500 relative z-10 w-12 h-12" />
-                        </div>
-                    </div>
+            {/* ── Player Labels ── */}
+            <div className="w-full max-w-[520px] flex justify-between mb-2 px-1">
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${turn === 'Blue' ? 'bg-blue-500/20 border-blue-500/60 text-blue-300' : 'bg-white/5 border-white/10 text-slate-500'}`}>
+                    <div className="w-3 h-3 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]" />
+                    {isP2P && socketGame ? (socketGame.profiles?.[socketGame.players?.[1]]?.name || 'Blue') : 'Blue'}
+                    {pieces.filter(p => p.color === 'Blue' && p.finished).length > 0 && (
+                        <span className="text-blue-400">🏠{pieces.filter(p => p.color === 'Blue' && p.finished).length}</span>
+                    )}
+                </div>
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${turn === 'Red' ? 'bg-red-500/20 border-red-500/60 text-red-300' : 'bg-white/5 border-white/10 text-slate-500'}`}>
+                    {pieces.filter(p => p.color === 'Red' && p.finished).length > 0 && (
+                        <span className="text-red-400">🏠{pieces.filter(p => p.color === 'Red' && p.finished).length}</span>
+                    )}
+                    {isP2P && socketGame ? (socketGame.profiles?.[socketGame.players?.[0]]?.name || 'Red') : 'Red'}
+                    <div className="w-3 h-3 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" />
+                </div>
+            </div>
 
-                    {/* Yellow Base (Bottom Right) */}
-                    <div className="absolute bottom-0 right-0 w-[40%] h-[40%] bg-white border-l-4 border-t-4 border-royal-800 p-4">
-                        <div className="w-full h-full bg-yellow-100 rounded-3xl border-4 border-yellow-500 flex items-center justify-center relative">
-                            <div className="absolute inset-0 grid grid-cols-2 grid-rows-2 p-4 gap-4">
-                                {[0, 1, 2, 3].map(i => <div key={i} className="bg-yellow-200 rounded-full border-2 border-yellow-400 opacity-50"></div>)}
-                            </div>
-                            <Crown className="text-yellow-500 relative z-10 w-12 h-12" />
-                        </div>
-                    </div>
-
-                    {/* Home Run Tracks */}
-                    {/* Red Home (Left) */}
-                    <div className="absolute top-[40%] left-0 w-[40%] h-[20%] flex items-center p-2">
-                        <div className="w-full h-8 bg-red-100 rounded-full flex items-center px-2 space-x-1 border border-red-300">
-                            {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-6 w-full bg-red-500 rounded-sm opacity-20"></div>)}
-                        </div>
-                    </div>
-                    {/* Yellow Home (Right) */}
-                    <div className="absolute top-[40%] right-0 w-[40%] h-[20%] flex items-center p-2">
-                        <div className="w-full h-8 bg-yellow-100 rounded-full flex items-center px-2 space-x-1 border border-yellow-300">
-                            {[1, 2, 3, 4, 5].map(i => <div key={i} className="h-6 w-full bg-yellow-500 rounded-sm opacity-20"></div>)}
-                        </div>
-                    </div>
-
-                    {/* Center */}
-                    <div className="absolute top-[40%] left-[40%] w-[20%] h-[20%] bg-gradient-to-br from-royal-800 to-royal-950 flex items-center justify-center border-4 border-white shadow-inner z-10">
-                        <div className="text-center">
-                            <div className="text-white font-black text-xs">VANTAGE</div>
-                            <Star className="text-gold-400 w-6 h-6 mx-auto mt-1 animate-pulse" fill="currentColor" />
-                        </div>
-                    </div>
-
-                    {/* Safe Zones (Visual) */}
-                    <div className="absolute top-[10%] left-[40%] w-[20%] h-[5%] bg-slate-300/30 flex justify-center"><Shield size={12} className="text-slate-400 opacity-50" /></div>
+            {/* ── Board ── */}
+            <div className="relative w-full max-w-[520px] aspect-square rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(251,191,36,0.08)] border-2 border-white/8">
+                {/* 15×15 CSS grid */}
+                <div className="absolute inset-0 grid grid-cols-15 grid-rows-15"
+                    style={{ display: 'grid', gridTemplateColumns: 'repeat(15, 1fr)', gridTemplateRows: 'repeat(15, 1fr)' }}>
+                    {Array.from({ length: 15 }, (_, r) =>
+                        Array.from({ length: 15 }, (_, c) => {
+                            const type = getCellType(r, c);
+                            return (
+                                <div
+                                    key={`${r}-${c}`}
+                                    className={`relative flex items-center justify-center ${getCellStyle(type)}`}
+                                    style={{ fontSize: '0.45rem' }}
+                                >
+                                    {getCellContent(r, c, type)}
+                                </div>
+                            );
+                        })
+                    )}
                 </div>
 
-                {/* Pieces Layer */}
+                {/* ── Home base circles (in-corner visuals) ── */}
+                {/* Blue home base */}
+                <div className="absolute top-[2%] left-[2%] w-[38%] h-[38%] flex items-center justify-center">
+                    <div className="w-[85%] h-[85%] rounded-2xl border-2 border-blue-500/60 bg-blue-900/40 flex flex-wrap gap-2 items-center justify-center p-3">
+                        {BLUE_BASE_POSITIONS.map((_, idx) => {
+                            const piece = pieces.find(p => p.color === 'Blue' && p.id === idx + 4 && p.step === -1 && !p.finished);
+                            return (
+                                <div key={idx}
+                                    className={`w-[38%] aspect-square rounded-full border-2 transition-all duration-200 ${piece
+                                        ? (turn === 'Blue' && diceValue === 6
+                                            ? 'bg-gradient-to-br from-blue-400 to-blue-600 border-white shadow-[0_0_16px_rgba(59,130,246,0.8)] scale-110 cursor-pointer animate-pulse'
+                                            : 'bg-gradient-to-br from-blue-500 to-blue-700 border-blue-300/50 cursor-pointer hover:scale-105')
+                                        : 'bg-blue-950 border-blue-800/30 opacity-30'}`}
+                                    onClick={() => piece && handlePieceClick(piece)}
+                                >
+                                    {piece && <div className="w-full h-full rounded-full flex items-center justify-center">
+                                        <div className="w-1/2 h-1/2 rounded-full bg-white/20" />
+                                    </div>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Red home base */}
+                <div className="absolute bottom-[2%] right-[2%] w-[38%] h-[38%] flex items-center justify-center">
+                    <div className="w-[85%] h-[85%] rounded-2xl border-2 border-red-500/60 bg-red-900/40 flex flex-wrap gap-2 items-center justify-center p-3">
+                        {RED_BASE_POSITIONS.map((_, idx) => {
+                            const piece = pieces.find(p => p.color === 'Red' && p.id === idx && p.step === -1 && !p.finished);
+                            return (
+                                <div key={idx}
+                                    className={`w-[38%] aspect-square rounded-full border-2 transition-all duration-200 ${piece
+                                        ? (turn === 'Red' && diceValue === 6
+                                            ? 'bg-gradient-to-br from-red-400 to-red-600 border-white shadow-[0_0_16px_rgba(239,68,68,0.8)] scale-110 cursor-pointer animate-pulse'
+                                            : 'bg-gradient-to-br from-red-500 to-red-700 border-red-300/50 cursor-pointer hover:scale-105')
+                                        : 'bg-red-950 border-red-800/30 opacity-30'}`}
+                                    onClick={() => piece && handlePieceClick(piece)}
+                                >
+                                    {piece && <div className="w-full h-full rounded-full flex items-center justify-center">
+                                        <div className="w-1/2 h-1/2 rounded-full bg-white/20" />
+                                    </div>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {/* Inactive corners (top-right, bottom-left) */}
+                <div className="absolute top-[2%] right-[2%] w-[38%] h-[38%] rounded-2xl bg-slate-900/60 border border-white/5 flex items-center justify-center">
+                    <span className="text-2xl opacity-20">❌</span>
+                </div>
+                <div className="absolute bottom-[2%] left-[2%] w-[38%] h-[38%] rounded-2xl bg-slate-900/60 border border-white/5 flex items-center justify-center">
+                    <span className="text-2xl opacity-20">❌</span>
+                </div>
+
+                {/* ── Track pieces ── */}
                 <AnimatePresence>
-                    {pieces.map((p, i) => {
-                        const pos = getPiecePosition(p.color, p.step, i);
-                        const stackIndex = pieces.filter((other, idx) => idx < i && other.step === p.step && other.color === p.color && p.step !== -1).length;
-                        const offset = stackIndex * 4;
+                    {pieces.map(piece => {
+                        if (piece.step === -1 || piece.finished) return null;
+                        const pos = getBoardPosition(piece);
+                        if (!pos) return null;
+                        const [row, col] = pos;
+
+                        // How many pieces share this cell (for stacking offset)
+                        const cellKey = `${row},${col}`;
+                        const stack = cellPieces.get(cellKey) || [];
+                        const stackIdx = stack.findIndex(p => p.id === piece.id);
+                        const offsetX = stackIdx * 4;
+                        const offsetY = stackIdx * 4;
+
+                        const isMovable = turn === myColor && turn === piece.color && diceRolled && diceValue !== null &&
+                            !(piece.step === -1 && diceValue !== 6) &&
+                            piece.step + (diceValue || 0) <= GOAL_STEP;
+
+                        const cellSize = 100 / 15; // % per cell
+                        const top = row * cellSize + cellSize / 2;
+                        const left = col * cellSize + cellSize / 2;
 
                         return (
                             <motion.div
-                                key={p.id}
-                                layoutId={`p-${p.id}`}
-                                initial={{ scale: 0 }}
+                                key={piece.id}
+                                layoutId={`piece-${piece.id}`}
                                 animate={{
-                                    top: `${pos.y}%`,
-                                    left: `${pos.x}%`,
-                                    marginLeft: `${offset}px`,
-                                    marginTop: `${offset}px`,
-                                    scale: 1,
-                                    zIndex: 20 + stackIndex
+                                    top: `${top}%`,
+                                    left: `${left}%`,
+                                    x: `-50%`,
+                                    y: `-50%`,
+                                    scale: isMovable ? 1.15 : 1,
                                 }}
-                                transition={{ type: "spring", damping: 25, stiffness: 200 }}
-                                onClick={() => handlePieceClick(p)}
+                                style={{ position: 'absolute', marginLeft: offsetX, marginTop: offsetY }}
+                                transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+                                onClick={() => handlePieceClick(piece)}
                                 className={`
-                            absolute w-6 h-6 md:w-8 md:h-8 -ml-3 -mt-3 md:-ml-4 md:-mt-4 rounded-full border-2 border-white shadow-[0_4px_6px_rgba(0,0,0,0.4)] cursor-pointer 
-                            ${p.color === 'Red' ? 'bg-gradient-to-br from-red-500 to-red-700' : 'bg-gradient-to-br from-yellow-400 to-yellow-600'}
-                            ${currentTurn === myColor && p.color === myColor && diceRolled ? 'ring-4 ring-white/50 animate-pulse' : ''}
-                            ${lastMovedPieceId === p.id ? 'z-50' : ''}
-                        `}
+                                    w-[5.5%] aspect-square rounded-full border-2
+                                    flex items-center justify-center
+                                    cursor-pointer z-30 shadow-md
+                                    ${piece.color === 'Red'
+                                        ? 'bg-gradient-to-br from-red-400 to-red-700 border-red-200'
+                                        : 'bg-gradient-to-br from-blue-400 to-blue-700 border-blue-200'
+                                    }
+                                    ${isMovable ? 'ring-2 ring-white/70 ring-offset-1 ring-offset-transparent animate-pulse' : ''}
+                                `}
                             >
-                                <div className="absolute inset-2 rounded-full bg-white/20"></div>
-                                {p.step !== -1 && SAFE_ZONES.includes(p.color === 'Red' ? p.step : (p.step + 26) % 52) && (
-                                    <div className="absolute -top-2 -right-2 text-gold-400 drop-shadow-md"><Shield size={10} fill="currentColor" /></div>
-                                )}
+                                <div className="w-2/5 h-2/5 rounded-full bg-white/30" />
                             </motion.div>
-                        )
+                        );
                     })}
                 </AnimatePresence>
             </div>
 
-            <div className="mt-8 flex flex-col items-center h-32 justify-end pb-4">
-                {currentTurn === myColor && !diceRolled && (
-                    <motion.button
-                        initial={{ scale: 0.9, opacity: 0 }}
-                        animate={{ scale: 1, opacity: 1 }}
-                        whileTap={{ scale: 0.95 }}
-                        onClick={handleRoll}
-                        className="bg-gold-500 hover:bg-gold-400 text-royal-950 font-black px-12 py-4 rounded-2xl shadow-[0_0_20px_rgba(251,191,36,0.4)] flex items-center gap-3 transition-transform"
-                    >
-                        <Dice5 size={24} className="animate-spin-slow" /> ROLL DICE
-                    </motion.button>
-                )}
-                {diceRolled && (
-                    <div className="flex flex-col items-center">
-                        <motion.div
-                            initial={{ scale: 0, rotate: 180 }}
-                            animate={{ scale: 1, rotate: 0 }}
-                            className="bg-white text-royal-950 font-black text-5xl w-20 h-20 flex items-center justify-center rounded-2xl shadow-xl mb-4 border-4 border-gold-500"
-                        >
-                            {diceValue}
+            {/* ── Controls ── */}
+            <div className="w-full max-w-[520px] mt-5 flex flex-col items-center gap-4">
+
+                {/* Informational message */}
+                <AnimatePresence>
+                    {message && (
+                        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                            className="text-gold-400 text-sm font-bold bg-gold-500/10 border border-gold-500/30 px-4 py-2 rounded-xl">
+                            {message}
                         </motion.div>
-                        {currentTurn === myColor && <p className="text-gold-400 text-sm font-bold animate-bounce">Select a piece to move</p>}
+                    )}
+                </AnimatePresence>
+
+                {/* Dice + Roll button row */}
+                <div className="flex items-center gap-6">
+                    <div className="flex flex-col items-center">
+                        <AnimatedDice value={diceValue} rolling={rolling} />
+                        {!diceValue && <span className="text-slate-600 text-xs mt-1">Roll to play</span>}
                     </div>
-                )}
-                {currentTurn !== myColor && (
-                    <div className="text-slate-500 text-sm font-mono animate-pulse">Waiting for opponent...</div>
-                )}
+
+                    {isMyTurn && !diceRolled && !rolling && (
+                        <motion.button
+                            initial={{ scale: 0.85, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            whileTap={{ scale: 0.93 }}
+                            onClick={handleRoll}
+                            className="bg-gradient-to-r from-gold-500 to-amber-500 hover:from-gold-400 hover:to-amber-400 text-royal-950 font-black px-10 py-3.5 rounded-2xl shadow-[0_0_24px_rgba(251,191,36,0.35)] text-base transition-all"
+                        >
+                            🎲 ROLL
+                        </motion.button>
+                    )}
+
+                    {isMyTurn && diceRolled && (
+                        <div className="text-gold-400 text-sm font-bold animate-bounce">
+                            Pick a piece ↙
+                        </div>
+                    )}
+
+                    {!isMyTurn && (
+                        <div className="text-slate-600 text-sm font-mono animate-pulse">
+                            Opponent rolling...
+                        </div>
+                    )}
+                </div>
+
+                {/* Finished pieces tally */}
+                <div className="flex gap-8 text-sm">
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-blue-500" />
+                        <span className="text-blue-400 font-bold">
+                            {pieces.filter(p => p.color === 'Blue' && p.finished).length}/4 home
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-red-500" />
+                        <span className="text-red-400 font-bold">
+                            {pieces.filter(p => p.color === 'Red' && p.finished).length}/4 home
+                        </span>
+                    </div>
+                </div>
             </div>
 
+            {/* ── P2P Chat ── */}
             {isP2P && socketGame && (
                 <GameChat
                     messages={socketGame.chat || []}
-                    onSendMessage={(msg) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
+                    onSendMessage={(msg: string) => socket?.emit('game_action', { roomId: socketGame.roomId, action: { type: 'CHAT', message: msg } })}
                     currentUserId={user.id}
                     profiles={socketGame.profiles || {}}
                 />

@@ -24,6 +24,7 @@ import { ChallengeRequestModal } from './ChallengeRequestModal';
 import { useGameController } from '../hooks/useGameController.ts';
 import { GameResultOverlay } from './GameResultOverlay';
 import { Onboarding } from './Onboarding';
+import { LiveWinFeed } from './LiveWinFeed';
 
 // ─── Lazy-loaded route views ───────────────────────────────────────────────────
 const LandingPage = lazy(() => import('./LandingPage').then(m => ({ default: m.LandingPage })));
@@ -421,6 +422,10 @@ const AppContent = () => {
         <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
             {user && currentView !== 'game' && currentView !== 'matchmaking' && (
                 <Navigation currentView={currentView} setView={setView} user={user} hasUnreadMessages={unreadForum} />
+            )}
+            {/* Global live win feed — visible on dashboard, lobby, not during games */}
+            {user && !['game', 'matchmaking', 'auth', 'landing'].includes(currentView) && (
+                <LiveWinFeed />
             )}
 
             {isRejoining && (

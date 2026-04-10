@@ -7,13 +7,14 @@ import { useAppState } from '../services/AppContext';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
+import { SocketGameState } from '../types';
 
 interface CardGameProps {
     table: Table;
     user: User;
     onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
     socket?: Socket | null;
-    socketGame?: any;
+    socketGame?: SocketGameState | null;
 }
 
 type Suit = 'H' | 'D' | 'C' | 'S';
@@ -86,23 +87,24 @@ export const CardGame: React.FC<CardGameProps> = ({ table, user, onGameEnd, sock
     // Sync State
     useEffect(() => {
         if (isP2P && socketGame) {
-            if (socketGame.gameState && socketGame.gameState.hands && socketGame.gameState.hands[user.id]) {
-                setMyHand(socketGame.gameState.hands[user.id]);
-
-                // Count opponent cards
+            const gs = socketGame.gameState as {
+                hands?: Record<string, Card[]>;
+                discardPile?: Card[];
+                activeSuit?: Suit | null;
+                deck?: unknown[];
+            };
+            if (gs?.hands?.[user.id]) {
+                setMyHand(gs.hands[user.id]);
                 const oppId = socketGame.players.find((id: string) => id !== user.id);
-                if (socketGame.gameState.hands[oppId]) setOppHandCount(socketGame.gameState.hands[oppId].length);
+                if (oppId && gs.hands[oppId]) setOppHandCount(gs.hands[oppId].length);
             }
-            if (socketGame.gameState && socketGame.gameState.discardPile) setDiscardPile(socketGame.gameState.discardPile);
-            if (socketGame.gameState && socketGame.gameState.activeSuit) setActiveSuit(socketGame.gameState.activeSuit);
+            if (gs?.discardPile) setDiscardPile(gs.discardPile);
+            if (gs?.activeSuit !== undefined) setActiveSuit(gs.activeSuit ?? null);
+            if (gs?.deck) setDeckSize(gs.deck.length);
             if (socketGame.turn) setTurn(socketGame.turn === user.id ? 'me' : 'opp');
-            if (socketGame.gameState && socketGame.gameState.deck) setDeckSize(socketGame.gameState.deck.length);
 
             // In P2P mode, SocketContext's 'game_over' handler dispatches the result.
-            // Calling onGameEnd here too would cause a double result dispatch.
-            if (socketGame.winner && !isP2P) {
-                onGameEnd(socketGame.winner === user.id ? 'win' : 'loss');
-            }
+            // Calling onGameEnd here would cause a double result dispatch. Safe to omit.
         }
     }, [socketGame, user.id, isP2P]);
 

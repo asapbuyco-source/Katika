@@ -65,6 +65,24 @@ app.set('trust proxy', 1); // For accurate rate limiting behind Railway's proxy
 
 // Security Headers
 app.use(helmet());
+app.use(helmet.contentSecurityPolicy({
+    directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "https://cdn.tailwindcss.com", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https://api.dicebear.com", "https://i.pravatar.cc", "https://www.google.com"],
+        connectSrc: ["'self'",
+            (process.env.FRONTEND_URL || '*'),
+            "https://*.googleapis.com",
+            "https://*.firebaseio.com",
+            "https://live.fapshi.com",
+            "wss://*"
+        ],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"]
+    }
+}));
 
 // Logging
 app.use(morgan('combined'));
@@ -1140,7 +1158,7 @@ app.post('/api/tournaments/cancel', verifyAdmin, async (req, res) => {
     }
 });
 
-app.get('/api/pay/status/:transId', async (req, res) => {
+app.get('/api/pay/status/:transId', verifyAuth, async (req, res) => {
     try {
         // Sanitize transId: Fapshi IDs are alphanumeric only — prevent path traversal
         const rawTransId = req.params.transId;
@@ -1163,6 +1181,17 @@ app.get('/api/pay/status/:transId', async (req, res) => {
 });
 
 // --- SERVER-SIDE FINANCIAL SETTLEMENT ---
+// Exponential-backoff helper: guarantees critical DB writes survive transient errors
+const withRetry = async (fn, retries = 3, delayMs = 500) => {
+    try { return await fn(); }
+    catch (e) {
+        if (retries <= 0) throw e;
+        console.warn(`[Retry] Attempt failed, retrying in ${delayMs}ms...`, e.message);
+        await new Promise(r => setTimeout(r, delayMs));
+        return withRetry(fn, retries - 1, delayMs * 4);
+    }
+};
+
 const settleGame = async (roomId, winnerId) => {
     if (!db) return;
     const room = rooms.get(roomId);
@@ -1176,7 +1205,7 @@ const settleGame = async (roomId, winnerId) => {
     const settlementRef = db.collection('processed_settlements').doc(`settle_${roomId}`);
 
     try {
-        await db.runTransaction(async (tx) => {
+        await withRetry(() => db.runTransaction(async (tx) => {
             const sentinelSnap = await tx.get(settlementRef);
             if (sentinelSnap.exists) return; // already settled
 
@@ -1186,7 +1215,7 @@ const settleGame = async (roomId, winnerId) => {
                 tx.get(winnerRef), tx.get(loserRef)
             ]);
 
-            // Elo update logic
+            // ELO update
             const K = 32;
             const wElo = winnerDoc.exists ? (winnerDoc.data().elo || 1200) : 1200;
             const lElo = loserDoc.exists ? (loserDoc.data().elo || 1200) : 1200;
@@ -1195,10 +1224,7 @@ const settleGame = async (roomId, winnerId) => {
             const newLoserElo = Math.round(lElo - K * (1 - expectedWin));
 
             if (winnerDoc.exists) {
-                tx.update(winnerRef, { 
-                    balance: (winnerDoc.data().balance || 0) + winnings,
-                    elo: newWinnerElo 
-                });
+                tx.update(winnerRef, { balance: (winnerDoc.data().balance || 0) + winnings, elo: newWinnerElo });
                 tx.set(winnerRef.collection('transactions').doc(), {
                     type: 'winnings', amount: winnings, status: 'completed',
                     date: new Date().toISOString(),
@@ -1216,10 +1242,15 @@ const settleGame = async (roomId, winnerId) => {
                 });
             }
             tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
-        });
+        }));
         console.log(`[settleGame] ${roomId}: credited ${winnings} FCFA to ${winnerId}`);
     } catch (err) {
-        console.error(`[settleGame] Failed for room ${roomId}:`, err.message);
+        console.error(`[settleGame] CRITICAL — Failed after 3 retries for room ${roomId}:`, err.message);
+        // Write to a failed_settlements collection so admin can manually reconcile
+        if (db) db.collection('failed_settlements').doc(roomId).set({
+            roomId, winnerId, loserId, winnings, stake: room.stack,
+            error: err.message, failedAt: admin.firestore.FieldValue.serverTimestamp()
+        }).catch(() => {});
     }
 };
 
@@ -1555,6 +1586,24 @@ const endGame = (roomId, winnerId, reason) => {
         recordTournamentMatchResult(tournamentMatchId, winnerId).catch(e =>
             console.error(`[endGame] Tournament advancement failed for match ${tournamentMatchId}:`, e)
         );
+    }
+
+    // ── Live Win Feed: write to publicly readable Firestore collection ──────────
+    if (winnerId && room.stake > 0 && db) {
+        const winnerProfile = room.profiles?.[winnerId];
+        if (winnerProfile) {
+            const { winnings } = calculatePayouts(room.stake);
+            db.collection('live_winners').add({
+                playerName: winnerProfile.name || 'Unknown',
+                playerAvatar: winnerProfile.avatar || '',
+                gameType: room.gameType,
+                amount: winnings,
+                timestamp: admin.firestore.FieldValue.serverTimestamp()
+            }).then(docRef => {
+                // Auto-delete after 1 hour so feed stays fresh
+                setTimeout(() => db.collection('live_winners').doc(docRef.id).delete().catch(() => {}), 3600000);
+            }).catch(() => {});
+        }
     }
 
     // Cleanup Room Data after a delay (Extended for Rematch window)
@@ -2327,8 +2376,8 @@ io.on('connection', (socket) => {
                         }
                         const prevCount = serverBalls.filter(b => b.pocketed || b.isPotted).length;
                         const newCount = authBalls.filter(b => b.pocketed || b.isPotted).length;
-                        if (newCount - prevCount > 3) {
-                            console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot. Rejected.`); return;
+                        if (newCount - prevCount > 2) {
+                            console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: 2). Rejected.`); return;
                         }
                     }
                 }

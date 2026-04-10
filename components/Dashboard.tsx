@@ -5,6 +5,8 @@ import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, subscribeToGameConfigs, subscribeToGlobalWinners } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
+import { BalanceCounter } from './BalanceCounter';
+import { StreakBadge } from './StreakBadge';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -150,8 +152,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                   <span>{t('vantage_vault')}</span>
               </div>
               <h2 className="text-4xl md:text-5xl font-display font-bold text-white mt-2 tracking-tight">
-                {user.balance.toLocaleString()} <span className="text-slate-400 text-2xl font-sans font-normal">FCFA</span>
+                <BalanceCounter value={user.balance} suffix=" FCFA" className="text-4xl md:text-5xl font-display font-bold" />
+                <span className="text-slate-400 text-2xl font-sans font-normal ml-1">FCFA</span>
               </h2>
+              {(user.winStreak ?? 0) >= 2 && (
+                <div className="mt-2">
+                  <StreakBadge streak={user.winStreak ?? 0} />
+                </div>
+              )}
             </div>
             <div className="flex flex-col sm:flex-row gap-3 mt-8 relative z-10">
               <button 

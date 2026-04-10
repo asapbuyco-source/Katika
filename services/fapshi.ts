@@ -43,13 +43,18 @@ export const initiateFapshiPayment = async (amount: number, user: User): Promise
 };
 
 export const checkPaymentStatus = async (transId: string): Promise<'SUCCESSFUL' | 'FAILED' | 'PENDING' | 'EXPIRED' | null> => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
     try {
-        const response = await fetch(`${PROXY_BASE}/api/pay/status/${transId}`);
+        const response = await fetch(`${PROXY_BASE}/api/pay/status/${transId}`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!response.ok) return null;
         const data = await response.json();
         return data.status;
-    } catch (error) {
-        console.error('Status check failed', error);
+    } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') console.warn('[Payment] Status check timed out after 10s for', transId);
+        else console.error('Status check failed', error);
         return null;
     }
 };

@@ -61,6 +61,7 @@ export interface User {
   referredBy?: string;
   referralBonusPaid?: boolean;
   promoBalance?: number;
+  winStreak?: number;
 }
 
 export interface PlayerProfile {
@@ -84,10 +85,14 @@ export interface Challenge {
 
 export interface Transaction {
   id: string;
-  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'stake_loss' | 'tournament_entry';
+  type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'stake_loss' |
+        'tournament_entry' | 'tournament_refund' | 'escrow_lock' | 'escrow_refund' |
+        'streak_bonus' | 'referral_bonus';
   amount: number;
   date: string;
   status: 'completed' | 'pending' | 'failed';
+  note?: string;
+  gameType?: string;
 }
 
 export interface GameTier {
