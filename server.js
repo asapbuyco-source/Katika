@@ -529,17 +529,11 @@ app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) 
 
             if (realBal + promoBal < entryFee) throw new Error("Insufficient funds");
 
-            // Deduct from promo first
-            let remainingFee = entryFee;
-            let newPromo = promoBal;
-            if (newPromo >= remainingFee) {
-                newPromo -= remainingFee;
-                remainingFee = 0;
-            } else {
-                remainingFee -= newPromo;
-                newPromo = 0;
-            }
-            const newReal = Math.max(0, realBal - remainingFee);
+            const newPromo = Math.max(0, promoBal - entryFee);
+            const promoDeducted = promoBal - newPromo;
+            const remainingToPay = entryFee - promoDeducted;
+            const newReal = Math.max(0, realBal - remainingToPay);
+            const realDeducted = realBal - newReal;
 
             // Update user balance
             const updates = { balance: newReal };
@@ -2556,6 +2550,13 @@ io.on('connection', (socket) => {
     socket.on('aim_sync', (data) => {
         if (data.roomId) {
             socket.to(data.roomId).emit('aim_sync', data);
+        }
+    });
+
+    socket.on('pool_ping', (data) => {
+        if (data.roomId) {
+            // Echo back to acknowledge heartbeat — helps client gauge RTT and stability
+            socket.emit('pool_pong', { roomId: data.roomId, timestamp: Date.now() });
         }
     });
 
