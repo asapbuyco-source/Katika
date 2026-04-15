@@ -394,12 +394,19 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     // ── Orientation & Scale ──
     const [scale, setScale] = useState(1);
     useEffect(() => {
+        try {
+            if (screen.orientation && screen.orientation.lock) {
+                // Attempt to force landscape mode natively on mobile devices
+                screen.orientation.lock('landscape').catch(() => {});
+            }
+        } catch(e) {}
+        
         const upd = () => {
             const w = window.innerWidth;
             const h = window.innerHeight;
-            // Always treat as portrait for mobile tournament layout
-            // Scale table to fit width (TW=900)
-            const s = Math.min((w - 10) / TW, (h * 0.5) / TH);
+            // Left panel: 192px (w-48), Right panel: 96px (w-24)
+            const availableW = w - 192 - 96;
+            const s = Math.min((availableW - 20) / TW, (h - 20) / TH);
             setScale(s);
         };
         upd(); window.addEventListener('resize', upd); return () => window.removeEventListener('resize', upd);
@@ -535,13 +542,16 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         }, 16);
     };
 
-    // ── Controls (Joystick & Slider) ──
-    const handleJoystick = (e: React.PointerEvent) => {
-        if (!isMyTurn || moving || bih) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const cx = rect.left + rect.width / 2, cy = rect.top + rect.height / 2;
-        const dx = e.clientX - cx, dy = e.clientY - cy;
-        const newAngle = Math.atan2(dy, dx);
+    // ── Controls (Drag Aim & Power) ──
+    const isAimingRef = useRef(false);
+    const updateAim = (e: React.PointerEvent | React.MouseEvent) => {
+        const cv = canvasRef.current; if (!cv) return;
+        const r = cv.getBoundingClientRect();
+        const cue = ballsRef.current.find(b => b.id === 0);
+        if (!cue) return;
+        const cx = r.left + (cue.x / TW) * r.width;
+        const cy = r.top + (cue.y / TH) * r.height;
+        const newAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
         setAngle(newAngle);
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
@@ -549,172 +559,264 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             lastSync.current = Date.now();
         }
     };
+    const handleCanvasPointerDown = (e: React.PointerEvent | React.MouseEvent) => {
+        if (!isMyTurn || moving) return;
+        if (bih) {
+            const cv = canvasRef.current; if (!cv) return;
+            const r = cv.getBoundingClientRect();
+            const tx = (e.clientX - r.left) * (TW / r.width), ty = (e.clientY - r.top) * (TH / r.height);
+            if (tx > RAIL + BR && tx < TW - RAIL - BR && ty > RAIL + BR && ty < TH - RAIL - BR) {
+                const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = tx; c.y = ty; c.vx = 0; c.vy = 0;
+                setBalls([...ballsRef.current]); setBih(false); playSFX('click');
+            }
+        } else {
+            isAimingRef.current = true;
+            if ('setPointerCapture' in e.target) (e.target as HTMLElement).setPointerCapture((e as React.PointerEvent).pointerId);
+            updateAim(e);
+        }
+    };
+    const handleCanvasPointerMove = (e: React.PointerEvent | React.MouseEvent) => {
+        if (!isAimingRef.current) return;
+        updateAim(e);
+    };
+    const handleCanvasPointerUp = (e: React.PointerEvent | React.MouseEvent) => {
+        if (isAimingRef.current) {
+            isAimingRef.current = false;
+            if ('releasePointerCapture' in e.target) {
+                try { (e.target as HTMLElement).releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
+            }
+        }
+    };
 
-    const handlePowerSlider = (e: React.PointerEvent) => {
-        if (!isMyTurn || moving || bih) return;
-        const rect = e.currentTarget.getBoundingClientRect();
-        const p = Math.max(0, Math.min(100, (rect.bottom - e.clientY) / rect.height * 100));
+    const isPoweringRef = useRef(false);
+    const updatePower = (e: React.PointerEvent | React.MouseEvent) => {
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        const p = Math.max(0, Math.min(100, (e.clientY - rect.top) / rect.height * 100));
         setPower(p);
+        setStrikeOff(p * 0.4 + 10); 
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
             socket.emit('aim_sync', { roomId, type: 'aim_sync', angle, power: p });
             lastSync.current = Date.now();
         }
     };
-
-    const handleCanvasTap = (e: React.PointerEvent | React.MouseEvent) => {
-        if (!isMyTurn || moving || !bih) return;
-        const cv = canvasRef.current; if (!cv) return;
-        const r = cv.getBoundingClientRect();
-        const tx = (e.clientX - r.left) * (TW / r.width), ty = (e.clientY - r.top) * (TH / r.height);
-        if (tx > RAIL + BR && tx < TW - RAIL - BR && ty > RAIL + BR && ty < TH - RAIL - BR) {
-            const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = tx; c.y = ty; c.vx = 0; c.vy = 0;
-            setBalls([...ballsRef.current]); setBih(false); playSFX('click');
+    const handlePowerPointerDown = (e: React.PointerEvent | React.MouseEvent) => {
+        if (!isMyTurn || moving || bih) return;
+        isPoweringRef.current = true;
+        if ('setPointerCapture' in e.target) (e.target as HTMLElement).setPointerCapture((e as React.PointerEvent).pointerId);
+        updatePower(e);
+    };
+    const handlePowerPointerMove = (e: React.PointerEvent | React.MouseEvent) => {
+        if (!isPoweringRef.current) return;
+        updatePower(e);
+    };
+    const handlePowerPointerUp = (e: React.PointerEvent | React.MouseEvent) => {
+        if (!isPoweringRef.current) return;
+        isPoweringRef.current = false;
+        if ('releasePointerCapture' in e.target) {
+            try { (e.target as HTMLElement).releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
         }
+        
+        if (power < 5) {
+            setPower(0);
+            setStrikeOff(0);
+            return;
+        }
+
+        let f = strikeOff;
+        const finalP = power;
+        setPower(0);
+        const iv = setInterval(() => {
+            f -= 8;
+            setStrikeOff(Math.max(0, f));
+            if (f <= 0) {
+                clearInterval(iv);
+                setStrikeOff(0);
+                const c = ballsRef.current.find(b => b.id === 0);
+                if (c && !c.pocketed) {
+                    c.vx = Math.cos(angle + Math.PI) * (finalP * .35); 
+                    c.vy = Math.sin(angle + Math.PI) * (finalP * .35);
+                    playPoolSound('cue-hit', finalP / 100); 
+                    startPhysics();
+                }
+            }
+        }, 16);
     };
 
     // ── Persistent Render ──
     useEffect(() => {
         const cv = canvasRef.current, ctx = cv?.getContext('2d'); if (!cv || !ctx) return;
+        const updateScale = () => {
+            const w = window.innerWidth, h = window.innerHeight;
+            const s = Math.min(w / (TW + 300), h / TH);
+            setScale(s);
+        };
+        window.addEventListener('resize', updateScale);
+        updateScale();
         const loop = () => {
             const mt = turnRef.current === myId, mv = movRef.current, grp = myGrRef.current;
             const targetIds = (mt && !mv) ? (grp === 'solids' ? [1, 2, 3, 4, 5, 6, 7] : grp === 'stripes' ? [9, 10, 11, 12, 13, 14, 15] : [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]).filter(id => !ballsRef.current.find(b => b.id === id)?.pocketed) : [];
             drawScene(ctx, ballsRef.current, sparksRef.current, mt ? angle : (isBot ? angle : oppAngle), mt ? power : (isBot ? power : oppPower), !mv, bihRef.current, mt ? ghost : oppGhost, strikeOff, shakeRef.current, targetIds.length === 0 && grp ? [8] : targetIds);
             animRef.current = requestAnimationFrame(loop);
         };
-        loop(); return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+        loop(); return () => { window.removeEventListener('resize', updateScale); if (animRef.current) cancelAnimationFrame(animRef.current); };
     }, [angle, power, strikeOff, ghost, oppAngle, oppPower, oppGhost, isBot, myId]);
 
     const myPot = myGroup ? balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8 && ((myGroup === 'solids' && b.id < 8) || (myGroup === 'stripes' && b.id > 8))).length : 0;
     const oppPot = myGroup ? balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8 && ((myGroup === 'solids' && b.id > 8) || (myGroup === 'stripes' && b.id < 8))).length : 0;
 
     return (
-        <div className="w-full h-[100dvh] flex flex-col bg-[#070c10] overflow-hidden select-none touch-none text-white font-sans">
+        <div className="w-[100dvw] h-[100dvh] flex flex-row bg-[#070c10] overflow-hidden select-none touch-none text-white font-sans">
             <AnimatePresence>
                 {netStatus !== 'ok' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center gap-4">
-                        <WifiOff className="text-red-400 animate-pulse" size={48} />
-                        <h2 className="text-xl font-bold">Connection Lost</h2>
-                        <p className="text-slate-400">Reconnecting to tournament server...</p>
-                        <Loader2 className="animate-spin text-gold-400" />
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center gap-4">
+                        <WifiOff className="text-red-500 animate-pulse" size={56} />
+                        <h2 className="text-2xl font-bold">Connection Lost</h2>
+                        <p className="text-slate-400">Reconnecting to game server...</p>
+                        <Loader2 className="animate-spin text-gold-400 mt-2" size={32} />
                     </motion.div>
                 )}
             </AnimatePresence>
 
-            {/* HUD */}
-            <header className="flex items-center justify-between px-4 py-3 bg-black/40 border-b border-white/5 safe-top shrink-0">
-                <div className="flex items-center gap-3 flex-1">
-                    <button onClick={() => setForfeit(true)} className="p-2 bg-white/5 rounded-xl"><ArrowLeft size={18} /></button>
-                    <div className={`p-2 rounded-xl flex items-center gap-2 border transition-all ${isMyTurn ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-white/10 bg-white/5'}`}>
-                        <img src={user.avatar} className="w-8 h-8 rounded-full border border-white/20" />
-                        <div className="hidden sm:block">
-                            <p className="text-[10px] font-bold truncate w-20">{user.name}</p>
-                            <p className="text-[9px] text-slate-400 uppercase tracking-wider">{myGroup || 'Open'}</p>
+            {/* Left Panel: Match Info & Players */}
+            <div className="w-48 h-full bg-black/60 border-r border-white/5 flex flex-col justify-between shrink-0 safe-left z-10 shadow-2xl relative">
+                {/* Player 1 (Top) */}
+                <div className={`p-4 border-b transition-all shadow-[0_4px_20px_rgba(0,0,0,0.5)] ${isMyTurn ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-white/10 bg-white/5'}`}>
+                    <div className="flex items-center gap-3 mb-3">
+                        <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold truncate text-white drop-shadow-md">{user.name}</p>
+                            <p className="text-[10px] text-slate-300 uppercase tracking-wider font-bold">{myGroup || 'Open'}</p>
                         </div>
-                        <span className="text-lg font-black font-mono ml-1">{myPot}</span>
+                    </div>
+                    <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner">
+                        <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pot</span>
+                        <span className="text-xl font-black font-mono text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">{myPot}</span>
                     </div>
                 </div>
 
-                <div className="flex flex-col items-center px-4 shrink-0">
-                    <span className="text-[8px] text-gold-500 font-bold tracking-tighter uppercase">STAKE</span>
-                    <span className="text-xs font-mono font-bold">💰{(table.stake * 2).toLocaleString()}</span>
-                    {isP2P && <div className={`flex items-center gap-1 text-xs mt-1 ${countdown < 10 ? 'text-red-500 font-black animate-pulse' : 'text-slate-300'}`}><Clock size={10} />{countdown}s</div>}
-                </div>
+                {/* Center Match Info */}
+                <div className="flex-1 flex flex-col items-center justify-center gap-6 relative px-4">
+                    <button onClick={() => setForfeit(true)} className="absolute top-4 left-4 p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all shadow-lg active:scale-95">
+                        <ArrowLeft size={16} className="text-slate-400" />
+                    </button>
 
-                <div className="flex items-center gap-3 flex-1 flex-row-reverse">
-                    <div className={`p-2 rounded-xl flex items-center gap-2 border transition-all ${!isMyTurn ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
-                        <img src={av2(oppId)} className="w-8 h-8 rounded-full border border-white/20" />
-                        <div className="hidden sm:block text-right">
-                            <p className="text-[10px] font-bold truncate w-20">{name2(oppId)}</p>
-                            <p className="text-[9px] text-slate-400 uppercase tracking-wider">{myGroup ? (myGroup === 'solids' ? 'stripes' : 'solids') : 'Ready'}</p>
-                        </div>
-                        <span className="text-lg font-black font-mono mr-1">{oppPot}</span>
+                    <div className="text-center bg-black/40 p-4 rounded-2xl border border-white/10 w-full shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
+                        <span className="text-[10px] text-gold-500 font-black tracking-widest uppercase block mb-1">STAKE</span>
+                        <span className="text-lg font-mono font-black text-white drop-shadow-[0_0_10px_rgba(251,191,36,0.4)]">💰{(table.stake * 2).toLocaleString()}</span>
+                    </div>
+
+                    <div className="h-16 flex flex-col items-center justify-center">
+                        {isP2P && <div className={`flex flex-col items-center text-xs transition-colors ${countdown < 10 ? 'text-red-500 font-black animate-pulse drop-shadow-[0_0_10px_rgba(239,68,68,0.6)]' : 'text-slate-300'}`}>
+                            <Clock size={18} className="mb-1 opacity-80" />
+                            <span className="font-mono text-xl tracking-wider">{countdown}s</span>
+                        </div>}
+                    </div>
+                    
+                    <div className={`w-full py-3 rounded-xl text-[10px] font-black tracking-widest uppercase border text-center shadow-lg transition-all ${isMyTurn ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 glow-emerald' : 'bg-slate-800/80 border-white/10 text-slate-400'}`}>
+                        {msg || 'WAITING'}
                     </div>
                 </div>
-            </header>
 
-            {/* Message Bar */}
-            <div className="py-2 flex justify-center shrink-0">
-                <div className={`px-5 py-1 rounded-full text-[10px] font-black tracking-widest uppercase border ${isMyTurn ? 'bg-emerald-500/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-white/10 text-slate-400'}`}>
-                    {msg || 'WAITING'}
+                {/* Player 2 (Bottom) */}
+                <div className={`p-4 border-t transition-all shadow-[0_-4px_20px_rgba(0,0,0,0.5)] ${!isMyTurn ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
+                    <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner mb-3">
+                        <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pot</span>
+                        <span className="text-xl font-black font-mono text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]">{oppPot}</span>
+                    </div>
+                    <div className="flex items-center gap-3 flex-row-reverse text-right">
+                        <img src={av2(oppId)} className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm font-bold truncate text-white drop-shadow-md">{name2(oppId)}</p>
+                            <p className="text-[10px] text-slate-300 uppercase tracking-wider font-bold">{myGroup ? (myGroup === 'solids' ? 'stripes' : 'solids') : 'Ready'}</p>
+                        </div>
+                    </div>
                 </div>
             </div>
 
-            {/* Table Container */}
-            <div className="flex-1 flex items-center justify-center p-2 min-h-0 bg-gradient-to-b from-[#070c10] to-[#0d161d]">
+            {/* Center Table Area */}
+            <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-[#070c10] to-[#0d161d] relative overflow-hidden">
+                <span className="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-slate-500/50 uppercase tracking-[0.5em] font-black pointer-events-none hidden md:block mix-blend-screen select-none">
+                    KATIKA CHAMPIONSHIP
+                </span>
+
                 <div style={{ width: TW, height: TH, transform: `scale(${scale})`, transformOrigin: 'center', position: 'relative' }} className="shrink-0 shadow-[0_0_100px_rgba(0,0,0,0.8)]">
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[#7a3e10] via-[#3a1a07] to-[#7a3e10] border-4 border-[#1a0d04] shadow-2xl overflow-hidden">
+                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[#7a3e10] via-[#3a1a07] to-[#7a3e10] border-4 border-[#1a0d04] shadow-[0_20px_50px_rgba(0,0,0,0.9)] overflow-hidden">
                         <div className="absolute inset-[16px] rounded-lg shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
-                            <canvas ref={canvasRef} width={TW} height={TH} onPointerDown={handleCanvasTap} className="w-full h-full block cursor-crosshair" />
+                            <canvas 
+                                ref={canvasRef} 
+                                width={TW} height={TH} 
+                                onPointerDown={handleCanvasPointerDown}
+                                onPointerMove={handleCanvasPointerMove}
+                                onPointerUp={handleCanvasPointerUp}
+                                onPointerOut={handleCanvasPointerUp}
+                                onPointerCancel={handleCanvasPointerUp}
+                                className="w-full h-full block cursor-crosshair touch-none" 
+                            />
                         </div>
                         {/* Decorative Diamonds */}
-                        {[25, 50, 75].map(pct => <div key={pct} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ top: '4px', left: `${pct}%` }} />)}
-                        {[25, 50, 75].map(pct => <div key={pct} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ bottom: '4px', left: `${pct}%` }} />)}
+                        {[25, 50, 75].map(pct => <div key={`t${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ top: '4px', left: `${pct}%` }} />)}
+                        {[25, 50, 75].map(pct => <div key={`b${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ bottom: '4px', left: `${pct}%` }} />)}
+                        {[25, 50, 75].map(pct => <div key={`l${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ left: '4px', top: `${pct}%` }} />)}
+                        {[25, 50, 75].map(pct => <div key={`r${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ right: '4px', top: `${pct}%` }} />)}
                     </div>
                 </div>
+
+                <AnimatePresence>
+                    {bih && isMyTurn && (
+                        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 px-8 py-3 bg-blue-500/90 rounded-full border-2 border-blue-400 shadow-[0_0_30px_rgba(59,130,246,0.5)] flex items-center gap-3 backdrop-blur-md">
+                            <Target size={20} className="animate-pulse drop-shadow-md text-white" />
+                            <span className="text-sm font-black uppercase tracking-widest text-white drop-shadow-md">Ball in Hand - Tap Board</span>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
             </div>
 
-            {/* Controls */}
-            <div className="h-[28%] bg-black/60 border-t border-white/5 p-4 flex items-center justify-between safe-bottom shrink-0">
-                {/* Aiming Joystick */}
-                <div className="relative w-32 h-32 rounded-full bg-white/5 border border-white/10 flex items-center justify-center active:bg-white/10 transition-colors" onPointerMove={handleJoystick}>
-                    <div className="absolute inset-4 rounded-full border-2 border-dashed border-white/20 animate-spin-slow" />
-                    <motion.div style={{ rotate: angle * (180 / Math.PI) }} className="w-full flex justify-end pr-2 pointer-events-none">
-                        <div className="w-12 h-1 bg-gradient-to-r from-transparent to-gold-400 rounded-full shadow-[0_0_10px_rgba(251,191,36,0.5)]" />
-                    </motion.div>
-                    <div className="w-4 h-4 bg-gold-500 rounded-full shadow-[0_0_20px_gold]" />
-                    <span className="absolute -top-6 text-[10px] font-black text-slate-500 tracking-[0.3em] uppercase">AIM STEER</span>
-                </div>
+            {/* Right Panel: Power Slider */}
+            <div className="w-24 h-full bg-black/60 border-l border-white/5 flex flex-col items-center justify-center py-8 safe-right shrink-0 z-10 shadow-[-10px_0_30px_rgba(0,0,0,0.5)] relative">
+                <span className="absolute top-[10%] text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black rotate-[-90deg] origin-center whitespace-nowrap opacity-60">
+                    PULL TO SHOOT
+                </span>
 
-                {/* Shoot Button */}
-                <div className="flex flex-col items-center gap-3">
-                    <button 
-                        disabled={!isMyTurn || moving || bih || power < 5} 
-                        onPointerUp={() => isMyTurn && !moving && !bih && power >= 5 && animStrike(angle, power)}
-                        className={`w-20 h-20 rounded-full flex items-center justify-center transition-all ${isMyTurn && !moving && power >= 5 ? 'bg-gold-500 text-royal-950 scale-110 shadow-[0_0_30px_gold] active:scale-95' : 'bg-white/10 text-slate-500 cursor-not-allowed opacity-50'}`}
-                    >
-                        <Zap size={32} fill="currentColor" />
-                    </button>
-                    <span className="text-[10px] font-black text-gold-500 animate-pulse uppercase tracking-widest">Shoot</span>
-                </div>
-
-                {/* Power Slider */}
-                <div className="relative w-16 h-40 bg-white/5 rounded-2xl border border-white/10 overflow-hidden" onPointerMove={handlePowerSlider} onPointerDown={handlePowerSlider}>
-                    <div className="absolute bottom-0 left-0 right-0 transition-all duration-75" style={{ height: `${power}%`, background: `linear-gradient(to top, #22c55e 0%, #f59e0b 60%, #ef4444 100%)` }} />
-                    <div className="absolute inset-0 flex flex-col justify-between py-4 pointer-events-none">
-                        {[100, 75, 50, 25, 0].map(v => <div key={v} className="w-full px-2 flex justify-between items-center"><div className="w-1 h-[1px] bg-white/20" /><span className="text-[7px] font-mono opacity-40">{v}%</span></div>)}
+                <div 
+                    className="relative w-12 h-[60%] max-h-72 bg-black/40 rounded-full border-2 border-white/10 overflow-hidden touch-none shadow-[inset_0_2px_15px_rgba(0,0,0,0.8)] my-8 cursor-ns-resize" 
+                    onPointerDown={handlePowerPointerDown}
+                    onPointerMove={handlePowerPointerMove}
+                    onPointerUp={handlePowerPointerUp}
+                    onPointerOut={handlePowerPointerUp}
+                    onPointerCancel={handlePowerPointerUp}
+                >
+                    <div className="absolute top-0 left-0 right-0 transition-all duration-75" style={{ height: `${power}%`, background: `linear-gradient(to bottom, #10b981 0%, #f59e0b 50%, #dc2626 100%)`, boxShadow: '0 10px 20px rgba(0,0,0,0.5)' }} />
+                    <div className="absolute inset-0 flex flex-col justify-between py-6 pointer-events-none">
+                        {[0, 25, 50, 75, 100].map(v => (
+                            <div key={v} className="w-full flex justify-center items-center opacity-30">
+                                <div className="w-4 h-[3px] bg-white rounded-full shadow-sm" />
+                            </div>
+                        ))}
                     </div>
-                    <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-black text-slate-500 tracking-[0.3em] uppercase">FORCE</span>
+                </div>
+
+                <div className="w-12 h-12 rounded-full border-2 border-white/10 flex items-center justify-center bg-white/5 shadow-[inset_0_2px_10px_rgba(255,255,255,0.05)]">
+                    <Zap size={20} className={`transition-colors duration-300 ${power > 5 ? 'text-gold-400 animate-pulse drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]' : 'text-slate-600'}`} />
                 </div>
             </div>
-
-            {/* Overlays */}
-            <AnimatePresence>
-                {bih && isMyTurn && (
-                    <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="absolute bottom-40 left-1/2 -translate-x-1/2 z-50 px-6 py-2 bg-blue-500/90 rounded-full border border-blue-400 shadow-xl flex items-center gap-2">
-                        <Target size={16} className="animate-pulse" />
-                        <span className="text-xs font-bold uppercase tracking-widest italic">Ball in Hand: Tap Board</span>
-                    </motion.div>
-                )}
-            </AnimatePresence>
 
             <style>{`
-                .safe-top { padding-top: max(0.75rem, env(safe-area-inset-top)); }
-                .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
-                .animate-spin-slow { animation: spin 10s linear infinite; }
-                @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+                .safe-left { padding-left: max(0rem, env(safe-area-inset-left)); }
+                .safe-right { padding-right: max(0rem, env(safe-area-inset-right)); }
+                .glow-emerald { box-shadow: 0 0 20px rgba(16, 185, 129, 0.2); }
             `}</style>
 
             {/* Forfeit Modal */}
             {forfeit && (
                 <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
-                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1c2a35] border border-red-500/30 rounded-3xl p-8 w-full max-w-sm text-center">
-                        <AlertTriangle className="text-red-500 mx-auto mb-4" size={40} />
-                        <h2 className="text-xl font-bold mb-2">Forfeit Match?</h2>
-                        <p className="text-slate-400 mb-8 text-sm leading-relaxed">Leaving will result in an immediate loss and loss of stake. Tournament progress will be lost.</p>
+                    <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} className="bg-[#1c2a35] border border-red-500/30 rounded-3xl p-8 w-full max-w-sm text-center shadow-2xl">
+                        <AlertTriangle className="text-red-500 mx-auto mb-4 drop-shadow-[0_0_10px_rgba(239,68,68,0.5)]" size={48} />
+                        <h2 className="text-2xl font-bold mb-2">Forfeit Match?</h2>
+                        <p className="text-slate-400 mb-8 text-sm leading-relaxed">Leaving will result in an immediate loss and loss of your stake. Tournament progress will be lost permanently.</p>
                         <div className="flex gap-4">
-                            <button onClick={() => setForfeit(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold border border-white/10">Stay</button>
-                            <button onClick={() => { if (isP2P && socket) socket.emit('game_action', { roomId, action: { type: 'FORFEIT' } }); onGameEnd('quit'); }} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold shadow-lg shadow-red-600/20">Forfeit</button>
+                            <button onClick={() => setForfeit(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 rounded-xl font-bold border border-white/10 transition-colors">Stay</button>
+                            <button onClick={() => { if (isP2P && socket) socket.emit('game_action', { roomId, action: { type: 'FORFEIT' } }); onGameEnd('quit'); }} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white rounded-xl font-bold shadow-[0_4px_15px_rgba(220,38,38,0.3)] transition-colors">Forfeit</button>
                         </div>
                     </motion.div>
                 </div>
