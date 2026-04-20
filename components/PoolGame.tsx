@@ -694,7 +694,26 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
 
     // ── Persistent Render ──
     useEffect(() => {
-        const cv = canvasRef.current, ctx = cv?.getContext('2d'); if (!cv || !ctx) return;
+        const cv = canvasRef.current;
+        if (!cv) return;
+        const ctx = cv.getContext('2d'); 
+        if (!ctx) return;
+
+        // Apply DPR scaling for sharp rendering but cap at 2 to prevent GPU overload
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        const logicW = isLandscapeRef.current ? TH : TW;
+        const logicH = isLandscapeRef.current ? TW : TH;
+        
+        cv.width = logicW * dpr;
+        cv.height = logicH * dpr;
+        
+        // CSS handles the visual size
+        cv.style.width = `${logicW}px`;
+        cv.style.height = `${logicH}px`;
+        
+        // Normalize coordinates to the logical size
+        ctx.scale(dpr, dpr);
+
         const loop = () => {
             const mt = turnRef.current === myId, mv = movRef.current, grp = myGrRef.current;
             const targetIds = (mt && !mv) ? (grp === 'solids' ? [1, 2, 3, 4, 5, 6, 7] : grp === 'stripes' ? [9, 10, 11, 12, 13, 14, 15] : [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]).filter(id => !ballsRef.current.find(b => b.id === id)?.pocketed) : [];
@@ -822,7 +841,6 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                             <div className="absolute inset-[16px] rounded-lg shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
                                 <canvas 
                                     ref={canvasRef} 
-                                    width={isLandscape ? TH : TW} height={isLandscape ? TW : TH} 
                                     onPointerDown={handleCanvasPointerDown}
                                     onPointerMove={handleCanvasPointerMove}
                                     onPointerUp={handleCanvasPointerUp}

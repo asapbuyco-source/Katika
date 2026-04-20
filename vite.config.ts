@@ -35,7 +35,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // SPA offline fallback: serve index.html when network is unavailable
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io/, /^\/game\//, /^\/tournament\//],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,

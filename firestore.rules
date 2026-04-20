@@ -20,17 +20,18 @@ service cloud.firestore {
     }
 
     // Incoming data does NOT attempt to elevate isAdmin
-    // (isAdmin must only be writable by server-side Admin SDK, never the client)
     function noAdminEscalation() {
-      return !('isAdmin' in request.resource.data) ||
-             request.resource.data.isAdmin == resource.data.get('isAdmin', false);
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin']) ||
+             request.resource.data.isAdmin == resource.data.isAdmin;
     }
 
     // Incoming data does NOT attempt to arbitrarily increase financial fields or change referrals
     function noFinancialEscalation() {
-      return (!('balance' in request.resource.data) || request.resource.data.balance == resource.data.get('balance', 0)) &&
-             (!('promoBalance' in request.resource.data) || request.resource.data.promoBalance == resource.data.get('promoBalance', 0)) &&
-             (!('referredBy' in request.resource.data) || (!('referredBy' in resource.data)) || request.resource.data.referredBy == resource.data.get('referredBy', ''));
+      let diff = request.resource.data.diff(resource.data);
+      let noBalanceChange = !diff.affectedKeys().hasAny(['balance']) || request.resource.data.balance == resource.data.balance;
+      let noPromoChange = !diff.affectedKeys().hasAny(['promoBalance']) || request.resource.data.promoBalance == resource.data.promoBalance;
+      let noRefChange = !diff.affectedKeys().hasAny(['referredBy']) || request.resource.data.referredBy == resource.data.referredBy;
+      return noBalanceChange && noPromoChange && noRefChange;
     }
 
     // ─── USERS ───────────────────────────────────────────────────────────────

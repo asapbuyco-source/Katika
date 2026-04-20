@@ -216,14 +216,22 @@ const AppContent = () => {
 
     // Rejoining State
     const [isRejoining, setIsRejoining] = React.useState(false);
+    const [rejoinFailed, setRejoinFailed] = React.useState(false);
+
     useEffect(() => {
         const storedRoom = sessionStorage.getItem('vantage_active_room');
         if (storedRoom && !socketGame && isConnected) {
             setIsRejoining(true);
-            const timer = setTimeout(() => setIsRejoining(false), 5000); // Timeout fallback
+            setRejoinFailed(false);
+            const timer = setTimeout(() => {
+                 if (!socketGame) {
+                     setRejoinFailed(true);
+                 }
+            }, 5000); // Timeout fallback
             return () => clearTimeout(timer);
         } else if (socketGame) {
             setIsRejoining(false);
+            setRejoinFailed(false);
         }
     }, [socketGame, isConnected]);
 
@@ -434,12 +442,38 @@ const AppContent = () => {
                         animate={{ opacity: 1, scale: 1 }}
                         className="flex flex-col items-center"
                     >
-                        <div className="relative mb-6">
-                            <div className="absolute inset-0 bg-gold-500/20 blur-2xl rounded-full animate-pulse"></div>
-                            <Loader2 className="w-16 h-16 text-gold-500 animate-spin relative z-10" />
-                        </div>
-                        <h2 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase">Resuming Match</h2>
-                        <p className="text-slate-400 text-sm max-w-xs">Wait a moment while we reconnect you to your active game session...</p>
+                        {!rejoinFailed ? (
+                            <>
+                                <div className="relative mb-6">
+                                    <div className="absolute inset-0 bg-gold-500/20 blur-2xl rounded-full animate-pulse"></div>
+                                    <Loader2 className="w-16 h-16 text-gold-500 animate-spin relative z-10" />
+                                </div>
+                                <h2 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase">Resuming Match</h2>
+                                <p className="text-slate-400 text-sm max-w-xs">Wait a moment while we reconnect you to your active game session...</p>
+                            </>
+                        ) : (
+                            <>
+                                <div className="relative mb-6">
+                                    <div className="w-16 h-16 rounded-full bg-red-500/20 text-red-500 flex items-center justify-center border border-red-500/50">
+                                        <X size={32} />
+                                    </div>
+                                </div>
+                                <h2 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase">Room Expired</h2>
+                                <p className="text-slate-400 text-sm max-w-xs mb-6">The match may have ended while you were disconnected.</p>
+                                <div className="flex gap-3">
+                                    <button 
+                                        onClick={() => {
+                                            sessionStorage.removeItem('vantage_active_room');
+                                            setIsRejoining(false);
+                                            dispatch({ type: 'SET_VIEW', payload: 'dashboard' });
+                                        }}
+                                        className="px-6 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all font-bold tracking-wide"
+                                    >
+                                        Return to Dashboard
+                                    </button>
+                                </div>
+                            </>
+                        )}
                     </motion.div>
                 </div>
             )}

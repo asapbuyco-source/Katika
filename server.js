@@ -91,7 +91,10 @@ app.use(morgan('combined'));
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     max: 100,
-    message: { error: 'Too many requests, please try again later.' }
+    message: { error: 'Too many requests, please try again later.' },
+    keyGenerator: (req) => {
+        return req.user?.uid || req.ip; // Fix C: Key on user ID if authenticated, else IP
+    }
 });
 app.use('/api/', limiter);
 
@@ -561,7 +564,7 @@ app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) 
                 const netContribution = tData.entryFee - platformFee;
                 transaction.update(tRef, {
                     participants: admin.firestore.FieldValue.arrayUnion(userId),
-                    prizePool: (tData.prizePool || 0) + netContribution,
+                    prizePool: admin.firestore.FieldValue.increment(netContribution), // Fix F: Atomic increment
                     [`participantSplits.${userId}`]: { real: realDeducted, promo: promoDeducted }
                 });
             }
@@ -954,9 +957,7 @@ const startTournamentScheduler = () => {
 
 if (db) startTournamentScheduler();
 
-// --- ADMIN MIDDLEWARE: Verify Firebase ID Token + email whitelist ---
-// FIX C2: Admin privilege is determined by the JWT email (cryptographically signed by Firebase),
-// NOT by the Firestore isAdmin flag (which any user can self-write via the client SDK).
+// --- ADMIN MIDDLEWARE: Verify Firebase ID Token + custom claims ---
 const verifyAdmin = async (req, res, next) => {
     const authHeader = req.headers['authorization'];
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -968,7 +969,8 @@ const verifyAdmin = async (req, res, next) => {
     }
     try {
         const decoded = await admin.auth().verifyIdToken(token);
-        if (!decoded.email || !ADMIN_EMAILS.includes(decoded.email)) {
+        // Fix A: Prefer custom claim, fallback to email list during transition
+        if (!decoded.admin && (!decoded.email || !ADMIN_EMAILS.includes(decoded.email))) {
             console.warn(`[Admin] Blocked unauthorized access: uid=${decoded.uid} email=${decoded.email}`);
             return res.status(403).json({ error: 'Forbidden: Admin access required' });
         }
@@ -1401,10 +1403,11 @@ setInterval(() => {
 setInterval(() => {
     const tenMinAgo = Date.now() - 10 * 60 * 1000;
     for (const [roomId, room] of rooms.entries()) {
+        if (!room) continue; // Fix G: Guard against undefined
         if (room.status === 'completed') continue; // already scheduled for cleanup
         const createdAt = room.gameState?.startTime || 0;
         if (createdAt > tenMinAgo) continue; // room is fresh
-        const hasActivePlayers = room.players.some(pid => {
+        const hasActivePlayers = (room.players || []).some(pid => {
             const sid = userSockets.get(pid);
             return sid && io.sockets.sockets.has(sid);
         });
@@ -1412,7 +1415,7 @@ setInterval(() => {
             console.warn(`[Reaper] Evicting orphan room ${roomId} (${room.gameType}, both players disconnected)`);
             // Refund escrows for stake games so money isn't lost
             if (room.stake > 0 && room.escrowSplits) {
-                room.players.forEach(pid => {
+                (room.players || []).forEach(pid => {
                     const split = room.escrowSplits[pid];
                     if (split) refundEscrow(pid, split.real || 0, split.promo || 0);
                 });
@@ -1746,6 +1749,28 @@ const createInitialGameState = (gameType, p1, p2) => {
 // --- SOCKET LOGIC ---
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
+
+    // Fix E: Token Refresh Re-verification
+    // Enforce 55-minute disconnects for clients that don't refresh their token
+    let tokenExpiryTimer = setTimeout(() => {
+        console.warn(`[Auth] Forcing disconnect for ${socket.id} due to token expiry (55m)`);
+        socket.disconnect(true);
+    }, 55 * 60 * 1000);
+
+    socket.on('refresh_token', async ({ token }) => {
+        try {
+            await admin.auth().verifyIdToken(token);
+            clearTimeout(tokenExpiryTimer);
+            tokenExpiryTimer = setTimeout(() => {
+                console.warn(`[Auth] Forcing disconnect for ${socket.id} due to token expiry (55m)`);
+                socket.disconnect(true);
+            }, 55 * 60 * 1000);
+            socket.emit('token_verified');
+        } catch (err) {
+            console.warn(`[Auth] Token refresh failed for ${socket.id}`);
+            socket.disconnect(true);
+        }
+    });
 
     // ── Login streak tracking (internal — used for engagement, not displayed to players) ──
     const userId_connect = socketUsers.get(socket.id);
