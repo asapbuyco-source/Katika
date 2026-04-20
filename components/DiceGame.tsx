@@ -95,7 +95,16 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         ? socketGame.players.find((id: string) => id !== user.id)
         : 'bot';
 
+    const scoresRef = useRef({ me: 0, opp: 0 });
     const [scores, setScores] = useState({ me: 0, opp: 0 });
+
+    const updateScoresLocal = (updater: (s: {me: number, opp: number}) => {me: number, opp: number}) => {
+        setScores(s => {
+            const next = updater(s);
+            scoresRef.current = next;
+            return next;
+        });
+    };
     const [round, setRound] = useState(1);
     const [phase, setPhase] = useState<'waiting' | 'rolling' | 'scored'>('waiting');
 
@@ -150,10 +159,12 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             const gs = socketGame.gameState || {};
 
             if (gs.scores && (gs.scores[user.id] !== scores.me || gs.scores[opponentId] !== scores.opp)) {
-                setScores({
+                const newScores = {
                     me: gs.scores[user.id] || 0,
                     opp: gs.scores[opponentId] || 0
-                });
+                };
+                setScores(newScores);
+                scoresRef.current = newScores;
             }
 
             if (gs.currentRound && gs.currentRound !== round) {
@@ -317,11 +328,11 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
         setPhase('scored');
 
         if (pTotal > oTotal) {
-            setScores(s => ({ ...s, me: s.me + 1 }));
+            updateScoresLocal(s => ({ ...s, me: s.me + 1 }));
             setRoundWinner('me');
             playSFX('win');
         } else if (oTotal > pTotal) {
-            setScores(s => ({ ...s, opp: s.opp + 1 }));
+            updateScoresLocal(s => ({ ...s, opp: s.opp + 1 }));
             setRoundWinner('opp');
             playSFX('loss');
         } else {
@@ -335,8 +346,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
     };
 
     const nextRoundLocal = () => {
-        if (scores.me >= 3 || scores.opp >= 3) {
-            onGameEnd(scores.me >= 3 ? 'win' : 'loss');
+        if (scoresRef.current.me >= 3 || scoresRef.current.opp >= 3) {
+            onGameEnd(scoresRef.current.me >= 3 ? 'win' : 'loss');
         } else {
             setRound(r => r + 1);
             setIsMyTurn(true);

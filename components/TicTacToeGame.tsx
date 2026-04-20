@@ -88,6 +88,11 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
         }
     }, [socketGame, user.id, isP2P]);
 
+    const disconnectedRef = React.useRef(state.opponentDisconnected);
+    useEffect(() => {
+        disconnectedRef.current = state.opponentDisconnected;
+    }, [state.opponentDisconnected]);
+
     useEffect(() => {
         if (winner || isDraw) return;
 
@@ -95,7 +100,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
         let timeoutId: any;
 
         const timer = setInterval(() => {
-            if (state.opponentDisconnected) return;
+            if (disconnectedRef.current) return;
             setTimeLeft((prev) => {
                 if (prev <= 1) {
                     clearInterval(timer);
@@ -110,7 +115,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
             clearInterval(timer);
             if (timeoutId) clearTimeout(timeoutId);
         };
-    }, [isXNext, winner, isDraw, isP2P, state.opponentDisconnected]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isXNext, winner, isDraw, isP2P]);
 
     const handleQuit = () => {
         if (isP2P && socket && socketGame) {

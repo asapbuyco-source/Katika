@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { motion as originalMotion } from 'framer-motion';
 import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft, KeyRound, CheckCircle } from 'lucide-react';
-import { signInWithGoogle, registerWithEmail, loginWithEmail, loginAsGuest, syncUserProfile, triggerPasswordReset } from '../services/firebase';
+import { signInWithGoogle, registerWithEmail, loginWithEmail, syncUserProfile, triggerPasswordReset } from '../services/firebase';
 import { User as AppUser, ViewState } from '../types';
 
 // Fix for Framer Motion type mismatches in current environment
@@ -25,7 +25,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
-    const [showGuest, setShowGuest] = useState(false);
 
     const handleGoogleLogin = async () => {
         setIsLoading(true);
@@ -51,7 +50,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
             } else if (err.code === 'auth/network-request-failed') {
                 setError('Network error. Check your connection and try again.');
             } else {
-                setError('Google sign-in failed. Please try Email & Password or Guest Mode.');
+                setError('Google sign-in failed. Please try Email & Password.');
             }
             setIsLoading(false);
         }
@@ -75,17 +74,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
         }
     };
 
-    const handleGuestLogin = async () => {
-        setIsLoading(true);
-        try {
-            const guest = await loginAsGuest();
-            // Pass the guest user up to App.tsx
-            onAuthenticated(guest);
-        } catch (e) {
-            setError("Guest login failed");
-            setIsLoading(false);
-        }
-    };
+
 
     const handleEmailAuth = async () => {
         if (!email || !password) {
@@ -179,58 +168,35 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
 
                             {/* Standard Logins */}
-                            {!showGuest && (
-                                <>
-                                    <button
-                                        onClick={handleGoogleLogin}
-                                        disabled={isLoading}
-                                        className="w-full bg-white hover:bg-slate-100 text-royal-900 font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
-                                    >
-                                        {isLoading ? (
-                                            <span className="animate-pulse">Connecting...</span>
-                                        ) : (
-                                            <>
-                                                <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5" />
-                                                <span>Continue with Google</span>
-                                                <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-royal-900 transition-colors" />
-                                            </>
-                                        )}
-                                    </button>
+                            <button
+                                onClick={handleGoogleLogin}
+                                disabled={isLoading}
+                                className="w-full bg-white hover:bg-slate-100 text-royal-900 font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
+                            >
+                                {isLoading ? (
+                                    <span className="animate-pulse">Connecting...</span>
+                                ) : (
+                                    <>
+                                        <img src="https://www.google.com/favicon.ico" alt="G" className="w-5 h-5" />
+                                        <span>Continue with Google</span>
+                                        <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-royal-900 transition-colors" />
+                                    </>
+                                )}
+                            </button>
 
-                                    <div className="relative py-2">
-                                        <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-                                        <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">Or use email</span></div>
-                                    </div>
-
-                                    <button
-                                        onClick={() => setMethod('email')}
-                                        className="w-full bg-royal-800/50 hover:bg-royal-800 border border-white/10 text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
-                                    >
-                                        <Mail size={20} className="text-gold-400" />
-                                        <span>Email & Password</span>
-                                        <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-white transition-colors" />
-                                    </button>
-                                </>
-                            )}
-
-                            {/* Guest Fallback - Shows if error occurs or always available for dev */}
-                            {showGuest && (
-                                <motion.button
-                                    initial={{ scale: 0.9, opacity: 0 }}
-                                    animate={{ scale: 1, opacity: 1 }}
-                                    onClick={handleGuestLogin}
-                                    className="w-full bg-gradient-to-r from-blue-600 to-blue-500 text-white font-bold py-4 rounded-xl shadow-lg flex items-center justify-center gap-3 hover:scale-105 transition-transform"
-                                >
-                                    <User size={20} />
-                                    <span>Continue as Guest (Dev Mode)</span>
-                                </motion.button>
-                            )}
-
-                            <div className="mt-4 text-center">
-                                <button onClick={() => setShowGuest(!showGuest)} className="text-[10px] text-slate-500 hover:text-white">
-                                    {showGuest ? "Hide Guest Option" : "Having trouble? Try Guest Mode"}
-                                </button>
+                            <div className="relative py-2">
+                                <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
+                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">Or use email</span></div>
                             </div>
+
+                            <button
+                                onClick={() => setMethod('email')}
+                                className="w-full bg-royal-800/50 hover:bg-royal-800 border border-white/10 text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
+                            >
+                                <Mail size={20} className="text-gold-400" />
+                                <span>Email & Password</span>
+                                <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-white transition-colors" />
+                            </button>
                         </motion.div>
                     )}
 
@@ -290,7 +256,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
                             <div className="flex gap-3">
                                 <button
-                                    onClick={() => { setMethod('menu'); setError(''); setShowGuest(false); }}
+                                    onClick={() => { setMethod('menu'); setError(''); }}
                                     className="px-4 py-4 rounded-xl border border-white/10 hover:bg-white/5 text-slate-400 transition-colors"
                                 >
                                     <ArrowLeft size={20} />

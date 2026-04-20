@@ -163,8 +163,12 @@ console.log(`\n${'─'.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 if (failed === 0) {
     console.log('🏆 All pool shot tests passed!\n');
-    process.exit(0);
 } else {
     console.log('❌ Some tests failed — see above.\n');
-    process.exit(1);
+    throw new Error("Pool tests failed.");
 }
+
+import { it } from 'vitest';
+it('Pool shot physics raw validation', () => {
+    if (failed > 0) throw new Error("Pool tests failed.");
+});

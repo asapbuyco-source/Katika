@@ -56,7 +56,6 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighte
         <div
             onClick={(e) => { e.stopPropagation(); handlePieceClick(); handleMoveClick(); }}
             className={`relative w-full h-full flex items-center justify-center ${isDark ? 'bg-royal-900/60' : 'bg-white/5'} ${isClickable ? 'cursor-pointer' : ''}`}
-            style={{ transform: rotate ? 'rotate(180deg)' : 'none' }}
         >
             {isDark && <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />}
             {(isLastFrom || isLastTo) && <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />}
@@ -110,7 +109,6 @@ const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighte
     if (prev.isLastFrom !== next.isLastFrom) return false;
     if (prev.isLastTo !== next.isLastTo) return false;
     if (prev.isMeTurn !== next.isMeTurn) return false;
-    if (prev.rotate !== next.rotate) return false;
     return true;
 });
 
@@ -589,15 +587,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     // Finalize — apply the complete multi-hop move to state in one shot
                     executeMove({ ...randomMove, fromR: stateRef.current.pieces.find(p => currentPieces.find(cp => cp.id === p.id && (cp.r !== p.r || cp.c !== p.c)))?.r ?? randomMove.fromR, fromC: stateRef.current.pieces.find(p => currentPieces.find(cp => cp.id === p.id && (cp.r !== p.r || cp.c !== p.c)))?.c ?? randomMove.fromC });
                 };
-                // Simpler approach: just execute the single best jump move for bot
-                const { moves } = getGlobalValidMoves('opponent', stateRef.current.pieces);
-                if (moves.length > 0) {
-                    const jumps = moves.filter(m => m.isJump);
-                    const candidates = jumps.length > 0 ? jumps : moves;
-                    executeMove(candidates[Math.floor(Math.random() * candidates.length)]);
-                } else {
-                    setIsGameOver(true);
-                    onGameEnd('win');
+                
+                // Execute the bot chain recursively starting from the current board
+                execBotJumpChain();
                 }
             }, 1000);
             return () => clearTimeout(timer);
@@ -732,8 +724,10 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
             {/* BOARD */}
             <div className={`relative w-full max-w-[500px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} transition-colors duration-300`}>
-                <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10 overflow-hidden rounded-lg transition-all duration-700 ${forwardDir === 1 ? 'rotate-180' : ''}`}>
-                    {Array.from({ length: 8 }).map((_, r) => Array.from({ length: 8 }).map((_, c) => {
+                <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10 overflow-hidden rounded-lg transition-all duration-700`}>
+                    {Array.from({ length: 8 }).map((_, rIdx) => Array.from({ length: 8 }).map((_, cIdx) => {
+                        const r = forwardDir === 1 ? 7 - rIdx : rIdx;
+                        const c = forwardDir === 1 ? 7 - cIdx : cIdx;
                         const key = `${r},${c}`;
                         return <CheckersCell
                             key={key}
@@ -749,7 +743,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             onPieceClick={handlePieceClick}
                             onMoveClick={handleMoveClick}
                             isMeTurn={turn === 'me'}
-                            rotate={forwardDir === 1}
                         />;
                     }))}
                 </div>

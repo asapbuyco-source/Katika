@@ -548,8 +548,6 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         setTurnId(next);
         if (foul && next === myId) setBih(true);
         if (!isP2P && next === 'bot') setTimeout(() => {
-            // P4 Fix: guard against double-fire if physics are still settling
-            if (movRef.current) return;
             const c = ballsRef.current.find(b => b.id === 0)!; if (foul) { c.pocketed = false; c.x = TW * .6 + (Math.random() - .5) * 100; c.y = TH / 2 + (Math.random() - .5) * 100; setBalls([...ballsRef.current]); }
             const shot = findBotShot(ballsRef.current, nbg);
             if (shot) { setAngle(shot.angle); setPower(shot.power); animStrike(shot.angle, shot.power); }
@@ -645,10 +643,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const updatePower = (e: React.PointerEvent | React.MouseEvent) => {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const p = Math.max(0, Math.min(100, (e.clientY - rect.top) / rect.height * 100));
-        powerRef.current = p;                  // keep ref in sync
-        strikeOffRef.current = p * 0.4 + 10;  // keep ref in sync
+        powerRef.current = p;
         setPower(p);
-        setStrikeOff(p * 0.4 + 10);
+        // Do not update strikeOff during the drag; strikeOff is the forward animation
+        setStrikeOff(0);
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
             socket.emit('aim_sync', { roomId, type: 'aim_sync', angle: angleRef.current, power: p });
@@ -680,9 +678,6 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             try { captureEl.releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
         }
 
-        // CRITICAL FIX: read from refs, NOT from React state.
-        // React batches state updates, so `power`, `strikeOff`, and `angle`
-        // are frequently stale (0) here — causing the shot to silently cancel.
         const finalP = powerRef.current;
         const finalAngle = angleRef.current;
 
@@ -692,26 +687,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             return;
         }
 
-        let f = strikeOffRef.current;
         powerRef.current = 0; strikeOffRef.current = 0;
-        setPower(0);
-
-        const iv = setInterval(() => {
-            f -= 8;
-            setStrikeOff(Math.max(0, f));
-            if (f <= 0) {
-                clearInterval(iv);
-                setStrikeOff(0);
-                const c = ballsRef.current.find(b => b.id === 0);
-                if (c && !c.pocketed) {
-                    // Use captured finalAngle (from ref at release time) — angle state is stale here
-                    c.vx = Math.cos(finalAngle) * (finalP * .35);
-                    c.vy = Math.sin(finalAngle) * (finalP * .35);
-                    playPoolSound('cue-hit', finalP / 100);
-                    startPhysics();
-                }
-            }
-        }, 16);
+        // Uses animStrike for a smooth visual snap-forward, identical to the AI
+        animStrike(finalAngle, finalP);
     };
 
     // ── Persistent Render ──

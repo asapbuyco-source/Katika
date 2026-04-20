@@ -67,7 +67,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent', defaultStatus: 'active' },
     { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'hover:bg-red-500/20 hover:border-red-500/50', gradient: 'from-red-500/20 to-transparent', defaultStatus: 'active' },
     { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent', defaultStatus: 'active' },
-    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent', defaultStatus: 'disabled' },
     { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'hover:bg-green-500/20 hover:border-green-500/50', gradient: 'from-green-500/20 to-transparent', defaultStatus: 'active' },
   ];
 
