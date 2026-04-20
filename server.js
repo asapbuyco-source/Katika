@@ -1242,7 +1242,7 @@ const settleGame = async (roomId, winnerId) => {
         console.error(`[settleGame] CRITICAL — Failed after 3 retries for room ${roomId}:`, err.message);
         // Write to a failed_settlements collection so admin can manually reconcile
         if (db) db.collection('failed_settlements').doc(roomId).set({
-            roomId, winnerId, loserId, winnings, stake: room.stack,
+            roomId, winnerId, loserId, winnings, stake: room.stake,
             error: err.message, failedAt: admin.firestore.FieldValue.serverTimestamp()
         }).catch(() => {});
     }
@@ -1380,6 +1380,47 @@ const runDisputeSLAResolver = async () => {
     } catch (e) { console.error('[DisputeSLA]', e); }
 };
 setInterval(runDisputeSLAResolver, 5 * 60 * 1000);
+
+// ─── MEMORY HYGIENE ───────────────────────────────────────────────────────────
+
+// S2 Fix: Purge stale per-user rate-limit entries so the Map doesn't grow
+// unboundedly across a long server uptime. Runs every 5 minutes.
+setInterval(() => {
+    const cutoff = Date.now() - 60000;
+    for (const [uid, timestamps] of gameActionTimestamps.entries()) {
+        const fresh = timestamps.filter(t => t > cutoff);
+        if (fresh.length === 0) gameActionTimestamps.delete(uid);
+        else gameActionTimestamps.set(uid, fresh);
+    }
+}, 5 * 60 * 1000);
+
+// S1 Fix: Orphan room reaper — evicts rooms older than 10 minutes where
+// neither player has an active socket (both disconnected mid-game with no
+// graceful disconnect event, e.g., network cut). Without this, abandoned
+// rooms accumulate in memory indefinitely.
+setInterval(() => {
+    const tenMinAgo = Date.now() - 10 * 60 * 1000;
+    for (const [roomId, room] of rooms.entries()) {
+        if (room.status === 'completed') continue; // already scheduled for cleanup
+        const createdAt = room.gameState?.startTime || 0;
+        if (createdAt > tenMinAgo) continue; // room is fresh
+        const hasActivePlayers = room.players.some(pid => {
+            const sid = userSockets.get(pid);
+            return sid && io.sockets.sockets.has(sid);
+        });
+        if (!hasActivePlayers) {
+            console.warn(`[Reaper] Evicting orphan room ${roomId} (${room.gameType}, both players disconnected)`);
+            // Refund escrows for stake games so money isn't lost
+            if (room.stake > 0 && room.escrowSplits) {
+                room.players.forEach(pid => {
+                    const split = room.escrowSplits[pid];
+                    if (split) refundEscrow(pid, split.real || 0, split.promo || 0);
+                });
+            }
+            rooms.delete(roomId);
+        }
+    }
+}, 10 * 60 * 1000);
 
 // --- ADMIN SERVER STATUS ---
 app.get('/api/admin/server-status', verifyAdmin, (req, res) => {

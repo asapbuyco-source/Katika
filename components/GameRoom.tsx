@@ -220,7 +220,8 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             setTimeLeft(prev => {
                 if (prev <= 1) {
                     clearInterval(timer);
-                    handleTimeout();
+                    // Use ref so we always call the latest version (avoids stale closure)
+                    handleTimeoutRef.current();
                     return 0;
                 }
                 return prev - 1;
@@ -228,6 +229,10 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
         }, 1000);
         return () => clearInterval(timer);
     }, [turn, diceRolled, socketGame?.winner, state.opponentDisconnected]);
+
+    // Stale-closure fix: keep a ref so the setInterval below always calls the
+    // latest version of handleTimeout rather than the one from first render.
+    const handleTimeoutRef = useRef<() => void>(() => {});
 
     const handleTimeout = useCallback(() => {
         if (!isP2P || !socket || !socketGame) return;
@@ -239,6 +244,8 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
         }
     }, [isP2P, socket, socketGame, turn, myColor, onGameEnd]);
+
+    handleTimeoutRef.current = handleTimeout;
 
     // ── Roll Dice ─────────────────────────────────────────────────────────
     const handleRoll = () => {

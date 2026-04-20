@@ -405,6 +405,12 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const bihRef = useRef(bih); bihRef.current = bih;
     const turnRef = useRef(turnId); turnRef.current = turnId;
 
+    // Stable refs that shadow state — these are always up-to-date even inside
+    // async callbacks and setInterval closures where React state would be stale.
+    const angleRef = useRef(Math.PI);
+    const powerRef = useRef(0);
+    const strikeOffRef = useRef(0);
+
     const name2 = (id: string) => isP2P ? ((socketGame as any)?.profiles?.[id]?.name || 'Opponent') : 'Bot 🤖';
     const av2 = (id: string) => isP2P ? ((socketGame as any)?.profiles?.[id]?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${id}`) : `https://api.dicebear.com/7.x/bottts/svg?seed=katika_bot`;
 
@@ -591,10 +597,11 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         
         const coords = getLogicCoords(e, r);
         const newAngle = Math.atan2(coords.y - cue.y, coords.x - cue.x);
+        angleRef.current = newAngle; // keep ref in sync
         setAngle(newAngle);
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
-            socket.emit('aim_sync', { roomId, type: 'aim_sync', angle: newAngle, power });
+            socket.emit('aim_sync', { roomId, type: 'aim_sync', angle: newAngle, power: powerRef.current });
             lastSync.current = Date.now();
         }
     };
@@ -634,11 +641,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const updatePower = (e: React.PointerEvent | React.MouseEvent) => {
         const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
         const p = Math.max(0, Math.min(100, (e.clientY - rect.top) / rect.height * 100));
+        powerRef.current = p;                  // keep ref in sync
+        strikeOffRef.current = p * 0.4 + 10;  // keep ref in sync
         setPower(p);
-        setStrikeOff(p * 0.4 + 10); 
+        setStrikeOff(p * 0.4 + 10);
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
-            socket.emit('aim_sync', { roomId, type: 'aim_sync', angle, power: p });
+            socket.emit('aim_sync', { roomId, type: 'aim_sync', angle: angleRef.current, power: p });
             lastSync.current = Date.now();
         }
     };
@@ -658,16 +667,23 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         if ('releasePointerCapture' in e.target) {
             try { (e.target as HTMLElement).releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
         }
-        
-        if (power < 5) {
-            setPower(0);
-            setStrikeOff(0);
+
+        // CRITICAL FIX: read from refs, NOT from React state.
+        // React batches state updates, so `power`, `strikeOff`, and `angle`
+        // are frequently stale (0) here — causing the shot to silently cancel.
+        const finalP = powerRef.current;
+        const finalAngle = angleRef.current;
+
+        if (finalP < 5) {
+            powerRef.current = 0; strikeOffRef.current = 0;
+            setPower(0); setStrikeOff(0);
             return;
         }
 
-        let f = strikeOff;
-        const finalP = power;
+        let f = strikeOffRef.current;
+        powerRef.current = 0; strikeOffRef.current = 0;
         setPower(0);
+
         const iv = setInterval(() => {
             f -= 8;
             setStrikeOff(Math.max(0, f));
@@ -676,9 +692,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 setStrikeOff(0);
                 const c = ballsRef.current.find(b => b.id === 0);
                 if (c && !c.pocketed) {
-                    c.vx = Math.cos(angle) * (finalP * .35); 
-                    c.vy = Math.sin(angle) * (finalP * .35);
-                    playPoolSound('cue-hit', finalP / 100); 
+                    // Use captured finalAngle (from ref at release time) — angle state is stale here
+                    c.vx = Math.cos(finalAngle) * (finalP * .35);
+                    c.vy = Math.sin(finalAngle) * (finalP * .35);
+                    playPoolSound('cue-hit', finalP / 100);
                     startPhysics();
                 }
             }
