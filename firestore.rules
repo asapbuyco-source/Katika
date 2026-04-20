@@ -38,8 +38,17 @@ service cloud.firestore {
       // Anyone authenticated can read public profile fields
       allow read: if isAuth();
 
-      // User can only write their OWN document, and CANNOT grant themselves isAdmin or Free Money
-      allow create: if isOwner(uid) && noAdminEscalation() && noFinancialEscalation();
+      // New user profile creation: owner only. Cannot self-assign isAdmin or
+      // start with a balance other than the server-set starter (100 FCFA).
+      // We do NOT check noFinancialEscalation() here because resource.data is
+      // null on create — checking it crashes rule evaluation → permission denied.
+      allow create: if isOwner(uid)
+                    && request.resource.data.get('isAdmin', false) == false
+                    && request.resource.data.get('isBanned', false) == false
+                    && request.resource.data.get('balance', 100) <= 100
+                    && request.resource.data.get('promoBalance', 0) == 0;
+
+      // Profile updates: own doc only, cannot self-escalate admin or financials
       allow update: if isOwner(uid) && noAdminEscalation() && noFinancialEscalation();
 
       // Transactions sub-collection: owner read only; writes go through server Admin SDK

@@ -620,7 +620,11 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             }
         } else {
             isAimingRef.current = true;
-            if ('setPointerCapture' in e.target) (e.target as HTMLElement).setPointerCapture((e as React.PointerEvent).pointerId);
+            // Capture on currentTarget (the canvas element) not e.target (same el but safer)
+            const captureEl = e.currentTarget as HTMLElement;
+            if ('setPointerCapture' in captureEl) {
+                try { captureEl.setPointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
+            }
             updateAim(e);
         }
     };
@@ -654,7 +658,14 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const handlePowerPointerDown = (e: React.PointerEvent | React.MouseEvent) => {
         if (!isMyTurn || moving || bih) return;
         isPoweringRef.current = true;
-        if ('setPointerCapture' in e.target) (e.target as HTMLElement).setPointerCapture((e as React.PointerEvent).pointerId);
+        // CRITICAL: capture on currentTarget (the power bar div with the handlers),
+        // NOT e.target (which could be a child fill element). If we capture on a child,
+        // all subsequent pointermove events go to the child — handlePowerPointerMove
+        // never fires and power stays at 0 the whole drag.
+        const captureEl = e.currentTarget as HTMLElement;
+        if ('setPointerCapture' in captureEl) {
+            try { captureEl.setPointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
+        }
         updatePower(e);
     };
     const handlePowerPointerMove = (e: React.PointerEvent | React.MouseEvent) => {
