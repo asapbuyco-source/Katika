@@ -46,7 +46,12 @@ export const checkPaymentStatus = async (transId: string): Promise<'SUCCESSFUL' 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
     try {
-        const response = await fetch(`${PROXY_BASE}/api/pay/status/${transId}`, { signal: controller.signal });
+        // Fix M8: include auth token required by server verifyAuth middleware
+        const token = await auth.currentUser?.getIdToken();
+        const response = await fetch(`${PROXY_BASE}/api/pay/status/${transId}`, {
+            signal: controller.signal,
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
         clearTimeout(timeoutId);
         if (!response.ok) return null;
         const data = await response.json();

@@ -1607,13 +1607,20 @@ const endGame = (roomId, winnerId, reason) => {
     }, 60000);
 };
 
-// Card Game Helpers
+// Card Game Helpers — Fisher-Yates shuffle with crypto RNG (Fix C3)
+const fisherYatesShuffle = (arr) => {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = crypto.randomInt(0, i + 1);
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+};
 const createDeck = () => {
     const suits = ['H', 'D', 'C', 'S'];
     const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
     let deck = [];
     for (let s of suits) for (let r of ranks) deck.push({ id: s + r, suit: s, rank: r });
-    return deck.sort(() => Math.random() - 0.5);
+    return fisherYatesShuffle(deck);
 };
 
 const createInitialGameState = (gameType, p1, p2) => {
@@ -2167,11 +2174,11 @@ io.on('connection', (socket) => {
                     return;
                 }
 
-                // (E) Direction check for non-kings
+                // (E) Direction check for non-kings — applies to BOTH normal moves AND jumps (Fix M7)
                 // Server determines forward based on who is player[0] vs player[1]
                 const isPlayer1 = room.players[0] === userId;
                 const forwardDir = isPlayer1 ? -1 : 1; // player1 moves up (row decreases), player2 moves down
-                if (!piece.isKing && Math.sign(dR) !== forwardDir && absDR === 1) {
+                if (!piece.isKing && Math.sign(dR) !== forwardDir) {
                     console.warn(`[Checkers][${roomId}] Backward non-king move by ${userId}. Rejected.`);
                     return;
                 }
@@ -2370,9 +2377,36 @@ io.on('connection', (socket) => {
                         }
                         const prevCount = serverBalls.filter(b => b.pocketed || b.isPotted).length;
                         const newCount = authBalls.filter(b => b.pocketed || b.isPotted).length;
-                        if (newCount - prevCount > 2) {
-                            console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: 2). Rejected.`); return;
+                        if (newCount - prevCount > 4) { // Fix M1: break shots can pot 3-4 balls legally
+                            console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: 4). Rejected.`); return;
                         }
+                    }
+                }
+
+                // P1 Fix: Ball-in-hand boundary validation for Pool
+                // If the previous state had ballInHand=true and the new state has ballInHand=false,
+                // the client is placing the cue ball. Validate the cue ball is inside table bounds.
+                if (room.gameType === 'Pool' && room.gameState.ballInHand && action.newState.ballInHand === false && action.newState.balls) {
+                    const cueBall = action.newState.balls.find(b => b.id === 0);
+                    const TW = 450, TH = 900, RAIL = 20, BR = 13;
+                    const pockets = [
+                        { x: BR, y: BR }, { x: TW - BR, y: BR },
+                        { x: 4, y: TH / 2 }, { x: TW - 4, y: TH / 2 },
+                        { x: BR, y: TH - BR }, { x: TW - BR, y: TH - BR }
+                    ];
+                    if (cueBall) {
+                        // Clamp to valid table area
+                        cueBall.x = Math.max(RAIL + BR + 2, Math.min(TW - RAIL - BR - 2, cueBall.x));
+                        cueBall.y = Math.max(RAIL + BR + 2, Math.min(TH - RAIL - BR - 2, cueBall.y));
+                        // Push away from pockets
+                        for (const p of pockets) {
+                            if (Math.hypot(cueBall.x - p.x, cueBall.y - p.y) < BR * 2.5) {
+                                console.warn(`[Pool][${roomId}] Ball-in-hand cue ball too close to pocket from ${userId}. Repositioning.`);
+                                cueBall.x = TW / 4; cueBall.y = TH / 2;
+                                break;
+                            }
+                        }
+                        cueBall.pocketed = false; cueBall.vx = 0; cueBall.vy = 0;
                     }
                 }
 
@@ -2380,6 +2414,7 @@ io.on('connection', (socket) => {
                 room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
                 if (action.newState.turn) room.turn = action.newState.turn;
+
 
                 // action.newState.winner is a fallback for non-Chess, non-Checkers games (i.e., Pool or Dice).
                 // Chess and Checkers explicitly end parsing earlier.
@@ -2434,7 +2469,7 @@ io.on('connection', (socket) => {
         else if (room.gameType === 'Ludo') {
             if (action.type === 'ROLL') {
                 if (room.turn !== userId) return;
-                const diceVal = Math.ceil(Math.random() * 6);
+                const diceVal = crypto.randomInt(1, 7); // Fix C2: use crypto-secure RNG
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
                 io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
@@ -2530,7 +2565,7 @@ io.on('connection', (socket) => {
                     // Shuffle discard back into deck if now empty, keep top card as new discard
                     if (room.gameState.deck.length === 0 && room.gameState.discardPile.length > 1) {
                         const top = room.gameState.discardPile.pop();
-                        room.gameState.deck = room.gameState.discardPile.sort(() => Math.random() - 0.5);
+                        room.gameState.deck = fisherYatesShuffle(room.gameState.discardPile); // Fix C3
                         room.gameState.discardPile = [top];
                     }
                     if (action.passTurn) {

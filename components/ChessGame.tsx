@@ -301,29 +301,35 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         const interval = setInterval(() => {
             if (state.opponentDisconnected) return;
             setTimeRemaining(prev => {
-                const turnColor = displayGame.turn();
+                // C1 Fix: read live game state from ref to avoid stale closure
+                const liveGame = stateRef.current.game;
+                const turnColor = liveGame.turn();
+                const liveMyColor = stateRef.current.myColor;
                 
-                if (turnColor === myColor) {
-                    if (prev[myColor] <= 1) {
+                if (turnColor === liveMyColor) {
+                    if (prev[liveMyColor] <= 1) {
                         clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
-                        if (!isP2P) onGameEnd('loss');
-                        return { ...prev, [myColor]: 0 };
+                        const { isP2P: liveP2P, socket: liveSock, socketGame: liveSG } = stateRef.current;
+                        if (liveP2P && liveSock) liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'FORFEIT' } });
+                        if (!liveP2P) onGameEnd('loss');
+                        return { ...prev, [liveMyColor]: 0 };
                     }
-                    return { ...prev, [myColor]: Math.max(0, prev[myColor] - 1) };
+                    return { ...prev, [liveMyColor]: Math.max(0, prev[liveMyColor] - 1) };
                 } else {
-                    if (prev[turnColor] <= 1) {
+                    const oppColor = turnColor as 'w' | 'b';
+                    if (prev[oppColor] <= 1) {
                         clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        if (!isP2P) onGameEnd('win');
-                        return { ...prev, [turnColor]: 0 };
+                        const { isP2P: liveP2P, socket: liveSock, socketGame: liveSG } = stateRef.current;
+                        if (liveP2P && liveSock) liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+                        if (!liveP2P) onGameEnd('win');
+                        return { ...prev, [oppColor]: 0 };
                     }
-                    return { ...prev, [turnColor]: Math.max(0, prev[turnColor] - 1) };
+                    return { ...prev, [oppColor]: Math.max(0, prev[oppColor] - 1) };
                 }
             });
         }, 1000);
         return () => clearInterval(interval);
-    }, [displayGame.turn(), isGameOver, viewIndex, myColor, isP2P, socket, socketGame, state.opponentDisconnected]);
+    }, [isGameOver, viewIndex, myColor, isP2P, socket, socketGame, state.opponentDisconnected]);
 
     const checkGameOver = useCallback((currentGamState: Chess) => {
         // Bug A fix: read from stateRef so this callback never captures a stale

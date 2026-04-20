@@ -16,7 +16,7 @@ interface PoolGameProps {
 }
 
 // ──────────────── Physics Constants ──────────────────────────────────────────────────────────
-const TW = 900, TH = 450, BR = 13, RAIL = 20;
+const TW = 450, TH = 900, BR = 13, RAIL = 20;
 const PR = 26;          // Visual pocket radius
 const PD = PR + 5;      // Pocket detection radius
 const FRICTION = 0.988, WALL_REST = 0.72, BALL_REST = 0.93, VEL_THRESH = 0.08, SUB = 8;
@@ -24,11 +24,11 @@ const TURN_TIME = 45;   // Faster turns for mobile tournaments
 
 const POCKETS = [
     { x: PR * 0.6, y: PR * 0.6 },           // TL
-    { x: TW / 2, y: 4 },                    // T-side
-    { x: TW - PR * 0.6, y: PR * 0.6 },       // TR
+    { x: TW - PR * 0.6, y: PR * 0.6 },      // TR
+    { x: 4, y: TH / 2 },                    // L-side
+    { x: TW - 4, y: TH / 2 },               // R-side
     { x: PR * 0.6, y: TH - PR * 0.6 },      // BL
-    { x: TW / 2, y: TH - 4 },                 // B-side
-    { x: TW - PR * 0.6, y: TH - PR * 0.6 },  // BR
+    { x: TW - PR * 0.6, y: TH - PR * 0.6 }, // BR
 ];
 
 const BALL_COLORS: Record<number, string> = {
@@ -43,11 +43,16 @@ interface Spark { x: number; y: number; vx: number; vy: number; life: number; ma
 
 function buildRack(): Ball[] {
     const balls: Ball[] = [];
-    const cx = TW * 0.66, cy = TH / 2, dx = BR * 2.05, dy = BR * 1.18;
+    const cx = TW / 2, cy = TH * 0.25, dy_row = BR * 1.732, dx_col = BR * 1.05;
     [[1], [9, 2], [10, 8, 3], [11, 4, 12, 5], [13, 6, 14, 7, 15]].forEach((row, ri) =>
-        row.forEach((id, ci) => balls.push({ id, x: cx + ri * dx, y: cy + (ci - (row.length - 1) / 2) * dy * 2, vx: 0, vy: 0, pocketed: false }))
+        row.forEach((id, ci) => balls.push({ 
+            id, 
+            x: cx + (ci - (row.length - 1) / 2) * dx_col * 2, 
+            y: cy - ri * dy_row,
+            vx: 0, vy: 0, pocketed: false 
+        }))
     );
-    balls.push({ id: 0, x: TW * 0.22, y: cy, vx: 0, vy: 0, pocketed: false });
+    balls.push({ id: 0, x: cx, y: TH * 0.75, vx: 0, vy: 0, pocketed: false });
     return balls;
 }
 
@@ -71,22 +76,22 @@ function stepPhysics(
             let f = 0, bounced = false;
             const gapC = 37, gapM = 30;
             if (b.y < RAIL + BR) {
-                if (!(b.x < gapC || (b.x > TW / 2 - gapM && b.x < TW / 2 + gapM) || b.x > TW - gapC)) {
+                if (!(b.x < gapC || b.x > TW - gapC)) {
                     b.y = RAIL + BR; f = Math.abs(b.vy); b.vy = f * WALL_REST; bounced = true;
                 }
             }
             if (b.y > TH - RAIL - BR) {
-                if (!(b.x < gapC || (b.x > TW / 2 - gapM && b.x < TW / 2 + gapM) || b.x > TW - gapC)) {
+                if (!(b.x < gapC || b.x > TW - gapC)) {
                     b.y = TH - RAIL - BR; f = Math.abs(b.vy); b.vy = -f * WALL_REST; bounced = true;
                 }
             }
             if (b.x < RAIL + BR) {
-                if (!(b.y < gapC || b.y > TH - gapC)) {
+                if (!(b.y < gapC || (b.y > TH / 2 - gapM && b.y < TH / 2 + gapM) || b.y > TH - gapC)) {
                     b.x = RAIL + BR; f = Math.abs(b.vx); b.vx = f * WALL_REST; bounced = true;
                 }
             }
             if (b.x > TW - RAIL - BR) {
-                if (!(b.y < gapC || b.y > TH - gapC)) {
+                if (!(b.y < gapC || (b.y > TH / 2 - gapM && b.y < TH / 2 + gapM) || b.y > TH - gapC)) {
                     b.x = TW - RAIL - BR; f = Math.abs(b.vx); b.vx = -f * WALL_REST; bounced = true;
                 }
             }
@@ -154,13 +159,20 @@ function shade(hex: string, p: number) {
 }
 
 // ──────────────── Visual Rendering ──────────────────────────────────────────────────────────
-function drawScene(
+export function drawScene(
     ctx: CanvasRenderingContext2D, balls: Ball[], sparks: Spark[],
     angle: number, power: number, showAim: boolean, bih: boolean,
     ghost: { x: number; y: number } | null, strikeOff: number, shake: number,
-    targetBallIds?: number[]
+    targetBallIds?: number[], isLandscape: boolean = false
 ) {
     ctx.save();
+    
+    if (isLandscape) {
+        ctx.translate(TH / 2, TW / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.translate(-TW / 2, -TH / 2);
+    }
+    
     if (shake > 0) { ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake); }
     ctx.clearRect(-10, -10, TW + 20, TH + 20);
 
@@ -175,10 +187,10 @@ function drawScene(
 
     // Table Lines
     ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(TW * .25, 14); ctx.lineTo(TW * .25, TH - 14); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(14, TH * .75); ctx.lineTo(TW - 14, TH * .75); ctx.stroke();
     ctx.setLineDash([]);
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    [[TW * .65, TH / 2], [TW * .25, TH / 2]].forEach(([sx, sy]) => { ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill(); });
+    [[TW / 2, TH * .25], [TW / 2, TH * .75]].forEach(([sx, sy]) => { ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill(); });
 
     // Rails
     const railColor = '#104462';
@@ -189,12 +201,17 @@ function drawScene(
         ctx.fill();
         ctx.strokeStyle = 'rgba(255,255,255,0.08)'; ctx.lineWidth = 0.5; ctx.stroke();
     };
-    poly([[C, 0], [TW / 2 - M, 0], [TW / 2 - M + RAIL, RAIL], [C + RAIL, RAIL]]);
-    poly([[TW / 2 + M, 0], [TW - C, 0], [TW - C - RAIL, RAIL], [TW / 2 + M - RAIL, RAIL]]);
-    poly([[C, TH], [TW / 2 - M, TH], [TW / 2 - M + RAIL, TH - RAIL], [C + RAIL, TH - RAIL]]);
-    poly([[TW / 2 + M, TH], [TW - C, TH], [TW - C - RAIL, TH - RAIL], [TW / 2 + M - RAIL, TH - RAIL]]);
-    poly([[0, C], [0, TH - C], [RAIL, TH - C - RAIL], [RAIL, C + RAIL]]);
-    poly([[TW, C], [TW, TH - C], [TW - RAIL, TH - C - RAIL], [TW - RAIL, C + RAIL]]);
+    
+    // Top Rail
+    poly([[C, 0], [TW - C, 0], [TW - C - RAIL, RAIL], [C + RAIL, RAIL]]);
+    // Bottom Rail
+    poly([[C, TH], [TW - C, TH], [TW - C - RAIL, TH - RAIL], [C + RAIL, TH - RAIL]]);
+    // Left Rails
+    poly([[0, C], [0, TH / 2 - M], [RAIL, TH / 2 - M + RAIL], [RAIL, C + RAIL]]);
+    poly([[0, TH / 2 + M], [0, TH - C], [RAIL, TH - C - RAIL], [RAIL, TH / 2 + M - RAIL]]);
+    // Right Rails
+    poly([[TW, C], [TW, TH / 2 - M], [TW - RAIL, TH / 2 - M + RAIL], [TW - RAIL, C + RAIL]]);
+    poly([[TW, TH / 2 + M], [TW, TH - C], [TW - RAIL, TH - C - RAIL], [TW - RAIL, TH / 2 + M - RAIL]]);
 
     // Pockets
     POCKETS.forEach(p => {
@@ -393,21 +410,27 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
 
     // ── Orientation & Scale ──
     const [scale, setScale] = useState(1);
+    const [isLandscape, setIsLandscape] = useState(false);
+    
     useEffect(() => {
-        try {
-            if (screen.orientation && screen.orientation.lock) {
-                // Attempt to force landscape mode natively on mobile devices
-                screen.orientation.lock('landscape').catch(() => {});
-            }
-        } catch(e) {}
-        
         const upd = () => {
             const w = window.innerWidth;
             const h = window.innerHeight;
-            // Left panel: 192px (w-48), Right panel: 96px (w-24)
-            const availableW = w - 192 - 96;
-            const s = Math.min((availableW - 20) / TW, (h - 20) / TH);
-            setScale(s);
+            const isL = w > h * 1.1; // Treat as landscape if width is significantly larger
+            setIsLandscape(isL);
+
+            if (isL) {
+                // Landscape: Left panel 192px + Right panel 96px
+                const availableW = w - 192 - 96;
+                const s = Math.min((availableW - 20) / TH, (h - 20) / TW);
+                setScale(Math.max(0.3, s));
+            } else {
+                // Portrait Mobile: subtract HUD header (~80px) + power bar width (88px) + padding
+                const availableW = w - 88 - 16; // 88px power bar on right, 16px left padding
+                const availableH = h - 90 - 20; // 90px header + 20px bottom padding
+                const s = Math.min(availableW / TW, availableH / TH);
+                setScale(Math.max(0.3, s));
+            }
         };
         upd(); window.addEventListener('resize', upd); return () => window.removeEventListener('resize', upd);
     }, []);
@@ -519,6 +542,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         setTurnId(next);
         if (foul && next === myId) setBih(true);
         if (!isP2P && next === 'bot') setTimeout(() => {
+            // P4 Fix: guard against double-fire if physics are still settling
+            if (movRef.current) return;
             const c = ballsRef.current.find(b => b.id === 0)!; if (foul) { c.pocketed = false; c.x = TW * .6 + (Math.random() - .5) * 100; c.y = TH / 2 + (Math.random() - .5) * 100; setBalls([...ballsRef.current]); }
             const shot = findBotShot(ballsRef.current, nbg);
             if (shot) { setAngle(shot.angle); setPower(shot.power); animStrike(shot.angle, shot.power); }
@@ -535,7 +560,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 clearInterval(iv); setStrikeOff(0); setPower(0);
                 const c = ballsRef.current.find(b => b.id === 0);
                 if (c && !c.pocketed) {
-                    c.vx = Math.cos(a + Math.PI) * (p * .35); c.vy = Math.sin(a + Math.PI) * (p * .35);
+                    c.vx = Math.cos(a) * (p * .35); 
+                    c.vy = Math.sin(a) * (p * .35);
                     playPoolSound('cue-hit', p / 100); startPhysics();
                 }
             }
@@ -544,14 +570,27 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
 
     // ── Controls (Drag Aim & Power) ──
     const isAimingRef = useRef(false);
+
+    const getLogicCoords = (e: React.PointerEvent | React.MouseEvent, r: DOMRect) => {
+        const px = e.clientX - r.left;
+        const py = e.clientY - r.top;
+        if (isLandscapeRef.current) {
+            return { x: TW - (py / r.height) * TW, y: (px / r.width) * TH };
+        }
+        return { x: (px / r.width) * TW, y: (py / r.height) * TH };
+    };
+
+    const isLandscapeRef = useRef(isLandscape);
+    useEffect(() => { isLandscapeRef.current = isLandscape; }, [isLandscape]);
+
     const updateAim = (e: React.PointerEvent | React.MouseEvent) => {
         const cv = canvasRef.current; if (!cv) return;
         const r = cv.getBoundingClientRect();
         const cue = ballsRef.current.find(b => b.id === 0);
         if (!cue) return;
-        const cx = r.left + (cue.x / TW) * r.width;
-        const cy = r.top + (cue.y / TH) * r.height;
-        const newAngle = Math.atan2(e.clientY - cy, e.clientX - cx);
+        
+        const coords = getLogicCoords(e, r);
+        const newAngle = Math.atan2(coords.y - cue.y, coords.x - cue.x);
         setAngle(newAngle);
 
         if (isP2P && socket && Date.now() - lastSync.current > 60) {
@@ -559,12 +598,15 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             lastSync.current = Date.now();
         }
     };
+
     const handleCanvasPointerDown = (e: React.PointerEvent | React.MouseEvent) => {
         if (!isMyTurn || moving) return;
         if (bih) {
             const cv = canvasRef.current; if (!cv) return;
             const r = cv.getBoundingClientRect();
-            const tx = (e.clientX - r.left) * (TW / r.width), ty = (e.clientY - r.top) * (TH / r.height);
+            const coords = getLogicCoords(e, r);
+            const { x: tx, y: ty } = coords;
+
             if (tx > RAIL + BR && tx < TW - RAIL - BR && ty > RAIL + BR && ty < TH - RAIL - BR) {
                 const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = tx; c.y = ty; c.vx = 0; c.vy = 0;
                 setBalls([...ballsRef.current]); setBih(false); playSFX('click');
@@ -634,8 +676,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 setStrikeOff(0);
                 const c = ballsRef.current.find(b => b.id === 0);
                 if (c && !c.pocketed) {
-                    c.vx = Math.cos(angle + Math.PI) * (finalP * .35); 
-                    c.vy = Math.sin(angle + Math.PI) * (finalP * .35);
+                    c.vx = Math.cos(angle) * (finalP * .35); 
+                    c.vy = Math.sin(angle) * (finalP * .35);
                     playPoolSound('cue-hit', finalP / 100); 
                     startPhysics();
                 }
@@ -646,27 +688,20 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     // ── Persistent Render ──
     useEffect(() => {
         const cv = canvasRef.current, ctx = cv?.getContext('2d'); if (!cv || !ctx) return;
-        const updateScale = () => {
-            const w = window.innerWidth, h = window.innerHeight;
-            const s = Math.min(w / (TW + 300), h / TH);
-            setScale(s);
-        };
-        window.addEventListener('resize', updateScale);
-        updateScale();
         const loop = () => {
             const mt = turnRef.current === myId, mv = movRef.current, grp = myGrRef.current;
             const targetIds = (mt && !mv) ? (grp === 'solids' ? [1, 2, 3, 4, 5, 6, 7] : grp === 'stripes' ? [9, 10, 11, 12, 13, 14, 15] : [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]).filter(id => !ballsRef.current.find(b => b.id === id)?.pocketed) : [];
-            drawScene(ctx, ballsRef.current, sparksRef.current, mt ? angle : (isBot ? angle : oppAngle), mt ? power : (isBot ? power : oppPower), !mv, bihRef.current, mt ? ghost : oppGhost, strikeOff, shakeRef.current, targetIds.length === 0 && grp ? [8] : targetIds);
+            drawScene(ctx, ballsRef.current, sparksRef.current, mt ? angle : (isBot ? angle : oppAngle), mt ? power : (isBot ? power : oppPower), !mv, bihRef.current, mt ? ghost : oppGhost, strikeOff, shakeRef.current, targetIds.length === 0 && grp ? [8] : targetIds, isLandscapeRef.current);
             animRef.current = requestAnimationFrame(loop);
         };
-        loop(); return () => { window.removeEventListener('resize', updateScale); if (animRef.current) cancelAnimationFrame(animRef.current); };
+        loop(); return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
     }, [angle, power, strikeOff, ghost, oppAngle, oppPower, oppGhost, isBot, myId]);
 
     const myPot = myGroup ? balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8 && ((myGroup === 'solids' && b.id < 8) || (myGroup === 'stripes' && b.id > 8))).length : 0;
     const oppPot = myGroup ? balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8 && ((myGroup === 'solids' && b.id > 8) || (myGroup === 'stripes' && b.id < 8))).length : 0;
 
     return (
-        <div className="w-[100dvw] h-[100dvh] flex flex-row bg-[#070c10] overflow-hidden select-none touch-none text-white font-sans">
+        <div className={`w-[100dvw] h-[100dvh] flex ${isLandscape ? 'flex-row' : 'flex-col'} bg-[#070c10] overflow-hidden select-none touch-none text-white font-sans ${!isLandscape && 'pt-safe'}`}>
             <AnimatePresence>
                 {netStatus !== 'ok' && (
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center gap-4">
@@ -678,133 +713,167 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 )}
             </AnimatePresence>
 
-            {/* Left Panel: Match Info & Players */}
-            <div className="w-48 h-full bg-black/60 border-r border-white/5 flex flex-col justify-between shrink-0 safe-left z-10 shadow-2xl relative">
-                {/* Player 1 (Top) */}
-                <div className={`p-4 border-b transition-all shadow-[0_4px_20px_rgba(0,0,0,0.5)] ${isMyTurn ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-white/10 bg-white/5'}`}>
-                    <div className="flex items-center gap-3 mb-3">
-                        <img src={user.avatar} className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg" />
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold truncate text-white drop-shadow-md">{user.name}</p>
-                            <p className="text-[10px] text-slate-300 uppercase tracking-wider font-bold">{myGroup || 'Open'}</p>
+            {isLandscape ? (
+                /* ── LANDSCAPE HUD (PC/iPad) ── */
+                <div className="w-48 h-full bg-black/60 border-r border-white/5 flex flex-col justify-between shrink-0 z-10 shadow-2xl relative safe-left">
+                    <div className={`p-4 border-b transition-all shadow-[0_4px_20px_rgba(0,0,0,0.5)] ${isMyTurn ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-white/10 bg-white/5'}`}>
+                        <div className="flex items-center gap-3 mb-3">
+                            <img src={user.avatar} className="w-10 h-10 rounded-full border border-white/20 shadow-lg" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold truncate text-white drop-shadow-md">{user.name}</p>
+                                <p className="text-[10px] text-slate-300 uppercase tracking-widest font-bold">{myGroup || 'Open'}</p>
+                            </div>
+                        </div>
+                        <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner">
+                            <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pots</span>
+                            <span className="text-xl font-black font-mono text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">{myPot}</span>
                         </div>
                     </div>
-                    <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner">
-                        <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pot</span>
-                        <span className="text-xl font-black font-mono text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]">{myPot}</span>
-                    </div>
-                </div>
 
-                {/* Center Match Info */}
-                <div className="flex-1 flex flex-col items-center justify-center gap-6 relative px-4">
-                    <button onClick={() => setForfeit(true)} className="absolute top-4 left-4 p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all shadow-lg active:scale-95">
-                        <ArrowLeft size={16} className="text-slate-400" />
-                    </button>
-
-                    <div className="text-center bg-black/40 p-4 rounded-2xl border border-white/10 w-full shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
-                        <span className="text-[10px] text-gold-500 font-black tracking-widest uppercase block mb-1">STAKE</span>
-                        <span className="text-lg font-mono font-black text-white drop-shadow-[0_0_10px_rgba(251,191,36,0.4)]">💰{(table.stake * 2).toLocaleString()}</span>
-                    </div>
-
-                    <div className="h-16 flex flex-col items-center justify-center">
+                    <div className="flex-1 flex flex-col items-center justify-center gap-6 relative px-4">
+                        <button onClick={() => setForfeit(true)} className="absolute top-4 left-4 p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all shadow-lg active:scale-95">
+                            <ArrowLeft size={16} className="text-slate-400" />
+                        </button>
+                        <div className="text-center bg-black/40 p-4 rounded-2xl border border-white/10 w-full shadow-[inset_0_2px_10px_rgba(0,0,0,0.5)]">
+                            <span className="text-[10px] text-gold-500 font-black tracking-widest block mb-1">STAKE</span>
+                            <span className="text-lg font-mono font-black text-white drop-shadow-[0_0_10px_rgba(251,191,36,0.4)]">💰{(table.stake * 2).toLocaleString()}</span>
+                        </div>
                         {isP2P && <div className={`flex flex-col items-center text-xs transition-colors ${countdown < 10 ? 'text-red-500 font-black animate-pulse drop-shadow-[0_0_10px_rgba(239,68,68,0.6)]' : 'text-slate-300'}`}>
-                            <Clock size={18} className="mb-1 opacity-80" />
-                            <span className="font-mono text-xl tracking-wider">{countdown}s</span>
+                            <span className="font-mono text-2xl tracking-wider">{countdown}s</span>
                         </div>}
+                        <div className={`w-full py-3 rounded-xl text-[10px] font-black tracking-widest uppercase border text-center shadow-lg transition-all ${isMyTurn ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-slate-800 text-slate-400 border-white/10'}`}>
+                            {msg || 'WAITING'}
+                        </div>
                     </div>
-                    
-                    <div className={`w-full py-3 rounded-xl text-[10px] font-black tracking-widest uppercase border text-center shadow-lg transition-all ${isMyTurn ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 glow-emerald' : 'bg-slate-800/80 border-white/10 text-slate-400'}`}>
-                        {msg || 'WAITING'}
-                    </div>
-                </div>
 
-                {/* Player 2 (Bottom) */}
-                <div className={`p-4 border-t transition-all shadow-[0_-4px_20px_rgba(0,0,0,0.5)] ${!isMyTurn ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
-                    <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner mb-3">
-                        <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pot</span>
-                        <span className="text-xl font-black font-mono text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]">{oppPot}</span>
-                    </div>
-                    <div className="flex items-center gap-3 flex-row-reverse text-right">
-                        <img src={av2(oppId)} className="w-10 h-10 rounded-full border-2 border-white/20 shadow-lg" />
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold truncate text-white drop-shadow-md">{name2(oppId)}</p>
-                            <p className="text-[10px] text-slate-300 uppercase tracking-wider font-bold">{myGroup ? (myGroup === 'solids' ? 'stripes' : 'solids') : 'Ready'}</p>
+                    <div className={`p-4 border-t transition-all shadow-[0_-4px_20px_rgba(0,0,0,0.5)] ${!isMyTurn ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
+                        <div className="flex justify-between items-center bg-black/60 rounded-xl px-3 py-2 border border-white/10 shadow-inner mb-3">
+                            <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">Pots</span>
+                            <span className="text-xl font-black font-mono text-red-400 drop-shadow-[0_0_8px_rgba(248,113,113,0.5)]">{oppPot}</span>
+                        </div>
+                        <div className="flex items-center gap-3 flex-row-reverse text-right">
+                            <img src={av2(oppId)} className="w-10 h-10 rounded-full border border-white/20 shadow-lg" />
+                            <div className="flex-1 min-w-0">
+                                <p className="text-sm font-bold truncate text-white drop-shadow-md">{name2(oppId)}</p>
+                                <p className="text-[10px] text-slate-300 uppercase tracking-widest font-bold">{myGroup ? (myGroup === 'solids' ? 'stripes' : 'solids') : 'Ready'}</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-
-            {/* Center Table Area */}
-            <div className="flex-1 flex items-center justify-center bg-gradient-to-br from-[#070c10] to-[#0d161d] relative overflow-hidden">
-                <span className="absolute top-6 left-1/2 -translate-x-1/2 text-xs text-slate-500/50 uppercase tracking-[0.5em] font-black pointer-events-none hidden md:block mix-blend-screen select-none">
-                    KATIKA CHAMPIONSHIP
-                </span>
-
-                <div style={{ width: TW, height: TH, transform: `scale(${scale})`, transformOrigin: 'center', position: 'relative' }} className="shrink-0 shadow-[0_0_100px_rgba(0,0,0,0.8)]">
-                    <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[#7a3e10] via-[#3a1a07] to-[#7a3e10] border-4 border-[#1a0d04] shadow-[0_20px_50px_rgba(0,0,0,0.9)] overflow-hidden">
-                        <div className="absolute inset-[16px] rounded-lg shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
-                            <canvas 
-                                ref={canvasRef} 
-                                width={TW} height={TH} 
-                                onPointerDown={handleCanvasPointerDown}
-                                onPointerMove={handleCanvasPointerMove}
-                                onPointerUp={handleCanvasPointerUp}
-                                onPointerOut={handleCanvasPointerUp}
-                                onPointerCancel={handleCanvasPointerUp}
-                                className="w-full h-full block cursor-crosshair touch-none" 
-                            />
+            ) : (
+                /* ── PORTRAIT HUD (Mobile) ── */
+                <header className="flex justify-between items-end px-4 pb-3 pt-2 bg-black/60 border-b border-white/5 shadow-md z-10 shrink-0">
+                    {/* Player 1 */}
+                    <div className={`flex flex-col items-start gap-1 p-2 rounded-xl transition-all ${isMyTurn ? 'bg-emerald-500/10 border border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]' : 'border border-transparent'}`}>
+                        <div className="flex items-center gap-2">
+                            <img src={user.avatar} className="w-8 h-8 rounded-full border border-white/20" />
+                            <div>
+                                <p className="text-xs font-bold leading-none max-w-[70px] truncate">{user.name}</p>
+                                <p className="text-[9px] text-slate-400 uppercase tracking-widest">{myGroup || 'Open'}</p>
+                            </div>
                         </div>
-                        {/* Decorative Diamonds */}
-                        {[25, 50, 75].map(pct => <div key={`t${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ top: '4px', left: `${pct}%` }} />)}
-                        {[25, 50, 75].map(pct => <div key={`b${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ bottom: '4px', left: `${pct}%` }} />)}
-                        {[25, 50, 75].map(pct => <div key={`l${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ left: '4px', top: `${pct}%` }} />)}
-                        {[25, 50, 75].map(pct => <div key={`r${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full shadow-sm" style={{ right: '4px', top: `${pct}%` }} />)}
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">
+                            Pots: <span className="text-emerald-400 text-sm">{myPot}</span>
+                        </div>
+                    </div>
+
+                    {/* Match Center Info */}
+                    <div className="flex flex-col items-center pb-2">
+                        <button onClick={() => setForfeit(true)} className="mb-2 p-1.5 bg-white/5 hover:bg-white/10 rounded-lg opacity-50 hover:opacity-100 transition-all">
+                            <ArrowLeft size={14} className="text-slate-400" />
+                        </button>
+                        <span className="text-[10px] text-gold-500 font-black tracking-widest leading-none drop-shadow-md">💰{(table.stake * 2).toLocaleString()}</span>
+                        {isP2P && <div className={`text-xs font-mono font-bold mt-1 ${countdown < 10 ? 'text-red-500 animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'text-slate-300'}`}>{countdown}s</div>}
+                        <div className={`mt-2 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${isMyTurn ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-slate-800 text-slate-400 border-white/10'}`}>
+                            {msg || 'WAIT'}
+                        </div>
+                    </div>
+
+                    {/* Player 2 */}
+                    <div className={`flex flex-col items-end gap-1 p-2 rounded-xl transition-all ${!isMyTurn ? 'bg-red-500/10 border border-red-500/30 shadow-[0_0_10px_rgba(239,68,68,0.2)]' : 'border border-transparent'}`}>
+                        <div className="flex items-center gap-2 flex-row-reverse text-right">
+                            <img src={av2(oppId)} className="w-8 h-8 rounded-full border border-white/20" />
+                            <div>
+                                <p className="text-xs font-bold leading-none max-w-[70px] truncate">{name2(oppId)}</p>
+                                <p className="text-[9px] text-slate-400 uppercase tracking-widest">{myGroup ? (myGroup === 'solids' ? 'stripes' : 'solids') : 'Ready'}</p>
+                            </div>
+                        </div>
+                        <div className="text-[10px] text-slate-500 uppercase tracking-wider font-mono">
+                            Pots: <span className="text-red-400 text-sm">{oppPot}</span>
+                        </div>
+                    </div>
+                </header>
+            )}
+
+            {/* Play Area */}
+            <div className="flex-1 w-full relative bg-gradient-to-br from-[#070c10] to-[#0d161d] overflow-hidden">
+                
+                {/* Center Table */}
+                <div className="absolute inset-0 flex items-center justify-center">
+                    <div style={{ width: isLandscape ? TH : TW, height: isLandscape ? TW : TH, transform: `scale(${scale})`, transformOrigin: 'center' }} className="shadow-[0_0_100px_rgba(0,0,0,0.8)] relative">
+                        <div className="absolute inset-0 rounded-2xl bg-gradient-to-br from-[#7a3e10] via-[#3a1a07] to-[#7a3e10] border-4 border-[#1a0d04] shadow-[0_20px_50px_rgba(0,0,0,0.9)] overflow-hidden">
+                            <div className="absolute inset-[16px] rounded-lg shadow-[inset_0_0_50px_rgba(0,0,0,0.9)] overflow-hidden">
+                                <canvas 
+                                    ref={canvasRef} 
+                                    width={isLandscape ? TH : TW} height={isLandscape ? TW : TH} 
+                                    onPointerDown={handleCanvasPointerDown}
+                                    onPointerMove={handleCanvasPointerMove}
+                                    onPointerUp={handleCanvasPointerUp}
+                                    onPointerOut={handleCanvasPointerUp}
+                                    onPointerCancel={handleCanvasPointerUp}
+                                    className="w-full h-full block cursor-crosshair touch-none" 
+                                />
+                            </div>
+                            {/* Decorative Diamonds */}
+                            {isLandscape ? [
+                                ...[25, 50, 75].map(pct => <div key={`t${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ left: `${pct}%`, top: '4px' }} />),
+                                ...[25, 50, 75].map(pct => <div key={`b${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ left: `${pct}%`, bottom: '4px' }} />),
+                                <div key="lm" className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ left: '4px', top: '50%' }} />,
+                                <div key="rm" className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ right: '4px', top: '50%' }} />
+                            ] : [
+                                ...[25, 50, 75].map(pct => <div key={`l${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ top: `${pct}%`, left: '4px' }} />),
+                                ...[25, 50, 75].map(pct => <div key={`r${pct}`} className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ top: `${pct}%`, right: '4px' }} />),
+                                <div key="tm" className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ top: '4px', left: '50%' }} />,
+                                <div key="bm" className="absolute w-2 h-2 bg-white/20 rounded-full" style={{ bottom: '4px', left: '50%' }} />
+                            ]}
+                        </div>
+                    </div>
+                </div>
+
+                {/* Right Power Bar — fixed on right side, doesn't overlap canvas */}
+                <div className={`${isLandscape ? 'w-24 h-full bg-black/60 border-l fixed right-0' : 'w-20 h-[55%] max-h-[380px] absolute right-0 top-1/2 -translate-y-1/2'} border-white/5 flex flex-col items-center justify-center gap-2 z-10 safe-right shadow-2xl`}>
+                    <span className="text-[9px] text-slate-500 uppercase tracking-widest font-black rotate-[90deg] whitespace-nowrap mb-6 opacity-60">FORCE</span>
+                    <div 
+                        className="relative w-8 sm:w-10 flex-1 bg-black/60 rounded-full border-2 border-white/20 overflow-hidden touch-none shadow-[inset_0_2px_15px_rgba(0,0,0,0.8)] cursor-ns-resize backdrop-blur-sm" 
+                        onPointerDown={handlePowerPointerDown}
+                        onPointerMove={handlePowerPointerMove}
+                        onPointerUp={handlePowerPointerUp}
+                        onPointerOut={handlePowerPointerUp}
+                        onPointerCancel={handlePowerPointerUp}
+                    >
+                        <div className="absolute top-0 left-0 right-0 transition-all duration-75" style={{ height: `${power}%`, background: `linear-gradient(to bottom, #10b981 0%, #f59e0b 50%, #dc2626 100%)`, boxShadow: '0 5px 15px rgba(0,0,0,0.5)' }} />
+                        <div className="absolute inset-0 flex flex-col justify-between py-6 pointer-events-none">
+                            {[0, 25, 50, 75, 100].map(v => <div key={v} className="w-full flex justify-center opacity-40"><div className="w-4 h-[2px] bg-white rounded-full shadow-sm" /></div>)}
+                        </div>
+                    </div>
+                    <div className="w-10 h-10 rounded-full border-2 border-white/10 flex items-center justify-center bg-black/40 shadow-inner mt-4 backdrop-blur-md">
+                        <Zap size={16} className={`transition-colors duration-300 ${power > 5 ? 'text-gold-400 animate-pulse drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]' : 'text-slate-600'}`} />
                     </div>
                 </div>
 
                 <AnimatePresence>
                     {bih && isMyTurn && (
-                        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 px-8 py-3 bg-blue-500/90 rounded-full border-2 border-blue-400 shadow-[0_0_30px_rgba(59,130,246,0.5)] flex items-center gap-3 backdrop-blur-md">
-                            <Target size={20} className="animate-pulse drop-shadow-md text-white" />
-                            <span className="text-sm font-black uppercase tracking-widest text-white drop-shadow-md">Ball in Hand - Tap Board</span>
+                        <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} className="absolute bottom-12 left-1/2 -translate-x-1/2 z-50 px-6 py-3 bg-blue-500/90 rounded-full border-2 border-blue-400 shadow-[0_0_30px_rgba(59,130,246,0.6)] flex items-center gap-3 backdrop-blur-md whitespace-nowrap">
+                            <Target size={18} className="animate-pulse drop-shadow-md text-white" />
+                            <span className="text-xs font-black uppercase tracking-widest text-white drop-shadow-md">Ball in Hand - Tap Board</span>
                         </motion.div>
                     )}
                 </AnimatePresence>
             </div>
 
-            {/* Right Panel: Power Slider */}
-            <div className="w-24 h-full bg-black/60 border-l border-white/5 flex flex-col items-center justify-center py-8 safe-right shrink-0 z-10 shadow-[-10px_0_30px_rgba(0,0,0,0.5)] relative">
-                <span className="absolute top-[10%] text-[10px] text-slate-500 uppercase tracking-[0.3em] font-black rotate-[-90deg] origin-center whitespace-nowrap opacity-60">
-                    PULL TO SHOOT
-                </span>
-
-                <div 
-                    className="relative w-12 h-[60%] max-h-72 bg-black/40 rounded-full border-2 border-white/10 overflow-hidden touch-none shadow-[inset_0_2px_15px_rgba(0,0,0,0.8)] my-8 cursor-ns-resize" 
-                    onPointerDown={handlePowerPointerDown}
-                    onPointerMove={handlePowerPointerMove}
-                    onPointerUp={handlePowerPointerUp}
-                    onPointerOut={handlePowerPointerUp}
-                    onPointerCancel={handlePowerPointerUp}
-                >
-                    <div className="absolute top-0 left-0 right-0 transition-all duration-75" style={{ height: `${power}%`, background: `linear-gradient(to bottom, #10b981 0%, #f59e0b 50%, #dc2626 100%)`, boxShadow: '0 10px 20px rgba(0,0,0,0.5)' }} />
-                    <div className="absolute inset-0 flex flex-col justify-between py-6 pointer-events-none">
-                        {[0, 25, 50, 75, 100].map(v => (
-                            <div key={v} className="w-full flex justify-center items-center opacity-30">
-                                <div className="w-4 h-[3px] bg-white rounded-full shadow-sm" />
-                            </div>
-                        ))}
-                    </div>
-                </div>
-
-                <div className="w-12 h-12 rounded-full border-2 border-white/10 flex items-center justify-center bg-white/5 shadow-[inset_0_2px_10px_rgba(255,255,255,0.05)]">
-                    <Zap size={20} className={`transition-colors duration-300 ${power > 5 ? 'text-gold-400 animate-pulse drop-shadow-[0_0_8px_rgba(251,191,36,0.6)]' : 'text-slate-600'}`} />
-                </div>
-            </div>
-
             <style>{`
-                .safe-left { padding-left: max(0rem, env(safe-area-inset-left)); }
-                .safe-right { padding-right: max(0rem, env(safe-area-inset-right)); }
-                .glow-emerald { box-shadow: 0 0 20px rgba(16, 185, 129, 0.2); }
+                .pt-safe { padding-top: max(0rem, env(safe-area-inset-top)); }
+                .pb-safe { padding-bottom: max(0rem, env(safe-area-inset-bottom)); }
             `}</style>
 
             {/* Forfeit Modal */}

@@ -46,7 +46,6 @@ const GameRoom = lazy(() => import('./GameRoom').then(m => ({ default: m.GameRoo
 const CheckersGame = lazy(() => import('./CheckersGame').then(m => ({ default: m.CheckersGame })));
 const DiceGame = lazy(() => import('./DiceGame').then(m => ({ default: m.DiceGame })));
 const ChessGame = lazy(() => import('./ChessGame').then(m => ({ default: m.ChessGame })));
-const CardGame = lazy(() => import('./CardGame').then(m => ({ default: m.CardGame })));
 const TicTacToeGame = lazy(() => import('./TicTacToeGame').then(m => ({ default: m.TicTacToeGame })));
 const PoolGame = lazy(() => import('./PoolGame').then(m => ({ default: m.PoolGame })));
 
@@ -467,10 +466,9 @@ const AppContent = () => {
                                                 activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                                                     activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                                                         activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                            activeGameTable.gameType === 'Cards' ? <CardGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                                activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                                    activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                                        <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
+                                                            activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                                    <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                                         </>
                                     ) : (
                                         <div className="flex flex-col items-center justify-center h-full gap-4">

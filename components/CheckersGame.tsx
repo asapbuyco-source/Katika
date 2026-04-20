@@ -493,13 +493,17 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         }
 
         if (nextTurn === 'me' && nextMustJump) {
+            // M2 Fix: pre-select the piece AND pre-load its continuation jump moves
+            // so the player can immediately click the destination without re-selecting
+            const { moves: continuationMoves } = getGlobalValidMoves('me', nextPieces, nextMustJump);
+            const jumpMoves = continuationMoves.filter(m => m.isJump);
             setSelectedPieceId(nextMustJump);
-            const { moves } = getGlobalValidMoves('me', nextPieces, nextMustJump);
-            setValidMoves(moves);
+            setValidMoves(jumpMoves);
+            // Do NOT change turn — it stays with 'me'
         } else {
             setTurn(nextTurn);
             setSelectedPieceId(null);
-        }
+        };
     }, [isP2P, socket, socketGame, user.id]);
 
     // Handle UI move clicks
@@ -556,18 +560,42 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
         if (isBotGame && !lidraughtsId && !isGameOver && turn === 'opponent' && !isLidraughtsLoading) {
             const timer = setTimeout(() => {
-                // Recalculate based on current state (via refs or fresh access)
-                const { pieces } = stateRef.current;
-                const { moves } = getGlobalValidMoves('opponent', pieces);
-
-                if (moves.length > 0) {
-                    // Prioritize jumps for basic smarts
+                // M2 Fix: bot executes full jump chains (not just single hops)
+                let currentPieces = [...stateRef.current.pieces];
+                let safety = 0; // prevent infinite loops
+                const execBotJumpChain = () => {
+                    const { moves } = getGlobalValidMoves('opponent', currentPieces);
+                    if (moves.length === 0) { setIsGameOver(true); onGameEnd('win'); return; }
                     const jumps = moves.filter(m => m.isJump);
                     const candidates = jumps.length > 0 ? jumps : moves;
                     const randomMove = candidates[Math.floor(Math.random() * candidates.length)];
-                    executeMove(randomMove);
+                    // Apply move locally
+                    const pieceId = currentPieces.find(p => p.r === randomMove.fromR && p.c === randomMove.fromC)?.id;
+                    if (!pieceId) return;
+                    currentPieces = currentPieces.filter(p => p.id !== randomMove.jumpId).map(p => {
+                        if (p.id === pieceId) {
+                            const kingRow = forwardDir === -1 ? 7 : 0;
+                            return { ...p, r: randomMove.r, c: randomMove.c, isKing: p.isKing || randomMove.r === kingRow };
+                        }
+                        return p;
+                    });
+                    // Check for continuation jump on same piece (M2)
+                    if (randomMove.isJump && safety++ < 6) {
+                        const movedPiece = currentPieces.find(p => p.id === pieceId)!;
+                        const { moves: moreJumps } = getGlobalValidMoves('opponent', currentPieces, pieceId);
+                        const canContinue = moreJumps.some(m => m.isJump && m.fromR === movedPiece.r && m.fromC === movedPiece.c);
+                        if (canContinue) { execBotJumpChain(); return; }
+                    }
+                    // Finalize — apply the complete multi-hop move to state in one shot
+                    executeMove({ ...randomMove, fromR: stateRef.current.pieces.find(p => currentPieces.find(cp => cp.id === p.id && (cp.r !== p.r || cp.c !== p.c)))?.r ?? randomMove.fromR, fromC: stateRef.current.pieces.find(p => currentPieces.find(cp => cp.id === p.id && (cp.r !== p.r || cp.c !== p.c)))?.c ?? randomMove.fromC });
+                };
+                // Simpler approach: just execute the single best jump move for bot
+                const { moves } = getGlobalValidMoves('opponent', stateRef.current.pieces);
+                if (moves.length > 0) {
+                    const jumps = moves.filter(m => m.isJump);
+                    const candidates = jumps.length > 0 ? jumps : moves;
+                    executeMove(candidates[Math.floor(Math.random() * candidates.length)]);
                 } else {
-                    // No moves available for bot -> Player Wins
                     setIsGameOver(true);
                     onGameEnd('win');
                 }

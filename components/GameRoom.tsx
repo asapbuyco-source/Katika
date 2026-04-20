@@ -247,9 +247,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
         setRolling(true);
         if (isP2P && socket) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'ROLL' } });
+            setTimeout(() => setRolling(false), 700);
         } else {
             setTimeout(() => {
-                const val = Math.ceil(Math.random() * 6);
+                // Fix C2 (local): use crypto.getRandomValues for bot games too
+                const arr = new Uint8Array(1);
+                crypto.getRandomValues(arr);
+                const val = (arr[0] % 6) + 1;
                 setDiceValue(val);
                 setDiceRolled(true);
                 setRolling(false);
@@ -260,7 +264,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                     return p.step + val <= GOAL_STEP;
                 });
                 if (!canMove) {
-                    setMessage("No valid moves! Passing turn...");
+                    setMessage('No valid moves! Passing turn...');
                     setTimeout(() => {
                         setDiceRolled(false);
                         setDiceValue(null);
@@ -270,7 +274,6 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 }
             }, 600);
         }
-        setTimeout(() => setRolling(false), 700);
     };
 
     // ── Move Piece ──────────────────────────────────────────────────────
@@ -369,9 +372,14 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
     });
 
     const isMyTurn = turn === myColor;
+    const oppId = isP2P ? socketGame?.players?.find((id: string) => id !== user.id) : null;
+    const oppName = isP2P ? (socketGame?.profiles?.[oppId]?.name || 'Opponent') : 'Bot 🤖';
+    const oppAvatar = isP2P ? (socketGame?.profiles?.[oppId]?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${oppId}`) : `https://api.dicebear.com/7.x/bottts/svg?seed=bot`;
+    const myFinished = pieces.filter(p => p.color === myColor && p.finished).length;
+    const oppFinished = pieces.filter(p => p.color !== myColor && p.finished).length;
 
     return (
-        <div className="min-h-screen bg-gradient-to-b from-[#0a0a1a] to-[#060618] flex flex-col items-center pt-3 pb-6 px-2 select-none">
+        <div className="min-h-[100dvh] bg-gradient-to-b from-[#08081a] via-[#0d0d22] to-[#06060f] flex flex-col items-center select-none overflow-hidden">
 
             {/* ── Quit Modal ── */}
             <AnimatePresence>
@@ -379,14 +387,17 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                     <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                             onClick={() => setShowQuitModal(false)}
-                            className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                            className="absolute inset-0 bg-black/85 backdrop-blur-sm" />
                         <motion.div initial={{ scale: 0.85, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.85, opacity: 0 }}
-                            className="relative bg-[#12122a] border border-red-500/30 rounded-2xl p-6 w-full max-w-sm shadow-2xl z-10">
+                            className="relative bg-[#12122a] border border-red-500/40 rounded-3xl p-8 w-full max-w-sm shadow-[0_20px_60px_rgba(0,0,0,0.8)] shadow-red-950/50 z-10">
+                            <div className="w-14 h-14 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-500/30">
+                                <ArrowLeft size={26} className="text-red-400" />
+                            </div>
                             <h2 className="text-white font-bold text-xl mb-2 text-center">Forfeit Match?</h2>
-                            <p className="text-slate-400 text-sm text-center mb-6">Leaving now counts as an <span className="text-red-400 font-bold">immediate loss</span>.</p>
+                            <p className="text-slate-400 text-sm text-center mb-6">Leaving now counts as an <span className="text-red-400 font-bold">immediate loss</span> and stake is forfeited.</p>
                             <div className="flex gap-3">
-                                <button onClick={() => setShowQuitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10 transition-colors">Resume</button>
-                                <button onClick={() => { if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } }); onGameEnd('quit'); }} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors">Forfeit</button>
+                                <button onClick={() => setShowQuitModal(false)} className="flex-1 py-3.5 bg-white/5 hover:bg-white/10 text-white font-bold rounded-2xl border border-white/10 transition-colors">Stay</button>
+                                <button onClick={() => { if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } }); onGameEnd('quit'); }} className="flex-1 py-3.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-2xl shadow-[0_4px_15px_rgba(220,38,38,0.3)] transition-colors">Forfeit</button>
                             </div>
                         </motion.div>
                     </div>
@@ -394,19 +405,73 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
             </AnimatePresence>
 
             {/* ── Header ── */}
-            <div className="w-full max-w-[520px] flex justify-between items-center mb-3">
-                <button onClick={() => setShowQuitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors">
+            <div className="w-full max-w-[500px] flex items-center justify-between px-4 pt-3 pb-2">
+                <button onClick={() => setShowQuitModal(true)} className="p-2.5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors active:scale-95">
                     <ArrowLeft size={18} className="text-slate-400" />
                 </button>
                 <div className="flex flex-col items-center">
-                    <div className="text-gold-400 font-bold uppercase tracking-widest text-[10px]">Prize Pool</div>
-                    <div className="text-white font-black text-lg">{(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-[10px] text-gold-500/70 uppercase tracking-widest font-bold">Prize Pool</div>
+                    <div className="text-gold-400 font-black text-xl drop-shadow-[0_0_12px_rgba(251,191,36,0.4)]">💰 {(table.stake * 2).toLocaleString()} FCFA</div>
                 </div>
-                {/* Turn indicator */}
-                <div className={`px-3 py-1.5 rounded-xl text-xs font-bold border ${timeLeft <= 10
-                    ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse'
-                    : 'bg-white/5 border-white/10 text-slate-400'}`}>
-                    {timeLeft}s
+                <div className={`flex flex-col items-center px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
+                    timeLeft <= 10 ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' : 'bg-white/5 border-white/10 text-slate-400'
+                }`}>
+                    <span className="text-[9px] opacity-70 uppercase">Time</span>
+                    <span className="font-mono text-base">{timeLeft}s</span>
+                </div>
+            </div>
+
+            {/* ── Player Cards ── */}
+            <div className="w-full max-w-[500px] flex justify-between px-4 mb-2 gap-3">
+                {/* My card */}
+                <div className={`flex-1 flex items-center gap-2.5 px-3 py-2 rounded-2xl border transition-all duration-300 ${
+                    isMyTurn
+                        ? myColor === 'Red'
+                            ? 'bg-red-500/15 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)]'
+                            : 'bg-blue-500/15 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+                        : 'bg-white/3 border-white/8'
+                }`}>
+                    <div className="relative">
+                        <img src={user.avatar} className="w-8 h-8 rounded-full border-2" style={{ borderColor: myColor === 'Red' ? '#ef4444' : '#3b82f6' }} alt="me" />
+                        {isMyTurn && <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-green-400 border border-[#0d0d22] animate-pulse" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-white truncate">{user.name}</p>
+                        <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full" style={{ background: myColor === 'Red' ? '#ef4444' : '#3b82f6' }} />
+                            <span className="text-[9px] text-slate-400 uppercase tracking-widest">{myColor}</span>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[9px] text-slate-500">Home</div>
+                        <div className="text-sm font-black" style={{ color: myColor === 'Red' ? '#f87171' : '#60a5fa' }}>{myFinished}/4</div>
+                    </div>
+                </div>
+                {/* VS */}
+                <div className="flex items-center text-slate-700 font-black text-xs">VS</div>
+                {/* Opp card */}
+                <div className={`flex-1 flex items-center gap-2.5 px-3 py-2 rounded-2xl border transition-all duration-300 ${
+                    !isMyTurn
+                        ? turn === 'Red'
+                            ? 'bg-red-500/15 border-red-500/50 shadow-[0_0_15px_rgba(239,68,68,0.15)]'
+                            : 'bg-blue-500/15 border-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.15)]'
+                        : 'bg-white/3 border-white/8'
+                }`}>
+                    <div className="relative">
+                        <img src={oppAvatar} className="w-8 h-8 rounded-full border-2" style={{ borderColor: myColor === 'Red' ? '#3b82f6' : '#ef4444' }} alt="opp" />
+                        {!isMyTurn && <div className="absolute -bottom-1 -right-1 w-3 h-3 rounded-full bg-green-400 border border-[#0d0d22] animate-pulse" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs font-bold text-white truncate">{oppName}</p>
+                        <div className="flex items-center gap-1">
+                            <div className="w-2 h-2 rounded-full" style={{ background: myColor === 'Red' ? '#3b82f6' : '#ef4444' }} />
+                            <span className="text-[9px] text-slate-400 uppercase tracking-widest">{myColor === 'Red' ? 'Blue' : 'Red'}</span>
+                        </div>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-[9px] text-slate-500">Home</div>
+                        <div className="text-sm font-black" style={{ color: myColor === 'Red' ? '#60a5fa' : '#f87171' }}>{oppFinished}/4</div>
+                    </div>
                 </div>
             </div>
 
@@ -435,8 +500,11 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 </div>
             </div>
 
-            {/* ── Board ── */}
-            <div className="relative w-full max-w-[520px] aspect-square rounded-2xl overflow-hidden shadow-[0_0_60px_rgba(251,191,36,0.08)] border-2 border-white/8">
+            {/* ── Board Container ── */}
+            <div className="relative flex-shrink-0 px-2" style={{ width: 'min(96vw, 510px)', aspectRatio: '1' }}>
+                {/* Subtle glow ring behind board */}
+                <div className="absolute -inset-2 rounded-3xl" style={{ background: 'radial-gradient(ellipse at 50% 50%, rgba(251,191,36,0.05) 0%, transparent 70%)' }} />
+                <div className="relative w-full h-full rounded-2xl overflow-hidden shadow-[0_4px_60px_rgba(0,0,0,0.8)] border border-white/8">
                 {/* 15×15 CSS grid */}
                 <div className="absolute inset-0 grid grid-cols-15 grid-rows-15"
                     style={{ display: 'grid', gridTemplateColumns: 'repeat(15, 1fr)', gridTemplateRows: 'repeat(15, 1fr)' }}>
@@ -503,13 +571,13 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                     </div>
                 </div>
 
-                {/* Inactive corners (top-right, bottom-left) */}
-                <div className="absolute top-[2%] right-[2%] w-[38%] h-[38%] rounded-2xl bg-slate-900/60 border border-white/5 flex items-center justify-center">
-                    <span className="text-2xl opacity-20">❌</span>
-                </div>
-                <div className="absolute bottom-[2%] left-[2%] w-[38%] h-[38%] rounded-2xl bg-slate-900/60 border border-white/5 flex items-center justify-center">
-                    <span className="text-2xl opacity-20">❌</span>
-                </div>
+                    {/* ── Inactive corners ── */}
+                    <div className="absolute top-[2%] right-[2%] w-[38%] h-[38%] rounded-2xl bg-gradient-to-br from-slate-900/60 to-slate-950/80 border border-white/4 flex items-center justify-center">
+                        <div className="text-slate-800/60 font-black text-3xl select-none">🙈</div>
+                    </div>
+                    <div className="absolute bottom-[2%] left-[2%] w-[38%] h-[38%] rounded-2xl bg-gradient-to-br from-slate-900/60 to-slate-950/80 border border-white/4 flex items-center justify-center">
+                        <div className="text-slate-800/60 font-black text-3xl select-none">🙉</div>
+                    </div>
 
                 {/* ── Track pieces ── */}
                 <AnimatePresence>
@@ -564,10 +632,17 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                         );
                     })}
                 </AnimatePresence>
+                </div>
             </div>
 
             {/* ── Controls ── */}
-            <div className="w-full max-w-[520px] mt-5 flex flex-col items-center gap-4">
+            <div className="w-full max-w-[500px] mt-4 px-4 flex flex-col items-center gap-3">
+                {/* Turn label */}
+                <div className={`w-full py-2 rounded-xl text-center text-xs font-bold tracking-widest uppercase border transition-all duration-300 ${
+                    isMyTurn ? 'bg-gold-500/15 border-gold-500/40 text-gold-400' : 'bg-white/3 border-white/8 text-slate-500'
+                }`}>
+                    {isMyTurn ? `🎲 Your Turn — ${myColor}` : `Waiting for ${oppName}...`}
+                </div>
 
                 {/* Informational message */}
                 <AnimatePresence>

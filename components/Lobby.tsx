@@ -34,7 +34,6 @@ const STATIC_GAME_LIST = [
     { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active', desc: 'Powered by Lidraughts' },
     { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active' },
     { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', defaultStatus: 'active' },
-    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'bg-pink-500/10', border: 'border-pink-500/20', defaultStatus: 'active' },
     { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', defaultStatus: 'active' },
 ];
 
