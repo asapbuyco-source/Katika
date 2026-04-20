@@ -675,8 +675,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const handlePowerPointerUp = (e: React.PointerEvent | React.MouseEvent) => {
         if (!isPoweringRef.current) return;
         isPoweringRef.current = false;
-        if ('releasePointerCapture' in e.target) {
-            try { (e.target as HTMLElement).releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
+        const captureEl = e.currentTarget as HTMLElement;
+        if ('releasePointerCapture' in captureEl) {
+            try { captureEl.releasePointerCapture((e as React.PointerEvent).pointerId); } catch(err) {}
         }
 
         // CRITICAL FIX: read from refs, NOT from React state.
