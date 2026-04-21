@@ -511,6 +511,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const startPhysics = useCallback(() => {
         pottedRef.current = []; fhRef.current = null; fhLocked.current = false;
         setMoving(true); animRef.current = requestAnimationFrame(runPhysics);
+        // Safety timeout: if physics doesn't settle in 30s, force turn end
+        setTimeout(() => {
+            if (movRef.current) {
+                console.warn('[Pool] Physics timeout - forcing turn end');
+                setMoving(false); handleTurnEndRef.current();
+            }
+        }, 30000);
     }, [runPhysics]);
 
     const handleTurnEnd = useCallback(() => {
@@ -540,7 +547,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         let foul = cuePot || fhRef.current === null || (actGrp && ((actGrp === 'solids' && fhRef.current > 8) || (actGrp === 'stripes' && fhRef.current < 8 && fhRef.current !== 0))) || (!actGrp && fhRef.current === 8);
         if (foul) playSFX('error');
 
-        if (cuePot) { const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = TW * .25; c.y = TH / 2; c.vx = 0; c.vy = 0; }
+        if (cuePot) { const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = TW * .25; c.y = TH / 2; c.vx = 0; c.vy = 0; setBih(true); }
 
         let nmg = myGrRef.current, nbg = bgRef.current;
         if (!foul && !nmg && pot.some(id => id !== 0 && id !== 8)) {
@@ -569,6 +576,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     handleTurnEndRef.current = handleTurnEnd;
 
     const animStrike = (a: number, p: number) => {
+        if (p < 5) return; // Guard: minimum power to hit
         let f = 0; const tot = 10;
         const iv = setInterval(() => {
             f++; setStrikeOff((p * .4 + 28) * (f / tot));
@@ -576,9 +584,11 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 clearInterval(iv); setStrikeOff(0); setPower(0);
                 const c = ballsRef.current.find(b => b.id === 0);
                 if (c && !c.pocketed) {
-                    c.vx = Math.cos(a) * (p * .35); 
-                    c.vy = Math.sin(a) * (p * .35);
-                    playPoolSound('cue-hit', p / 100); startPhysics();
+                    // Clamp power to minimum to ensure cue ball moves
+                    const clampedP = Math.max(p, 12);
+                    c.vx = Math.cos(a) * (clampedP * .35); 
+                    c.vy = Math.sin(a) * (clampedP * .35);
+                    playPoolSound('cue-hit', clampedP / 100); startPhysics();
                 }
             }
         }, 16);
@@ -590,10 +600,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const getLogicCoords = (e: React.PointerEvent | React.MouseEvent, r: DOMRect) => {
         const px = e.clientX - r.left;
         const py = e.clientY - r.top;
-        if (isLandscapeRef.current) {
-            return { x: TW - (py / r.height) * TW, y: (px / r.width) * TH };
-        }
-        return { x: (px / r.width) * TW, y: (py / r.height) * TH };
+        const cx = (px / r.width) * TW;
+        const cy = (py / r.height) * TH;
+        // Simplified: always use direct mapping (was causing aim direction issues)
+        return { x: cx, y: cy };
     };
 
     const isLandscapeRef = useRef(isLandscape);
