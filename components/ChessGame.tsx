@@ -75,10 +75,11 @@ const ChessSquare = React.memo(({
                 <motion.span
                     layoutId={`piece-${square}`}
                     transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                    className={`text-3xl md:text-5xl select-none relative z-20 drop-shadow-md leading-none ${
+                    style={{ WebkitTextStroke: piece.color === 'b' ? '1px rgba(255,255,255,0.4)' : '1px rgba(0,0,0,0.8)' }}
+                    className={`text-3xl md:text-5xl select-none relative z-20 leading-none ${
                         piece.color === 'w'
-                            ? 'text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]'
-                            : 'text-[#1a1a2e] drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]'
+                            ? 'text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.8)]'
+                            : 'text-black drop-shadow-[0_1px_4px_rgba(255,255,255,0.2)]'
                     }`}
                 >
                     {symbol}
