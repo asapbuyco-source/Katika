@@ -590,7 +590,6 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 
                 // Execute the bot chain recursively starting from the current board
                 execBotJumpChain();
-                }
             }, 1000);
             return () => clearTimeout(timer);
         }

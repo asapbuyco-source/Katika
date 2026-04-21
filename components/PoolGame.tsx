@@ -519,7 +519,19 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         const actGrp = botShot ? bgRef.current : myGrRef.current;
 
         if (eightPot) {
-            const outcome = cuePot ? 'loss' : (((botShot && (bgRef.current ? ballsRef.current.filter(b => !b.pocketed && b.id !== 0 && b.id !== 8 && ((bgRef.current === 'solids' && b.id < 8) || (bgRef.current === 'stripes' && b.id > 8))).length === 0 : true)) || (!botShot && (myGrRef.current ? ballsRef.current.filter(b => !b.pocketed && b.id !== 0 && b.id !== 8 && ((myGrRef.current === 'solids' && b.id < 8) || (myGrRef.current === 'stripes' && b.id > 8))).length === 0 : true))) ? 'win' : 'loss');
+            // FIX: 8-ball win requires group to be assigned AND cleared
+            // Previously: when group was null, it defaulted to true (instant win bug)
+            const getGroupCleared = (group: string | null) => {
+                if (!group) return false; // No group assigned = cannot win yet
+                return ballsRef.current.filter(b => 
+                    !b.pocketed && b.id !== 0 && b.id !== 8 && 
+                    ((group === 'solids' && b.id < 8) || (group === 'stripes' && b.id > 8))
+                ).length === 0;
+            };
+            
+            const groupCleared = botShot ? getGroupCleared(bgRef.current) : getGroupCleared(myGrRef.current);
+            
+            const outcome = cuePot ? 'loss' : (groupCleared ? 'win' : 'loss');
             setMsg(outcome === 'win' ? '🏆 8-Ball Pocketed! Victory!' : '❌ 8-Ball Foul! Game Over.');
             setTimeout(() => onGameEnd(outcome as any), 3000);
             return;

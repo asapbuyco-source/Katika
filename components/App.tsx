@@ -3,7 +3,7 @@ import React, { useEffect, useRef, ReactNode, ErrorInfo, Component, lazy, Suspen
 import { ViewState, Table, SocketGameState, GameAction } from '../types';
 import { Navigation } from './Navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, AlertTriangle, RefreshCw, WifiOff } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
 import { ThemeProvider, useTheme } from '../services/theme';
 import { AppStateProvider, useAppState } from '../services/AppContext';
