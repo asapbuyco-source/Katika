@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink, ChevronLeft, ChevronRight, List } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -199,6 +199,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const [isGameOver, setIsGameOver] = useState(false);
     const [pendingPromotion, setPendingPromotion] = useState<{ from: Square, to: Square } | null>(null);
     const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
+    const [showMovesPanel, setShowMovesPanel] = useState(false);
+    const TIMER_INCREMENT = 3; // seconds added after each move (chess.com style)
 
     const isP2P = !!socket && !!socketGame;
     const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest);
@@ -302,7 +304,6 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         const interval = setInterval(() => {
             if (state.opponentDisconnected) return;
             setTimeRemaining(prev => {
-                // C1 Fix: read live game state from ref to avoid stale closure
                 const liveGame = stateRef.current.game;
                 const turnColor = liveGame.turn();
                 const liveMyColor = stateRef.current.myColor;
@@ -329,8 +330,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 }
             });
         }, 1000);
+        
         return () => clearInterval(interval);
-    }, [isGameOver, viewIndex, myColor, isP2P, socket, socketGame, state.opponentDisconnected]);
+    }, [isGameOver, viewIndex]); // minimal deps - rely on ref for everything else
 
     const checkGameOver = useCallback((currentGamState: Chess) => {
         // Bug A fix: read from stateRef so this callback never captures a stale
@@ -373,6 +375,16 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
                 if (move.captured) playSFX('capture'); else playSFX('move');
                 checkGameOver(newGame);
+
+                // Add time increment after each move (chess.com style)
+                if (!isP2P) {
+                    setTimeRemaining(prev => {
+                        const moverColor = move.color;
+                        const newTime = { ...prev };
+                        newTime[moverColor] = Math.min(prev[moverColor] + TIMER_INCREMENT, 1800); // cap at 30 mins
+                        return newTime;
+                    });
+                }
 
                 if (isP2P && socket && socketGame) {
                     const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
@@ -575,6 +587,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <button onClick={() => setShowRulesModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-gold-400 hover:text-white">
                         <BookOpen size={18} />
                     </button>
+                    <button onClick={() => setShowMovesPanel(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
+                        <List size={18} />
+                    </button>
                 </div>
                 <div className="flex flex-col items-center">
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
@@ -706,6 +721,73 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                             <div className="flex gap-3">
                                 <button onClick={() => setShowForfeitModal(false)} className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-white font-bold rounded-xl border border-white/10">Resume</button>
                                 <button onClick={handleQuit} className="flex-1 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl">Forfeit</button>
+                            </div>
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
+
+            {/* Moves History Panel */}
+            <AnimatePresence>
+                {showMovesPanel && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setShowMovesPanel(false)} className="absolute inset-0 bg-black/80 backdrop-blur-sm" />
+                        <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }} className="relative bg-[#1a1a1a] border border-white/10 rounded-2xl p-4 w-full max-w-md max-h-[80vh] shadow-2xl flex flex-col">
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                    <List size={18} className="text-gold-400" /> Move History
+                                </h2>
+                                <button onClick={() => setShowMovesPanel(false)} className="text-slate-400 hover:text-white">
+                                    <X size={20} />
+                                </button>
+                            </div>
+                            <div className="flex justify-center gap-4 mb-4">
+                                <button onClick={() => setViewIndex(-1)} disabled={viewIndex === -1} className="p-2 bg-white/5 rounded-lg disabled:opacity-30">
+                                    <ChevronRight size={18} className="rotate-180 text-white" />
+                                </button>
+                                <span className="text-sm text-slate-400">
+                                    {game.turn() === 'w' ? `White to move (${game.history().length})` : `Black to move (${game.history().length})`}
+                                </span>
+                                <button onClick={() => setViewIndex(Math.max(0, game.history().length - 1))} disabled={viewIndex === game.history().length - 1 || viewIndex === -1} className="p-2 bg-white/5 rounded-lg disabled:opacity-30">
+                                    <ChevronRight size={18} className="text-white" />
+                                </button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto custom-scrollbar">
+                                {(() => {
+                                    const verboseHistory = game.history({ verbose: true });
+                                    const moves: JSX.Element[] = [];
+                                    for (let i = 0; i < verboseHistory.length; i++) {
+                                        const move = verboseHistory[i];
+                                        const moveNum = Math.floor(i / 2) + 1;
+                                        const isWhite = i % 2 === 0;
+                                        if (isWhite) {
+                                            moves.push(
+                                                <div key={i} className="flex items-center gap-2 py-1">
+                                                    <span className="text-xs text-slate-500 w-6">{moveNum}.</span>
+                                                    <button 
+                                                        onClick={() => setViewIndex(i)}
+                                                        className={`flex-1 text-left px-2 py-1 rounded ${viewIndex === i ? 'bg-gold-500/30 text-gold-400' : 'text-white hover:bg-white/5'}`}
+                                                    >
+                                                        {move.san}
+                                                    </button>
+                                                </div>
+                                            );
+                                        } else {
+                                            moves.push(
+                                                <div key={i} className="flex items-center gap-2 py-1">
+                                                    <span className="w-6" />
+                                                    <button 
+                                                        onClick={() => setViewIndex(i)}
+                                                        className={`flex-1 text-left px-2 py-1 rounded ${viewIndex === i ? 'bg-gold-500/30 text-gold-400' : 'text-white hover:bg-white/5'}`}
+                                                    >
+                                                        {move.san}
+                                                    </button>
+                                                </div>
+                                            );
+                                        }
+                                    }
+                                    return moves.length > 0 ? moves : <div className="text-center text-slate-500 py-8">No moves yet</div>;
+                                })()}
                             </div>
                         </motion.div>
                     </div>

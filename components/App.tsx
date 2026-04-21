@@ -380,10 +380,17 @@ const AppContent = () => {
     // refresh or stale state), redirect to lobby immediately ───────────────
     useEffect(() => {
         if (isTransitioningRef.current) return;
-        if (currentView === 'game' && !activeGameTable && !gameResult) {
+        if (currentView === 'game' && !activeGameTable) {
             dispatch({ type: 'SET_VIEW', payload: 'lobby' });
         }
-    }, [currentView, activeGameTable, gameResult, dispatch]);
+    }, [currentView, activeGameTable, dispatch]);
+
+    // ── Clear game result when navigating away from game ───────────────
+    useEffect(() => {
+        if (gameResult && currentView !== 'game') {
+            dispatch({ type: 'SET_GAME_RESULT', payload: null });
+        }
+    }, [gameResult, currentView, dispatch]);
 
     // ── Find opponent for reconnection modal ─────────────────────────────────
     let opponentProfile = null;

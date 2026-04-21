@@ -94,6 +94,10 @@ export const useGameController = () => {
 
     // ── Game Event Flow ───────────────────────────────────────────────────────
     const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit' | 'draw') => {
+        // Only handle game end once
+        if (isTransitioningRef.current) return;
+        isTransitioningRef.current = true;
+
         let tournamentPot = 0;
         const tournamentMatchId = activeGameTable?.tournamentMatchId;
 
@@ -114,7 +118,11 @@ export const useGameController = () => {
             }
         }
         dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
-    }, [activeGameTable, user, dispatch]);
+
+        // Clean up game-specific state immediately
+        setSocketGame(null);
+        dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
+    }, [activeGameTable, user, dispatch, setSocketGame]);
 
     const finalizeGameEnd = useCallback(() => {
         isTransitioningRef.current = true;
