@@ -12,7 +12,7 @@ import { useAppState } from './AppContext';
 import { setTournamentMatchActive, reportTournamentMatchResult } from './firebase';
 import { playSFX } from './sound';
 
-// ─── Context Shape ─────────────────────────────────────────────────────────────
+// ─── Context Shaped ─────────────────────────────────────────────────────────────
 
 interface SocketContextValue {
     socket: Socket | null;
@@ -156,7 +156,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         const handleGameOver = ({ roomId, winner, financials }: { roomId?: string; winner: string; financials?: any }) => {
             dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
-            
+
             const currentGame = socketGameRef.current;
             const currentUser = userRef.current;
 
