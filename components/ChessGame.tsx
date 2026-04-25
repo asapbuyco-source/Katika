@@ -82,14 +82,21 @@ const ChessSquare = React.memo(({
             aria-label={piece ? `${piece.color === 'w' ? 'White' : 'Black'} ${piece.type} on ${square}` : `Empty square ${square}`}
             className={`
                 relative flex items-center justify-center w-full h-full
-                ${isDark ? 'bg-royal-900/60' : 'bg-slate-300/10'}
-                ${isSelected ? 'ring-inset ring-4 ring-gold-500/50' : ''}
-                ${isKingInCheck ? 'bg-red-500/50 animate-pulse' : ''}
-                ${isLastMove ? 'bg-yellow-500/20' : ''}
+                ${isSelected ? 'ring-inset ring-4 ring-[#829769]' : ''}
+                ${isKingInCheck ? 'animate-pulse' : ''}
                 ${isDragging ? 'opacity-50' : ''}
-                focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 focus-visible:ring-offset-royal-950
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-[#829769] focus-visible:ring-offset-2 focus-visible:ring-offset-[#302e2b]
                 cursor-pointer
             `}
+            style={{
+                backgroundColor: isKingInCheck
+                    ? '#e74c3c'
+                    : isLastMove
+                        ? (isDark ? '#aaa23a' : '#f6f669')
+                        : isSelected
+                            ? (isDark ? '#829769' : '#f4f78b')
+                            : (isDark ? '#779952' : '#ebecd0'),
+            }}
         >
             {/* Move Hint / Option */}
             {moveOption && (
@@ -440,10 +447,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 });
 
                 if (isP2P && socket && socketGame) {
+                    const moverColor = move.color;
+                    const incrementedTime = Math.min(timeRemaining[moverColor] + TIMER_INCREMENT, 1800);
                     const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
                     const updatedTimers = {
-                        [socketGame.players[0]]: timeRemaining.w,
-                        [socketGame.players[1]]: timeRemaining.b
+                        [socketGame.players[0]]: moverColor === 'w' ? incrementedTime : timeRemaining.w,
+                        [socketGame.players[1]]: moverColor === 'b' ? incrementedTime : timeRemaining.b
                     };
                     socket.emit('game_action', {
                         roomId: socketGame.roomId,
@@ -521,14 +530,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             const newSquares: any = {};
             if (moves.length > 0) {
                 moves.forEach((move: any) => {
-                    const targetPiece = game.get(move.to);
                     newSquares[move.to] = {
-                        background: targetPiece && targetPiece.color !== clickedPiece.color
-                            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
-                            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
+                        background: 'rgba(0, 0, 0, 0.15)',
                     };
                 });
-                newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
+                newSquares[square] = { background: 'rgba(130, 151, 105, 0.5)' };
             }
             setOptionSquares(newSquares);
             playSFX('click');
@@ -552,14 +558,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             const newSquares: any = {};
             if (moves.length > 0) {
                 moves.forEach((move: any) => {
-                    const targetPiece = game.get(move.to);
                     newSquares[move.to] = {
-                        background: targetPiece && targetPiece.color !== piece.color
-                            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
-                            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
+                        background: 'rgba(0, 0, 0, 0.15)',
                     };
                 });
-                newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
+                newSquares[square] = { background: 'rgba(130, 151, 105, 0.5)' };
             }
             setOptionSquares(newSquares);
             setSelectedSquare(square);
@@ -605,7 +608,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     };
 
     return (
-        <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        <div className="h-[100dvh] overflow-y-auto bg-royal-950 flex flex-col items-center p-4">
             {/* Promotion Modal */}
             <AnimatePresence>
                 {pendingPromotion && (
@@ -746,7 +749,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             </div>
 
             {/* Board */}
-            <div className={`relative w-full max-w-[600px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${viewIndex === moveHistory.length - 1 || viewIndex === -1 ? 'border-royal-800' : 'border-gold-500/50'} transition-colors duration-300`}>
+            <div className={`relative w-full max-w-[600px] aspect-square bg-[#302e2b] rounded-xl shadow-2xl p-1 md:p-2 border-4 border-[#302e2b] transition-colors duration-300`}>
                 {/* Board Grid */}
                 <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10`}>
                     {board.map((row: any[], rowIndex: number) =>
@@ -799,7 +802,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             {/* PLAYER BAR (ME) */}
             <div className="w-full max-w-[600px] flex justify-between items-start mt-2 mb-4 px-2">
                 <div className="flex items-center gap-3">
-                    <img src={user.avatar} className="w-10 h-10 rounded-full border border-gold-500" alt="Me" />
+                    <img src={user.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="Me" />
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">You</span>
                         <span className={`text-[10px] font-bold flex items-center gap-1 ${
@@ -810,6 +813,37 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                             </span>
                             {myColor === 'w' ? 'White' : 'Black'}
                         </span>
+                    </div>
+                    {/* Captured pieces display */}
+                    <div className="flex items-center gap-0.5 ml-2 h-6">
+                        {(() => {
+                            const verboseHistory = game.history({ verbose: true });
+                            const captured: string[] = [];
+                            verboseHistory.forEach((m: any) => {
+                                if (m.captured) captured.push(m.captured);
+                            });
+                            const myCaptured = captured.filter(c => myColor === 'w' ? c === c.toUpperCase() : c === c.toLowerCase());
+                            const oppCaptured = captured.filter(c => myColor === 'w' ? c === c.toLowerCase() : c === c.toUpperCase());
+                            const pieceSymbols: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚', P: '♙', R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔' };
+                            return (
+                                <>
+                                    {oppCaptured.length > 0 && (
+                                        <div className="flex items-center gap-0">
+                                            {oppCaptured.map((c, i) => (
+                                                <span key={i} className="text-[10px] text-white/70" title={`Captured: ${c}`}>{pieceSymbols[c]}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {myCaptured.length > 0 && (
+                                        <div className="flex items-center gap-0 ml-1">
+                                            {myCaptured.map((c, i) => (
+                                                <span key={i} className="text-[10px] text-red-400/70" title={`Lost: ${c}`}>{pieceSymbols[c]}</span>
+                                            ))}
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === myColor ? 'bg-gold-500/20 border-gold-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>

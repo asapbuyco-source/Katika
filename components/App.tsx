@@ -380,10 +380,14 @@ const AppContent = () => {
     // refresh or stale state), redirect to lobby immediately ───────────────
     useEffect(() => {
         if (isTransitioningRef.current) return;
-        if (currentView === 'game' && !activeGameTable) {
-            dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+        // UX-2 Fix: Auto-redirect from ghost "Finalizing" state after 3s if no result appears
+        if (currentView === 'game' && !activeGameTable && !gameResult) {
+            const timer = setTimeout(() => {
+                dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+            }, 3000);
+            return () => clearTimeout(timer);
         }
-    }, [currentView, activeGameTable, dispatch]);
+    }, [currentView, activeGameTable, gameResult, dispatch]);
 
     // ── Clear game result when navigating away from game ───────────────
     useEffect(() => {
@@ -500,7 +504,7 @@ const AppContent = () => {
                             )}
                             {currentView === 'tournaments' && user && <MV k="tournaments"><Tournaments user={user} onJoinMatch={handleTournamentMatchJoin} socket={socket} pendingTournamentId={preSelectedGame} onClearPendingTournament={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
                             {currentView === 'game' && user && (
-                                <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full min-h-full h-full">
+                                <motion.div key="game" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[50] w-full h-full overflow-hidden bg-royal-950">
                                     {activeGameTable ? (
                                         <>
                                             {activeGameTable.gameType === 'Checkers' ? <CheckersGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
@@ -512,9 +516,10 @@ const AppContent = () => {
                                                                     <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                                         </>
                                     ) : (
-                                        <div className="flex flex-col items-center justify-center h-full gap-4">
+                                        <div className="fixed inset-0 flex flex-col items-center justify-center gap-4 bg-royal-950 z-[45]">
                                             <Loader2 className="w-8 h-8 text-gold-500 animate-spin" />
                                             <p className="text-slate-400 font-bold uppercase tracking-widest text-xs">Finalizing Match Result...</p>
+                                            <p className="text-slate-600 text-xs">Returning to lobby shortly...</p>
                                         </div>
                                     )}
                                 </motion.div>

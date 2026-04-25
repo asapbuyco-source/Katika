@@ -1714,43 +1714,38 @@ const createInitialGameState = (gameType, p1, p2) => {
                 status: 'active',
                 drawCount: 0  // M5 fix: track consecutive draws to prevent infinite staked loops
             };
-        case 'Ludo':
-            const pieces = [];
-            for (let i = 0; i < 4; i++) pieces.push({ id: i, color: 'Red', step: -1, owner: p1 });
-            for (let i = 0; i < 4; i++) pieces.push({ id: i + 4, color: 'Yellow', step: -1, owner: p2 });
+case 'Ludo':
             return {
                 ...common,
-                pieces,
+                pieces: [
+                    ...Array.from({ length: 4 }, (_, i) => ({ id: i, color: 'Red', step: -1, owner: p1 })),
+                    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 4, color: 'Blue', step: -1, owner: p2 }))
+                ],
                 diceValue: null,
                 diceRolled: false,
                 turn: p1
             };
-};
-// [REMOVED] Card game case from createInitialGameState
         case 'Checkers':
-            const checkersPieces = [];
-            let cid = 0;
-            // Player 2 (Top, Rows 0-2)
-            for (let r = 0; r < 3; r++) {
-                for (let c = 0; c < 8; c++) {
-                    if ((r + c) % 2 === 1) checkersPieces.push({ id: `p2-${cid++}`, owner: p2, isKing: false, r, c });
-                }
-            }
-            // Player 1 (Bottom, Rows 5-7)
-            for (let r = 5; r < 8; r++) {
-                for (let c = 0; c < 8; c++) {
-                    if ((r + c) % 2 === 1) checkersPieces.push({ id: `p1-${cid++}`, owner: p1, isKing: false, r, c });
-                }
-            }
             return {
                 ...common,
-                pieces: checkersPieces,
+                pieces: [
+                    ...Array.from({ length: 3 }, (_, r) =>
+                        Array.from({ length: 8 }, (_, c) =>
+                            (r + c) % 2 === 1 ? { id: `p2-${r * 8 + c}`, owner: p2, isKing: false, r, c } : null
+                        ).filter(Boolean)
+                    ).flat(),
+                    ...Array.from({ length: 3 }, (_, r) =>
+                        Array.from({ length: 8 }, (_, c) =>
+                            (r + c) % 2 === 1 ? { id: `p1-${(r + 5) * 8 + c}`, owner: p1, isKing: false, r: r + 5, c } : null
+                        ).filter(Boolean)
+                    ).flat()
+                ],
                 turn: p1
             };
-        case 'Chess':
+case 'Chess':
             return {
                 ...common,
-                fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', // Standard start FEN
+                fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
                 pgn: '',
                 turn: p1
             };
@@ -2627,10 +2622,25 @@ io.on('connection', (socket) => {
 
                 // Bug M3 fix: validate that no piece moved more steps than the dice roll
                 const diceVal = room.gameState.diceValue || 0;
+
+                // S4 Fix: Must roll 6 to enter from home (step -1 → 0+)
+                const enteredWithoutSix = action.pieces.some((p, i) => {
+                    const prev = prevPieces[i];
+                    if (p.owner !== userId || prev.step !== -1) return false;
+                    if (p.step >= 0 && diceVal !== 6) return true;
+                    return false;
+                });
+                if (enteredWithoutSix) {
+                    console.warn(`[Ludo][${roomId}] ${userId} entered piece without rolling 6. Rejected.`);
+                    return;
+                }
+
                 const movedTooFar = action.pieces.some((p, i) => {
                     const prev = prevPieces[i];
                     // Only validate pieces the current player owns
                     if (p.owner !== userId) return false;
+                    // S4: skip — already validated entry above
+                    if (prev.step === -1 && p.step >= 0) return false;
                     const stepDiff = p.step - prev.step;
                     // Allow moving backward only to home (-1), or forward by at most diceVal
                     return stepDiff > diceVal;
@@ -2643,15 +2653,15 @@ io.on('connection', (socket) => {
                 room.gameState.pieces = action.pieces;
                 room.gameState.diceRolled = false;
 
-                // Winner detection: 4 pieces at finishing step (56)
-                const redWin = action.pieces.filter(p => p.color === 'Red' && p.step === 56).length === 4;
-                const yellowWin = action.pieces.filter(p => p.color === 'Yellow' && p.step === 56).length === 4;
+                // S3 Fix: Winner detection using color (aligned with server init) and finished flag
+                const redWin = action.pieces.filter(p => p.color === 'Red' && p.finished).length === 4;
+                const blueWin = action.pieces.filter(p => p.color === 'Blue' && p.finished).length === 4;
 
                 if (redWin) {
                     endGame(roomId, room.players[0], 'Ludo Victory');
                     return;
                 }
-                if (yellowWin) {
+                if (blueWin) {
                     endGame(roomId, room.players[1], 'Ludo Victory');
                     return;
                 }

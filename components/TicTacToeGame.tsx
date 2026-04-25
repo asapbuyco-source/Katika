@@ -238,7 +238,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
     };
 
     return (
-        <div className="min-h-screen bg-royal-950 flex flex-col items-center p-4">
+        <div className="h-[100dvh] overflow-y-auto bg-royal-950 flex flex-col items-center p-4">
             {/* FORFEIT MODAL */}
             <AnimatePresence>
                 {showForfeitModal && (

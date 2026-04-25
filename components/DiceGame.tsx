@@ -381,7 +381,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
     const hasRolledServer = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
 
     return (
-        <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-between p-4 relative overflow-hidden">
+        <div className="h-[100dvh] bg-royal-950 flex flex-col items-center justify-between p-4 relative overflow-hidden">
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
             <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
 

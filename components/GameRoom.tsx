@@ -248,6 +248,80 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
     handleTimeoutRef.current = handleTimeout;
 
+    // S8 Fix: Ludo bot auto-play for solo games
+    useEffect(() => {
+        if (isP2P || state.opponentDisconnected) return;
+        // Run bot move only when it's NOT the player's turn (i.e., bot's turn) and dice is ready
+        if (turn === myColor || diceRolled || !diceValue) return;
+
+        const timer = setTimeout(() => {
+            // ... existing bot move logic
+            const oppColor: PieceColor = myColor === 'Red' ? 'Blue' : 'Red';
+            const botPiecesAll = pieces.filter(p => p.color === oppColor && !p.finished);
+            const validPieces = botPiecesAll.filter(p => {
+                if (p.step === -1) return diceValue === 6;
+                return p.step + diceValue! <= GOAL_STEP;
+            });
+            if (validPieces.length > 0) {
+                const piece = validPieces[Math.floor(Math.random() * validPieces.length)];
+                const nextStep = piece.step === -1 ? 0 : piece.step + diceValue!;
+                const newPieces = pieces.map(p => p.id === piece.id
+                    ? { ...p, step: nextStep, finished: nextStep === GOAL_STEP }
+                    : p
+                );
+                const captured = checkCaptures(newPieces, piece, nextStep);
+                if (captured) playSFX('capture');
+                const bonusTurn = diceValue === 6 || captured || nextStep === GOAL_STEP;
+                // Bot finished 4 pieces = player lost
+                const oppCol: PieceColor = myColor === 'Red' ? 'Blue' : 'Red';
+                const botFin = newPieces.filter(p => p.color === oppColor && p.finished).length;
+                if (botFin === 4) { setPieces(newPieces); onGameEnd('loss'); return; }
+                // Player finished 4 pieces = player won
+                const myFin = newPieces.filter(p => p.color === myColor && p.finished).length;
+                if (myFin === 4) { setPieces(newPieces); onGameEnd('win'); return; }
+                setPieces(newPieces);
+                setDiceRolled(false);
+                setDiceValue(null);
+                playSFX('move');
+                if (!bonusTurn) setTurn(myColor);
+            }
+        }, 1200);
+        return () => clearTimeout(timer);
+    }, [turn, diceRolled, diceValue, isP2P, state.opponentDisconnected]);
+
+    // Bot roll: when it's opponent's turn and dice not rolled in solo mode
+    useEffect(() => {
+        if (isP2P || state.opponentDisconnected) return;
+        // Run bot roll only when it's NOT the player's turn (i.e., bot's turn)
+        if (turn === myColor || diceRolled) return;
+        const timer = setTimeout(() => {
+            if (isP2P || turn === myColor || diceRolled) return;
+            const arr = new Uint8Array(1);
+            crypto.getRandomValues(arr);
+            const val = (arr[0] % 6) + 1;
+            setDiceValue(val);
+            setDiceRolled(true);
+            playSFX('dice');
+
+            // Check if bot has any valid moves, otherwise pass turn
+            const oppColor: PieceColor = myColor === 'Red' ? 'Blue' : 'Red';
+            const botPieces = pieces.filter(p => p.color === oppColor && !p.finished);
+            const canMove = botPieces.some(p => {
+                if (p.step === -1 && val === 6) return true;
+                if (p.step === -1) return false;
+                return p.step + val <= GOAL_STEP;
+            });
+            if (!canMove) {
+                setTimeout(() => {
+                    setDiceRolled(false);
+                    setDiceValue(null);
+                    setTurn(myColor);
+                }, 1500);
+            }
+        }, 1500);
+        return () => clearTimeout(timer);
+    }, [turn, diceRolled, isP2P, state.opponentDisconnected]);
+
     // ── Roll Dice ─────────────────────────────────────────────────────────
     const handleRoll = () => {
         if (turn !== myColor || diceRolled) return;
@@ -387,7 +461,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
     const oppFinished = pieces.filter(p => p.color !== myColor && p.finished).length;
 
     return (
-        <div className="min-h-[100dvh] bg-gradient-to-b from-[#08081a] via-[#0d0d22] to-[#06060f] flex flex-col items-center select-none overflow-hidden">
+        <div className="h-[100dvh] overflow-y-auto bg-gradient-to-b from-[#08081a] via-[#0d0d22] to-[#06060f] flex flex-col items-center select-none">
 
             {/* ── Quit Modal ── */}
             <AnimatePresence>

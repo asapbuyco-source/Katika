@@ -481,11 +481,18 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         socket.on('aim_sync', (d: any) => {
             if (d.type === 'aim_sync') { setOppAngle(d.angle); setOppPower(d.power); setOppGhost(d.ghost); }
         });
-        return () => { 
-            socket.off('disconnect', onDisc); 
-            socket.off('connect', onConn); 
+        const handleGameOver = () => {
+            if (physicsAnimRef.current) cancelAnimationFrame(physicsAnimRef.current);
+            if (renderAnimRef.current) cancelAnimationFrame(renderAnimRef.current);
+            setMoving(false);
+        };
+        socket.on('game_over', handleGameOver);
+        return () => {
+            socket.off('disconnect', onDisc);
+            socket.off('connect', onConn);
             socket.off('pool_pong', onPong);
-            socket.off('game_update', h); 
+            socket.off('game_update', h);
+            socket.off('game_over', handleGameOver);
         };
     }, [socket, isP2P, roomId, myId, iAmP1]);
 
@@ -907,6 +914,28 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                     </div>
                 </header>
             )}
+
+            {/* Ball Tray - shows pocketed balls */}
+            <div className="flex justify-center gap-1 px-4 py-2 bg-black/40 border-t border-white/5 shrink-0">
+                {balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8).length === 0 ? (
+                    <span className="text-[10px] text-slate-600 font-bold uppercase tracking-widest">No balls pocketed</span>
+                ) : (
+                    <div className="flex items-center gap-1 flex-wrap justify-center max-w-[90%]">
+                        {balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8).map(b => (
+                            <div
+                                key={b.id}
+                                className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-bold shadow-md"
+                                style={{
+                                    background: b.id <= 8 ? `linear-gradient(135deg, #f7dc6f 0%, #d4ac0d 50%, #9a7d0a 100%)` : `linear-gradient(135deg, #fdfefe 0%, #bdc3c7 50%, #7f8c8d 100%)`,
+                                    color: b.id <= 8 ? '#1a1a1a' : '#1a1a1a',
+                                }}
+                            >
+                                {b.id}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
 
             {/* Play Area */}
             <div className="flex-1 w-full relative bg-gradient-to-br from-[#070c10] to-[#0d161d] overflow-hidden">
