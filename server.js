@@ -2053,7 +2053,7 @@ io.on('connection', (socket) => {
     });
 
     // 3. GAME ACTIONS
-    socket.on('game_action', ({ roomId, action }) => {
+    socket.on('game_action', async ({ roomId, action }) => {
         if (!roomId || !action?.type) return;
         const room = rooms.get(roomId);
         if (!room) return;
