@@ -1,4 +1,4 @@
-﻿
+
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
@@ -70,14 +70,8 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   // Tabs Configuration - strictly typed
   const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
 
-  // Reload Logic: When leaving settings tab or unmounting while on settings
-  useEffect(() => {
-    return () => {
-      if (activeTab === 'settings') {
-        window.location.reload();
-      }
-    };
-  }, [activeTab]);
+  // Task 21 Fix: Removed page reload on settings tab change
+  // Theme/language changes now propagate via React context (useTheme/useLanguage) automatically
 
   // Load Preferences from LocalStorage on Mount
   useEffect(() => {

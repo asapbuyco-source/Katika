@@ -90,6 +90,7 @@ const Die2D: React.FC<{ value: number; rolling: boolean; isMe: boolean }> = ({ v
 
 export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
     const { state } = useAppState();
+    useEffect(() => { window.scrollTo(0, 0); }, []);
     const isP2P = !!socket && !!socketGame;
     const opponentId = isP2P && Array.isArray(socketGame?.players)
         ? socketGame.players.find((id: string) => id !== user.id)
@@ -267,6 +268,19 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             if (timeoutId) clearTimeout(timeoutId);
         };
     }, [isMyTurn, round, phase, state.opponentDisconnected]);
+
+    // C4 Fix: Proactive bot auto-play — trigger when opponent's turn in solo mode
+    useEffect(() => {
+        if (isP2P || state.opponentDisconnected) return;
+        if (!isMyTurn && phase === 'waiting') {
+            const timer = setTimeout(() => {
+                if (!isP2P && !isMyTurn && phase === 'waiting' && !isProcessing) {
+                    botPlay();
+                }
+            }, 1500);
+            return () => clearTimeout(timer);
+        }
+    }, [isMyTurn, phase, isP2P, state.opponentDisconnected, isProcessing]);
 
     const handleTimeout = () => {
         if (phase !== 'waiting') return;
@@ -596,8 +610,10 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                         <motion.button
                             key="roll"
                             initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }}
-                            onClick={roll}
-                            className="w-full py-4 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black text-xl rounded-2xl shadow-[0_0_40px_rgba(251,191,36,0.4)] transition-all transform active:scale-95 flex items-center justify-center gap-3 border-t border-white/20"
+                            role="button"
+                        aria-label="Roll dice"
+                        onClick={roll}
+                        className="w-full py-4 bg-gradient-to-r from-gold-500 to-gold-600 hover:from-gold-400 hover:to-gold-500 text-royal-950 font-black text-xl rounded-2xl shadow-[0_0_40px_rgba(251,191,36,0.4)] transition-all transform active:scale-95 flex items-center justify-center gap-3 border-t border-white/20 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 focus-visible:ring-offset-royal-950"
                         >
                             <Box size={24} strokeWidth={3} /> ROLL DICE ({timeLeft}s)
                         </motion.button>

@@ -72,6 +72,9 @@ function stepPhysics(
     for (let step = 0; step < SUB; step++) {
         const active = balls.filter(b => !b.pocketed);
         for (const b of active) {
+            // Task 5 Fix: NaN guard - if velocities are NaN, force ball to stop
+            if (isNaN(b.vx) || isNaN(b.vy)) { b.vx = 0; b.vy = 0; b.pocketed = true; pottedCb(b.id); continue; }
+            
             b.x += b.vx / SUB; b.y += b.vy / SUB;
             let f = 0, bounced = false;
             const gapC = 37, gapM = 30;
@@ -306,8 +309,9 @@ export function drawScene(
         }
     });
 
-    // Cue Stick
-    if (showAim && !bih && cueBall) {
+    // Cue Stick - always show when player is aiming and balls are not moving
+    const showCueStick = showAim && !bih && cueBall && power >= 5;
+    if (showCueStick) {
         const pb = (28 + power * 0.42) - strikeOff;
         ctx.save(); ctx.translate(cueBall.x, cueBall.y); ctx.rotate(angle);
         const tx = BR + pb, bx = tx + 360;
@@ -315,6 +319,13 @@ export function drawScene(
         g.addColorStop(0, '#4a90e2'); g.addColorStop(0.01, '#d4b06a'); g.addColorStop(0.4, '#e8ca80'); g.addColorStop(0.6, '#1a1a1a'); g.addColorStop(1, '#3e1a08');
         ctx.beginPath(); ctx.moveTo(tx, -1.5); ctx.lineTo(tx + 55, -3.2); ctx.lineTo(bx, -5); ctx.lineTo(bx, 5); ctx.lineTo(tx + 55, 3.2); ctx.lineTo(tx, 1.5); ctx.closePath();
         ctx.fillStyle = g; ctx.fill(); ctx.restore();
+    } else if (showAim && !bih && cueBall) {
+        // Draw a simple aiming indicator when no power is set
+        ctx.save(); ctx.translate(cueBall.x, cueBall.y); ctx.rotate(angle);
+        ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(BR + 30, 0); ctx.lineTo(BR + 360, 0); ctx.stroke();
+        ctx.setLineDash([]); ctx.restore();
     }
     ctx.restore();
 }
@@ -365,10 +376,13 @@ function findBotShot(balls: Ball[], grp: 'solids' | 'stripes' | null) {
 // ──────────────── Main Component ──────────────────────────────────────────────────────────
 export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
     const { state } = useAppState();
+    useEffect(() => { window.scrollTo(0, 0); }, []);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const ballsRef = useRef<Ball[]>(buildRack());
     const sparksRef = useRef<Spark[]>([]);
-    const animRef = useRef<number | null>(null);
+    // Task 32 Fix: Separate refs for physics and render animations
+    const physicsAnimRef = useRef<number | null>(null);
+    const renderAnimRef = useRef<number | null>(null);
     const pottedRef = useRef<number[]>([]);
     const fhRef = useRef<number | null>(null), fhLocked = useRef(false);
 
@@ -487,8 +501,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
 
     // ── Timer — reset when turn changes ──
     useEffect(() => { setCountdown(TURN_TIME); }, [turnId]);
+    // Task 18 Fix: Use movRef.current instead of state 'moving' to avoid race condition
     useEffect(() => {
-        if (!isP2P || moving || state.opponentDisconnected || netStatus !== 'ok') return;
+        if (!isP2P || movRef.current || state.opponentDisconnected || netStatus !== 'ok') return;
         if (countdown <= 0) {
             playSFX('error');
             if (isMyTurn) onGameEnd('loss');
@@ -496,7 +511,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         }
         const t = setTimeout(() => setCountdown(c => c - 1), 1000);
         return () => clearTimeout(t);
-    }, [isP2P, moving, countdown, isMyTurn, state.opponentDisconnected, netStatus]);
+    }, [isP2P, countdown, isMyTurn, state.opponentDisconnected, netStatus]);
 
     // ── Physics Control ──
     const shakeRef = useRef(0);
@@ -504,13 +519,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const runPhysics = useCallback(() => {
         const m = stepPhysics(ballsRef.current, sparksRef.current, id => pottedRef.current.push(id), id => { if (!fhLocked.current) { fhRef.current = id; fhLocked.current = true; } }, n => { shakeRef.current = Math.min(7, shakeRef.current + n); });
         shakeRef.current = shakeRef.current > 0.4 ? shakeRef.current * 0.82 : 0;
-        if (m) animRef.current = requestAnimationFrame(runPhysics);
+        if (m) physicsAnimRef.current = requestAnimationFrame(runPhysics);
         else { setBalls([...ballsRef.current]); setMoving(false); handleTurnEndRef.current(); }
     }, []);
 
     const startPhysics = useCallback(() => {
         pottedRef.current = []; fhRef.current = null; fhLocked.current = false;
-        setMoving(true); animRef.current = requestAnimationFrame(runPhysics);
+        setMoving(true); physicsAnimRef.current = requestAnimationFrame(runPhysics);
         // Safety timeout: if physics doesn't settle in 30s, force turn end
         setTimeout(() => {
             if (movRef.current) {
@@ -523,21 +538,47 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const handleTurnEnd = useCallback(() => {
         const pot = pottedRef.current, cuePot = pot.includes(0), eightPot = pot.includes(8);
         const botShot = turnRef.current === 'bot';
-        const actGrp = botShot ? bgRef.current : myGrRef.current;
+
+        // C2 Fix: Assign group BEFORE foul check so actGrp uses the fresh value
+        let nmg = myGrRef.current, nbg = bgRef.current;
+        if (!nmg && pot.some(id => id !== 0 && id !== 8)) {
+            const first = pot.find(id => id !== 0 && id !== 8)!;
+            nmg = (botShot ? (first < 8 ? 'stripes' : 'solids') : (first < 8 ? 'solids' : 'stripes'));
+            nbg = nmg === 'solids' ? 'stripes' : 'solids';
+            setMyGroup(nmg); setBotGroup(nbg);
+        }
+        const actGrp = botShot ? nbg : nmg;
 
         if (eightPot) {
-            // FIX: 8-ball win requires group to be assigned AND cleared
-            // Previously: when group was null, it defaulted to true (instant win bug)
             const getGroupCleared = (group: string | null) => {
-                if (!group) return false; // No group assigned = cannot win yet
-                return ballsRef.current.filter(b => 
-                    !b.pocketed && b.id !== 0 && b.id !== 8 && 
+                if (!group) return false;
+                return ballsRef.current.filter(b =>
+                    !b.pocketed && b.id !== 0 && b.id !== 8 &&
                     ((group === 'solids' && b.id < 8) || (group === 'stripes' && b.id > 8))
                 ).length === 0;
             };
-            
-            const groupCleared = botShot ? getGroupCleared(bgRef.current) : getGroupCleared(myGrRef.current);
-            
+
+            const groupCleared = botShot ? getGroupCleared(nbg) : getGroupCleared(nmg);
+
+            // C1 Fix: P2P must let server validate the win — emit action and wait for game_over
+            if (isP2P && socket && roomId) {
+                const winnerId = cuePot ? oppId : (groupCleared ? myId : oppId);
+                socket.emit('game_action', {
+                    roomId, action: {
+                        type: 'MOVE',
+                        newState: {
+                            balls: ballsRef.current,
+                            winner: winnerId,
+                            myGroupP1: iAmP1 ? nmg : nbg,
+                            myGroupP2: iAmP1 ? nbg : nmg
+                        }
+                    }
+                });
+                setMsg(winnerId === myId ? '🏆 Waiting for confirmation...' : '❌ 8-Ball Foul...');
+                return;
+            }
+
+            // Bot/solo path: local determination
             const outcome = cuePot ? 'loss' : (groupCleared ? 'win' : 'loss');
             setMsg(outcome === 'win' ? '🏆 8-Ball Pocketed! Victory!' : '❌ 8-Ball Foul! Game Over.');
             setTimeout(() => onGameEnd(outcome as any), 3000);
@@ -548,14 +589,6 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         if (foul) playSFX('error');
 
         if (cuePot) { const c = ballsRef.current.find(b => b.id === 0)!; c.pocketed = false; c.x = TW * .25; c.y = TH / 2; c.vx = 0; c.vy = 0; setBih(true); }
-
-        let nmg = myGrRef.current, nbg = bgRef.current;
-        if (!foul && !nmg && pot.some(id => id !== 0 && id !== 8)) {
-            const first = pot.find(id => id !== 0 && id !== 8)!;
-            nmg = (botShot ? (first < 8 ? 'stripes' : 'solids') : (first < 8 ? 'solids' : 'stripes'));
-            nbg = nmg === 'solids' ? 'stripes' : 'solids';
-            setMyGroup(nmg); setBotGroup(nbg);
-        }
 
         const keep = !foul && pot.some(id => id !== 0 && id !== 8 && (!actGrp || (actGrp === 'solids' && id < 8) || (actGrp === 'stripes' && id > 8)));
         const next = isP2P ? (keep ? myId : oppId) : (keep ? (botShot ? 'bot' : myId) : (botShot ? myId : 'bot'));
@@ -575,8 +608,11 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     }, [isP2P, socket, roomId, myId, oppId, iAmP1, onGameEnd]);
     handleTurnEndRef.current = handleTurnEnd;
 
+    // Task 17 Fix: isStrikingRef guard to prevent double-fire
+    const isStrikingRef = useRef(false);
     const animStrike = (a: number, p: number) => {
-        if (p < 5) return; // Guard: minimum power to hit
+        if (p < 5 || isStrikingRef.current) return; // Guard: minimum power to hit
+        isStrikingRef.current = true;
         let f = 0; const tot = 10;
         const iv = setInterval(() => {
             f++; setStrikeOff((p * .4 + 28) * (f / tot));
@@ -584,12 +620,21 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 clearInterval(iv); setStrikeOff(0); setPower(0);
                 const c = ballsRef.current.find(b => b.id === 0);
                 if (c && !c.pocketed) {
-                    // Clamp power to minimum to ensure cue ball moves
                     const clampedP = Math.max(p, 12);
                     c.vx = Math.cos(a) * (clampedP * .35); 
                     c.vy = Math.sin(a) * (clampedP * .35);
-                    playPoolSound('cue-hit', clampedP / 100); startPhysics();
+                    playPoolSound('cue-hit', clampedP / 100);
+                    setStrikeOff(p * .4 + 28);
+                    setTimeout(() => {
+                        setStrikeOff(0);
+                        startPhysics();
+                    }, 50);
+                } else {
+                    console.warn('[Pool] Cue ball pocketed on break');
+                    playSFX('error');
+                    startPhysics();
                 }
+                isStrikingRef.current = false;
             }
         }, 16);
     };
@@ -740,9 +785,9 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             const mt = turnRef.current === myId, mv = movRef.current, grp = myGrRef.current;
             const targetIds = (mt && !mv) ? (grp === 'solids' ? [1, 2, 3, 4, 5, 6, 7] : grp === 'stripes' ? [9, 10, 11, 12, 13, 14, 15] : [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]).filter(id => !ballsRef.current.find(b => b.id === id)?.pocketed) : [];
             drawScene(ctx, ballsRef.current, sparksRef.current, mt ? angle : (isBot ? angle : oppAngle), mt ? power : (isBot ? power : oppPower), !mv, bihRef.current, mt ? ghost : oppGhost, strikeOff, shakeRef.current, targetIds.length === 0 && grp ? [8] : targetIds, isLandscapeRef.current);
-            animRef.current = requestAnimationFrame(loop);
+            renderAnimRef.current = requestAnimationFrame(loop);
         };
-        loop(); return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+        loop(); return () => { if (renderAnimRef.current) cancelAnimationFrame(renderAnimRef.current); };
     }, [angle, power, strikeOff, ghost, oppAngle, oppPower, oppGhost, isBot, myId]);
 
     const myPot = myGroup ? balls.filter(b => b.pocketed && b.id !== 0 && b.id !== 8 && ((myGroup === 'solids' && b.id < 8) || (myGroup === 'stripes' && b.id > 8))).length : 0;
@@ -790,8 +835,13 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                             <span className="font-mono text-2xl tracking-wider">{countdown}s</span>
                         </div>}
                         <div className={`w-full py-3 rounded-xl text-[10px] font-black tracking-widest uppercase border text-center shadow-lg transition-all ${isMyTurn ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.2)]' : 'bg-slate-800 text-slate-400 border-white/10'}`}>
-                            {msg || 'WAITING'}
+                            {moving ? '🔄 Balls Moving...' : (msg || 'WAITING')}
                         </div>
+                        {!isMyTurn && !isP2P && (
+                            <div className="w-full py-2 rounded-xl text-[10px] font-black tracking-widest uppercase border text-center bg-slate-800 text-slate-400 border-white/10 animate-pulse">
+                                🤖 Bot Preparing...
+                            </div>
+                        )}
                     </div>
 
                     <div className={`p-4 border-t transition-all shadow-[0_-4px_20px_rgba(0,0,0,0.5)] ${!isMyTurn ? 'border-red-500/50 bg-red-500/10' : 'border-white/10 bg-white/5'}`}>
@@ -832,9 +882,14 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                         </button>
                         <span className="text-[10px] text-gold-500 font-black tracking-widest leading-none drop-shadow-md">💰{(table.stake * 2).toLocaleString()}</span>
                         {isP2P && <div className={`text-xs font-mono font-bold mt-1 ${countdown < 10 ? 'text-red-500 animate-pulse drop-shadow-[0_0_8px_rgba(239,68,68,0.8)]' : 'text-slate-300'}`}>{countdown}s</div>}
-                        <div className={`mt-2 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${isMyTurn ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : 'bg-slate-800 text-slate-400 border-white/10'}`}>
-                            {msg || 'WAIT'}
+                        <div className={`mt-2 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest border transition-all ${isMyTurn ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/50 shadow-[0_0_10px_rgba(16,185,129,0.3)] animate-pulse' : 'bg-slate-800 text-slate-400 border-white/10'}`}>
+                            {moving ? '🔄 Balls Moving...' : (msg || (isMyTurn ? '🎯 Your Shot' : '⏳ Opponent'))}
                         </div>
+                        {!isMyTurn && !isP2P && (
+                            <div className="mt-2 px-3 py-0.5 rounded-full text-[9px] font-black uppercase tracking-widest bg-slate-800 text-slate-400 border border-white/10 animate-pulse">
+                                🤖 Bot Thinking...
+                            </div>
+                        )}
                     </div>
 
                     {/* Player 2 */}

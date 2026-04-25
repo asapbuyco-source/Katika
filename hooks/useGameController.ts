@@ -119,10 +119,8 @@ export const useGameController = () => {
         }
         dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
 
-        // Clean up game-specific state immediately
-        setSocketGame(null);
         dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
-    }, [activeGameTable, user, dispatch, setSocketGame]);
+    }, [activeGameTable, user, dispatch]);
 
     const finalizeGameEnd = useCallback(() => {
         isTransitioningRef.current = true;

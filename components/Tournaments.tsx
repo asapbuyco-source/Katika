@@ -6,6 +6,7 @@ import { User, Tournament, TournamentMatch } from '../types';
 import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn, fetchServerTimeOffset, getServerTime } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { useLanguage } from '../services/i18n';
+import { useToast } from '../services/toast';
 
 interface TournamentsProps {
     user: User;
@@ -17,6 +18,7 @@ interface TournamentsProps {
 
 export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, socket, pendingTournamentId, onClearPendingTournament }) => {
     const { t } = useLanguage();
+    const toast = useToast();
     const [activeTab, setActiveTab] = useState<'list' | 'detail'>('list');
     const [tournaments, setTournaments] = useState<Tournament[]>([]);
     const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -164,7 +166,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
 
     const initiateRegistration = (t: Tournament) => {
         if (user.balance < t.entryFee) {
-            alert("Insufficient funds. Please deposit to your wallet first.");
+            toast.error("Insufficient funds. Please deposit to your wallet first.");
             return;
         }
         setRegTarget(t);
@@ -194,7 +196,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
             setRegTarget(null);
         } else {
             playSFX('error');
-            alert("Registration failed. The tournament might be full or an error occurred.");
+            toast.error("Registration failed. The tournament might be full or an error occurred.");
         }
     };
 

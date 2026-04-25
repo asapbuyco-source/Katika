@@ -9,6 +9,13 @@ import helmet from 'helmet';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 
+const sanitizeRoomForClient = (room, roomId) => ({
+    roomId, players: room.players, gameType: room.gameType,
+    stake: room.stake, turn: room.turn, status: room.status,
+    gameState: room.gameState, profiles: room.profiles,
+    chat: room.chat, winner: room.winner || null
+});
+
 
 // --- CONFIGURATION & VALIDATION ---
 const requiredEnv = ['FAPSHI_API_KEY', 'FAPSHI_USER_TOKEN'];
@@ -1544,6 +1551,35 @@ const refundEscrow = async (userId, realDeducted, promoDeducted) => {
     }
 };
 
+const deductEscrow = async (userId, amount, note) => {
+    if (!db || amount <= 0) return;
+    try {
+        const userRef = db.collection('users').doc(userId);
+        await db.runTransaction(async tx => {
+            const snap = await tx.get(userRef);
+            if (!snap.exists) throw new Error(`User ${userId} not found`);
+            const d = snap.data();
+            let realDeduct = 0, promoDeduct = 0;
+            if ((d.balance || 0) >= amount) realDeduct = amount;
+            else { realDeduct = d.balance || 0; promoDeduct = Math.min(d.promoBalance || 0, amount - realDeduct); }
+            if (realDeduct + promoDeduct < amount) throw new Error(`Insufficient funds for ${userId}`);
+            tx.update(userRef, {
+                balance: (d.balance || 0) - realDeduct,
+                promoBalance: (d.promoBalance || 0) - promoDeduct
+            });
+            tx.set(userRef.collection('transactions').doc(), {
+                type: 'escrow_deduct', amount, status: 'completed',
+                date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                note: note || 'Escrow deduction'
+            });
+        });
+        console.log(`Deducted escrow from ${userId}: ${amount}`);
+    } catch (e) {
+        console.error(`Failed to deduct escrow for ${userId}:`, e);
+        throw e; // re-throw so caller can handle
+    }
+};
+
 const endGame = (roomId, winnerId, reason) => {
     const room = rooms.get(roomId);
     if (!room || room.status === 'completed') return;
@@ -1651,21 +1687,9 @@ const endGame = (roomId, winnerId, reason) => {
     }, 60000);
 };
 
-// Card Game Helpers — Fisher-Yates shuffle with crypto RNG (Fix C3)
-const fisherYatesShuffle = (arr) => {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = crypto.randomInt(0, i + 1);
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-};
-const createDeck = () => {
-    const suits = ['H', 'D', 'C', 'S'];
-    const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
-    let deck = [];
-    for (let s of suits) for (let r of ranks) deck.push({ id: s + r, suit: s, rank: r });
-    return fisherYatesShuffle(deck);
-};
+// [REMOVED] Card Game Helpers — Fisher-Yates shuffle with crypto RNG
+// const fisherYatesShuffle = (arr) => { ... };
+// const createDeck = () => { ... };
 
 const createInitialGameState = (gameType, p1, p2) => {
     const common = {
@@ -1701,16 +1725,8 @@ const createInitialGameState = (gameType, p1, p2) => {
                 diceRolled: false,
                 turn: p1
             };
-        case 'Cards':
-            const deck = createDeck();
-            return {
-                ...common,
-                deck: deck.slice(15),
-                hands: { [p1]: deck.slice(0, 7), [p2]: deck.slice(7, 14) },
-                discardPile: [deck[14]],
-                activeSuit: deck[14].suit,
-                turn: p1
-            };
+};
+// [REMOVED] Card game case from createInitialGameState
         case 'Checkers':
             const checkersPieces = [];
             let cid = 0;
@@ -1769,6 +1785,16 @@ io.on('connection', (socket) => {
         } catch (err) {
             console.warn(`[Auth] Token refresh failed for ${socket.id}`);
             socket.disconnect(true);
+        }
+    });
+
+    socket.on('reconnect_game', ({ userId: reconnectUserId }) => {
+        for (const [roomId, room] of rooms.entries()) {
+            if (room.players.includes(reconnectUserId) && room.status === 'active') {
+                socket.join(roomId);
+                socket.emit('game_update', sanitizeRoomForClient(room, roomId));
+                break;
+            }
         }
     });
 
@@ -2070,7 +2096,7 @@ io.on('connection', (socket) => {
             if (!room.chat) room.chat = [];
             room.chat.push(msg);
             if (room.chat.length > 50) room.chat.shift();
-            io.to(roomId).emit('game_update', { ...room, roomId, chat: room.chat });
+            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
             return;
         }
 
@@ -2095,6 +2121,7 @@ io.on('connection', (socket) => {
             let requiredDuration = 59500; // Default 60s
             if (room.gameType === 'TicTacToe') requiredDuration = 14500; // 15s
             if (room.gameType === 'Cards') requiredDuration = 29500; // 30s
+            if (room.gameType === 'Checkers') requiredDuration = 599500; // 600s (10 min)
             
             if (elapsed < requiredDuration) { 
                 console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} claimed early. Only ${elapsed}ms elapsed.`);
@@ -2116,6 +2143,18 @@ io.on('connection', (socket) => {
             // If both players accepted
             if (room.rematchVotes.size === room.players.length) {
                 console.log(`Rematch accepted in room ${roomId}`);
+
+                // B11 Fix: Re-escrow both players for rematch
+                if (room.stake > 0 && db) {
+                    for (const pid of room.players) {
+                        try {
+                            await deductEscrow(pid, room.stake, 'Rematch stake');
+                        } catch (e) {
+                            socket.emit('game_error', { message: 'Insufficient funds for rematch' });
+                            return;
+                        }
+                    }
+                }
 
                 // Reset Room State
                 room.status = 'active';
@@ -2155,13 +2194,7 @@ io.on('connection', (socket) => {
 
             room.gameState.roundRolls[userId] = [roll1, roll2];
 
-            io.to(roomId).emit('game_update', {
-                ...room,
-                roomId: roomId,
-                gameState: room.gameState,
-                diceRolled: true,
-                diceValue: roll1 + roll2
-            });
+            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
 
             const p1 = room.players[0];
             const p2 = room.players[1];
@@ -2174,7 +2207,7 @@ io.on('connection', (socket) => {
                     else if (total2 > total1) room.gameState.scores[p2]++;
 
                     room.gameState.roundState = 'scored';
-                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                    io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
 
                     setTimeout(() => {
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
@@ -2184,22 +2217,21 @@ io.on('connection', (socket) => {
                             room.gameState.currentRound++;
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
-                            // Alternate who rolls first each round
                             room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
-                            io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                         }
                     }, 3000);
 
                 }, 2000);
             } else {
                 room.turn = room.players.find(id => id !== userId);
-                io.to(roomId).emit('game_update', { ...room, roomId });
+                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
             }
         }
 
         // --- CHECKERS & CHESS & TICTACTOE ---
         else if (action.type === 'MOVE') {
-            if (room.turn !== userId && room.gameType !== 'Cards') return;
+            if (room.turn !== userId) return;
 
             // =====================================================================
             // Fix 1: CHECKERS — Full server-side move validation
@@ -2214,6 +2246,16 @@ io.on('connection', (socket) => {
                 if (toR < 0 || toR > 7 || toC < 0 || toC > 7) {
                     console.warn(`[Checkers][${roomId}] OOB move by ${userId}. Rejected.`);
                     return;
+                }
+
+                // Task 1 Fix: Enforce mustJumpFrom for multi-jump chains
+                if (room.gameState.mustJumpFrom) {
+                    const [mjR, mjC] = room.gameState.mustJumpFrom.split(',').map(Number);
+                    const jumpDist = Math.abs(toR - fromR);
+                    if (fromR !== mjR || fromC !== mjC || jumpDist !== 2) {
+                        console.warn(`[Checkers][${roomId}] Must continue jump from (${mjR},${mjC}). Rejected.`);
+                        return;
+                    }
                 }
 
                 // (B) The piece being moved must exist and belong to userId
@@ -2333,9 +2375,27 @@ io.on('connection', (socket) => {
                     return;
                 }
 
+                // Task 1 Fix: Multi-jump continuation check
+                const movedDirs = movedPiece.isKing
+                    ? [[-1,-1],[-1,1],[1,-1],[1,1]]
+                    : [[forwardDir, -1], [forwardDir, 1]];
+                const pieceMapAfter = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
+                let hasMoreJumps = false;
+                if (absDR === 2) {
+                    hasMoreJumps = movedDirs.some(([dr, dc]) => {
+                        const mr2 = toR + dr, mc2 = toC + dc;
+                        const jr2 = toR + dr * 2, jc2 = toC + dc * 2;
+                        if (jr2 < 0 || jr2 > 7 || jc2 < 0 || jc2 > 7) return false;
+                        if (pieceMapAfter.has(`${jr2},${jc2}`)) return false;
+                        const mid2 = pieceMapAfter.get(`${mr2},${mc2}`);
+                        return mid2 && mid2.owner !== userId;
+                    });
+                }
+
                 room.gameState.pieces = updatedPieces;
-                room.turn = opponentId;
-                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                room.gameState.mustJumpFrom = hasMoreJumps ? `${toR},${toC}` : null;
+                room.turn = hasMoreJumps ? userId : opponentId;
+                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                 return; // handled — do NOT fall through to generic newState branch
             }
             // =====================================================================
@@ -2446,6 +2506,14 @@ io.on('connection', (socket) => {
                         if (newCount - prevCount > 4) { // Fix M1: break shots can pot 3-4 balls legally
                             console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: 4). Rejected.`); return;
                         }
+                        // Task 22 Fix: Verify winner's group is cleared before accepting win
+                        const isP1 = room.players[0] === userId;
+                        const winnerGrp = isP1 ? room.gameState.myGroupP1 : room.gameState.myGroupP2;
+                        const myIds = winnerGrp === 'solids' ? [1,2,3,4,5,6,7] : winnerGrp === 'stripes' ? [9,10,11,12,13,14,15] : [];
+                        const grpCleared = myIds.every(id => authBalls.find(b => b.id === id)?.pocketed || authBalls.find(b => b.id === id)?.isPotted);
+                        if (action.newState.winner === userId && grpCleared && myIds.length > 0 && !eightPocketed) {
+                            console.warn(`[Pool][${roomId}] Group cleared but 8-ball not pocketed by ${userId}. Rejected.`); return;
+                        }
                     }
                 }
 
@@ -2490,6 +2558,7 @@ io.on('connection', (socket) => {
                 }
             }
             else if (action.index !== undefined && room.gameType === 'TicTacToe') {
+                if (room.turn !== userId) return;
                 const board = room.gameState.board;
                 if (board[action.index] === null) {
                     const symbol = userId === room.players[0] ? 'X' : 'O';
@@ -2514,18 +2583,17 @@ io.on('connection', (socket) => {
                             endGame(roomId, null, 'Three Consecutive Draws');
                             return;
                         }
-                        io.to(roomId).emit('game_update', { ...room, roomId, status: 'draw' });
+                        io.to(roomId).emit('game_update', sanitizeRoomForClient({ ...room, status: 'draw' }, roomId));
                         setTimeout(() => {
                             room.gameState.board = Array(9).fill(null);
                             room.status = 'active';
-                            // Alternate who goes first after a draw
                             room.turn = room.players.find(id => id !== room.turn);
-                            io.to(roomId).emit('game_update', { ...room, roomId });
+                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                         }, 3000);
                     }
                 }
             }
-            io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
         }
         // Draw is handled above inside the MOVE + index branch.
         // The separate DRAW_ROUND action is intentionally not handled here
@@ -2538,16 +2606,27 @@ io.on('connection', (socket) => {
                 const diceVal = crypto.randomInt(1, 7); // Fix C2: use crypto-secure RNG
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
-                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
             }
             else if (action.type === 'MOVE_PIECE') {
                 if (room.turn !== userId) return;
                 // Basic validation: ensure no piece count tampering
                 if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
 
+                // Task 23 Fix: Teleportation prevention — verify pieces were at claimed starting positions
+                const prevPieces = room.gameState.pieces;
+                const movedIllegally = action.pieces.some((p, i) => {
+                    const prev = prevPieces[i];
+                    if (p.owner !== userId) return p.step !== prev.step;
+                    return false;
+                });
+                if (movedIllegally) {
+                    console.warn(`[Ludo][${roomId}] Illegal state change from ${userId}. Rejected.`);
+                    return;
+                }
+
                 // Bug M3 fix: validate that no piece moved more steps than the dice roll
                 const diceVal = room.gameState.diceValue || 0;
-                const prevPieces = room.gameState.pieces;
                 const movedTooFar = action.pieces.some((p, i) => {
                     const prev = prevPieces[i];
                     // Only validate pieces the current player owns
@@ -2580,71 +2659,11 @@ io.on('connection', (socket) => {
                 if (!action.bonusTurn) {
                     room.turn = room.players.find(id => id !== userId);
                 }
-                io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
+                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
             }
         }
 
-        // --- CARDS ---
-        else if (room.gameType === 'Cards') {
-            if (room.turn !== userId) return;
-
-            if (action.type === 'PLAY') {
-                const hand = room.gameState.hands[userId];
-                const cardIndex = hand.findIndex(c => c.id === action.card.id);
-
-                if (cardIndex > -1) {
-                    // Bug M6 fix: validate card legality before accepting the play
-                    const topCard = room.gameState.discardPile[room.gameState.discardPile.length - 1];
-                    const activeSuit = room.gameState.activeSuit;
-                    const isPlayable = action.card.suit === activeSuit
-                        || action.card.rank === topCard?.rank
-                        || action.card.rank === '8'; // 8s are wild
-                    if (!isPlayable) {
-                        console.warn(`[Cards][${roomId}] Illegal play by ${userId}: ${action.card.id} on ${activeSuit}/${topCard?.rank}. Rejected.`);
-                        socket.emit('invalid_move', { message: 'Card does not match active suit or rank' });
-                        return;
-                    }
-
-                    // Remove from hand
-                    hand.splice(cardIndex, 1);
-                    // Add to discard
-                    room.gameState.discardPile.push(action.card);
-                    // Update suit
-                    room.gameState.activeSuit = action.suit;
-
-                    // Win Check BEFORE emitting (avoid stale-state flash)
-                    if (hand.length === 0) {
-                        endGame(roomId, userId, 'Hand Cleared');
-                        return;
-                    }
-
-                    // Turn Pass
-                    room.turn = room.players.find(id => id !== userId);
-
-                    // Single authoritative emit with final state
-                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
-                }
-            } else if (action.type === 'DRAW') {
-                if (room.gameState.deck.length > 0) {
-                    const card = room.gameState.deck.pop();
-                    room.gameState.hands[userId].push(card);
-                    // Shuffle discard back into deck if now empty, keep top card as new discard
-                    if (room.gameState.deck.length === 0 && room.gameState.discardPile.length > 1) {
-                        const top = room.gameState.discardPile.pop();
-                        room.gameState.deck = fisherYatesShuffle(room.gameState.discardPile); // Fix C3
-                        room.gameState.discardPile = [top];
-                    }
-                    if (action.passTurn) {
-                        room.turn = room.players.find(id => id !== userId);
-                    }
-                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
-                } else {
-                    // Both deck and discard fully exhausted — pass turn to prevent deadlock
-                    room.turn = room.players.find(id => id !== userId);
-                    io.to(roomId).emit('game_update', { ...room, roomId, gameState: room.gameState });
-                }
-            }
-        }
+        // [REMOVED] Cards game handler block
     });
 
     // --- REAL-TIME POOL SYNC (Visual Only) ---
@@ -2674,9 +2693,10 @@ io.on('connection', (socket) => {
                     // Fast games (Dice, TicTacToe) get 60s since rounds are short.
                     // Chess/Checkers get the full 4 minutes (240s).
                     const DISCONNECT_TIMEOUTS = {
-                        Dice: 60, TicTacToe: 60, Cards: 90, Pool: 120, default: 240
+                        Dice: 60, TicTacToe: 60, Pool: 120, default: 240
                     };
-                    const timeoutSeconds = DISCONNECT_TIMEOUTS[room.gameType] || DISCONNECT_TIMEOUTS.default;
+                    const baseTimeout = DISCONNECT_TIMEOUTS[room.gameType] || DISCONNECT_TIMEOUTS.default;
+                    const timeoutSeconds = room.tournamentMatchId ? 90 : baseTimeout;
                     console.log(`Starting ${timeoutSeconds}s forfeit timer for ${userId} (game: ${room.gameType})`);
 
                     // Notify other player immediately
@@ -2793,8 +2813,20 @@ httpServer.listen(PORT, () => {
 });
 
 // Graceful shutdown
-const gracefulShutdown = (signal) => {
+const gracefulShutdown = async (signal) => {
     console.log(`${signal} received. Closing server...`);
+    for (const [roomId, room] of rooms.entries()) {
+        if (room.status === 'active') {
+            for (const pid of room.players) {
+                const split = room.escrowSplits?.[pid];
+                if (split) {
+                    try {
+                        await refundEscrow(pid, split.real, split.promo);
+                    } catch (e) { console.warn(`[Shutdown] Refund failed for ${pid}:`, e); }
+                }
+            }
+        }
+    }
     httpServer.close(() => {
         console.log('Server closed. Exiting.');
         process.exit(0);

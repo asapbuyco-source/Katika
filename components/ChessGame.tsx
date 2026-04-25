@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink, ChevronLeft, ChevronRight, List } from 'lucide-react';
+import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink, ChevronLeft, ChevronRight, List, Undo2 } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
 import { AIReferee } from './AIReferee';
 import { playSFX } from '../services/sound';
@@ -36,6 +36,9 @@ const ChessSquare = React.memo(({
     piece,
     moveOption,
     onClick,
+    onDragStart,
+    onDrop,
+    isDragging,
     rankLabel,
     fileLabel
 }: any) => {
@@ -50,15 +53,41 @@ const ChessSquare = React.memo(({
         onClick(square);
     };
 
+    const handleDragStart = (e: React.DragEvent) => {
+        if (piece && onDragStart) {
+            e.dataTransfer.setData('text/plain', square);
+            onDragStart(square, piece);
+        }
+    };
+
+    const handleDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        if (onDrop) {
+            onDrop(square);
+        }
+    };
+
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+    };
+
     return (
         <div
             onClick={handleClick}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
+            onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+            tabIndex={0}
+            role="button"
+            aria-label={piece ? `${piece.color === 'w' ? 'White' : 'Black'} ${piece.type} on ${square}` : `Empty square ${square}`}
             className={`
                 relative flex items-center justify-center w-full h-full
                 ${isDark ? 'bg-royal-900/60' : 'bg-slate-300/10'}
                 ${isSelected ? 'ring-inset ring-4 ring-gold-500/50' : ''}
                 ${isKingInCheck ? 'bg-red-500/50 animate-pulse' : ''}
                 ${isLastMove ? 'bg-yellow-500/20' : ''}
+                ${isDragging ? 'opacity-50' : ''}
+                focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-500 focus-visible:ring-offset-2 focus-visible:ring-offset-royal-950
                 cursor-pointer
             `}
         >
@@ -81,6 +110,8 @@ const ChessSquare = React.memo(({
                             ? 'text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.8)]'
                             : 'text-black drop-shadow-[0_1px_4px_rgba(255,255,255,0.2)]'
                     }`}
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
                 >
                     {symbol}
                 </motion.span>
@@ -102,6 +133,7 @@ const ChessSquare = React.memo(({
     if (prev.isSelected !== next.isSelected) return false;
     if (prev.isLastMove !== next.isLastMove) return false;
     if (prev.isKingInCheck !== next.isKingInCheck) return false;
+    if (prev.isDragging !== next.isDragging) return false;
 
     // Deep check piece
     const p1 = prev.piece;
@@ -187,6 +219,7 @@ const getBestMove = (game: Chess, difficulty: string): { from: string, to: strin
 
 export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
     const { state } = useAppState();
+    useEffect(() => { window.scrollTo(0, 0); }, []);
     const [game, setGame] = useState(new Chess());
     const [viewIndex, setViewIndex] = useState<number>(-1);
     const [myColor, setMyColor] = useState<'w' | 'b'>('w');
@@ -200,6 +233,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const [pendingPromotion, setPendingPromotion] = useState<{ from: Square, to: Square } | null>(null);
     const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
     const [showMovesPanel, setShowMovesPanel] = useState(false);
+    const [draggedSquare, setDraggedSquare] = useState<Square | null>(null);
     const TIMER_INCREMENT = 3; // seconds added after each move (chess.com style)
 
     const isP2P = !!socket && !!socketGame;
@@ -228,7 +262,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         socket,
         socketGame,
         timeRemaining,
-        isP2P
+        isP2P,
+        opponentDisconnected: state.opponentDisconnected
     });
 
     useEffect(() => {
@@ -242,9 +277,29 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             socket,
             socketGame,
             timeRemaining,
-            isP2P
+            isP2P,
+            opponentDisconnected: state.opponentDisconnected
         };
-    }, [game, viewIndex, myColor, selectedSquare, optionSquares, isGameOver, socket, socketGame, timeRemaining, isP2P]);
+    }, [game, viewIndex, myColor, selectedSquare, optionSquares, isGameOver, socket, socketGame, timeRemaining, isP2P, state.opponentDisconnected]);
+
+    // Undo last move - for practice/bot games only
+    const undoLastMove = useCallback(() => {
+        if (isP2P || isGameOver || game.history().length === 0) return;
+        
+        const history = game.history({ verbose: true });
+        const lastMove = history[history.length - 1];
+        
+        if (lastMove) {
+            game.undo();
+            const newGame = new Chess();
+            newGame.loadPgn(game.pgn());
+            setGame(newGame);
+            setViewIndex(newGame.history().length - 1);
+            setSelectedSquare(null);
+            setOptionSquares({});
+            playSFX('click');
+        }
+    }, [game, isP2P, isGameOver]);
 
     // Socket State Sync
     useEffect(() => {
@@ -302,7 +357,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         if (isGameOver || viewIndex !== -1) return;
         
         const interval = setInterval(() => {
-            if (state.opponentDisconnected) return;
+            if (stateRef.current.opponentDisconnected) return;
             setTimeRemaining(prev => {
                 const liveGame = stateRef.current.game;
                 const turnColor = liveGame.turn();
@@ -377,14 +432,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 checkGameOver(newGame);
 
                 // Add time increment after each move (chess.com style)
-                if (!isP2P) {
-                    setTimeRemaining(prev => {
-                        const moverColor = move.color;
-                        const newTime = { ...prev };
-                        newTime[moverColor] = Math.min(prev[moverColor] + TIMER_INCREMENT, 1800); // cap at 30 mins
-                        return newTime;
-                    });
-                }
+                setTimeRemaining(prev => {
+                    const moverColor = move.color;
+                    const newTime = { ...prev };
+                    newTime[moverColor] = Math.min(prev[moverColor] + TIMER_INCREMENT, 1800); // cap at 30 mins
+                    return newTime;
+                });
 
                 if (isP2P && socket && socketGame) {
                     const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
@@ -484,6 +537,55 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             setOptionSquares({});
         }
     }, [executeMove]); // Stable handler
+
+    const onDragStart = useCallback((square: Square, piece: any) => {
+        const { game, viewIndex, myColor, isGameOver } = stateRef.current;
+        if (isGameOver) return;
+        
+        const moveHistory = game.history();
+        const isViewingLatest = viewIndex === moveHistory.length - 1 || viewIndex === -1;
+        if (!isViewingLatest) return;
+        
+        if (piece && piece.color === myColor && game.turn() === myColor) {
+            setDraggedSquare(square);
+            const moves = game.moves({ square, verbose: true });
+            const newSquares: any = {};
+            if (moves.length > 0) {
+                moves.forEach((move: any) => {
+                    const targetPiece = game.get(move.to);
+                    newSquares[move.to] = {
+                        background: targetPiece && targetPiece.color !== piece.color
+                            ? 'radial-gradient(circle, rgba(239, 68, 68, 0.5) 25%, transparent 30%)'
+                            : 'radial-gradient(circle, rgba(251, 191, 36, 0.5) 25%, transparent 30%)',
+                    };
+                });
+                newSquares[square] = { background: 'rgba(251, 191, 36, 0.2)' };
+            }
+            setOptionSquares(newSquares);
+            setSelectedSquare(square);
+        }
+    }, []);
+
+    const onDrop = useCallback((targetSquare: Square) => {
+        setDraggedSquare(null);
+        if (draggedSquare) {
+            onSquareClick(draggedSquare);
+            if (optionSquares[targetSquare]) {
+                const piece = stateRef.current.game.get(draggedSquare);
+                if (piece && piece.type === 'p') {
+                    const isLastRank = (piece.color === 'w' && targetSquare[1] === '8') || (piece.color === 'b' && targetSquare[1] === '1');
+                    if (isLastRank) {
+                        setPendingPromotion({ from: draggedSquare, to: targetSquare });
+                        return;
+                    }
+                }
+                executeMove(draggedSquare, targetSquare);
+            }
+        }
+        setDraggedSquare(null);
+        setSelectedSquare(null);
+        setOptionSquares({});
+    }, [draggedSquare, onSquareClick, optionSquares, executeMove]);
 
     const handleQuit = () => {
         if (isP2P && socket) {
@@ -590,6 +692,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <button onClick={() => setShowMovesPanel(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                         <List size={18} />
                     </button>
+                    <button 
+                        onClick={undoLastMove} 
+                        disabled={game.history().length === 0 || isP2P || isGameOver}
+                        className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-gold-400 disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Undo last move"
+                    >
+                        <Undo2 size={18} />
+                    </button>
                 </div>
                 <div className="flex flex-col items-center">
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
@@ -674,6 +784,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     piece={visualPiece}
                                     moveOption={option}
                                     onClick={onSquareClick}
+                                    onDragStart={onDragStart}
+                                    onDrop={onDrop}
+                                    isDragging={draggedSquare === square}
                                     rankLabel={(actualCol === 0 && myColor === 'w') || (actualCol === 7 && myColor === 'b') ? rank : null}
                                     fileLabel={(actualRow === 7 && myColor === 'w') || (actualRow === 0 && myColor === 'b') ? file : null}
                                 />

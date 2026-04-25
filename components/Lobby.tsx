@@ -29,12 +29,12 @@ const GAME_TIERS: GameTier[] = [
 ];
 
 const STATIC_GAME_LIST = [
-    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', defaultStatus: 'active' },
-    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', defaultStatus: 'active', desc: 'Powered by Lichess' },
-    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active', desc: 'Powered by Lidraughts' },
-    { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active' },
-    { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', defaultStatus: 'active' },
-    { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', defaultStatus: 'active' },
+    { id: 'Dice', name: 'Dice Duel', players: 0, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', defaultStatus: 'active' },
+    { id: 'Chess', name: 'Master Chess', players: 0, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', defaultStatus: 'active', desc: 'Powered by Lichess' },
+    { id: 'Checkers', name: 'Checkers Pro', players: 0, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active', desc: 'Powered by Lidraughts' },
+    { id: 'Ludo', name: 'Ludo King', players: 0, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active' },
+    { id: 'TicTacToe', name: 'XO Clash', players: 0, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', defaultStatus: 'active' },
+    { id: 'Pool', name: '8-Ball Pool', players: 0, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', defaultStatus: 'active' },
 ];
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {

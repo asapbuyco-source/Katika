@@ -206,7 +206,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
             }
         } else if (!newBoard.includes(null)) {
             if (isP2P && socket) {
-                socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'DRAW_ROUND' } });
+                // No action needed — server handles draw detection inline during MOVE processing
             } else {
                 const nextStreak = drawStreak + 1;
                 setDrawStreak(nextStreak);

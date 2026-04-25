@@ -190,6 +190,7 @@ function getCellContent(r: number, c: number, type: CellType): React.ReactNode {
 // ─── Main component ────────────────────────────────────────────────────────
 export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, socket, socketGame }) => {
     const { state } = useAppState();
+    useEffect(() => { window.scrollTo(0, 0); }, []);
     const [pieces, setPieces] = useState<Piece[]>(buildPieces());
     const [turn, setTurn] = useState<PieceColor>('Red');
     const [diceValue, setDiceValue] = useState<number | null>(null);

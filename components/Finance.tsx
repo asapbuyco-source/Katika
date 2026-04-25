@@ -32,6 +32,8 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
     // Track which transIds have already been credited (to avoid double-credit between
     // the server webhook path and the client polling path).
     const creditedTransIds = useRef<Set<string>>(new Set());
+    // Task 20 Fix: Ref guard to prevent withdrawal spam
+    const withdrawingRef = useRef(false);
 
     // Real Data State
     const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -178,16 +180,22 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
         }
     };
 
-    const handleWithdraw = async () => {
-        if (!amount || !phone) { setErrorMsg('Please fill in the amount and phone number.'); return; }
+const handleWithdraw = async () => {
+        // Task 20 Fix: Prevent spam clicks
+        if (withdrawingRef.current) return;
+        withdrawingRef.current = true;
+
+        if (!amount || !phone) { setErrorMsg('Please fill in the amount and phone number.'); withdrawingRef.current = false; return; }
         const withdrawAmount = parseInt(amount);
         if (isNaN(withdrawAmount) || withdrawAmount < 1000) {
-            setErrorMsg('Minimum withdrawal is 1,000 FCFA.');
+            setErrorMsg('Minimum withdrawal is 1,000FCFA.');
+            withdrawingRef.current = false;
             return;
         }
-        if (withdrawAmount > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); return; }
+        if (withdrawAmount > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); withdrawingRef.current = false; return; }
         if (!/^6\d{8}$/.test(phone.replace(/\s/g, ''))) {
             setErrorMsg('Invalid phone number. Must start with 6 and be 9 digits.');
+            withdrawingRef.current = false;
             return;
         }
 
@@ -224,6 +232,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
             setErrorMsg('Network error. Please check your connection and try again.');
         } finally {
             setIsLoading(false);
+            withdrawingRef.current = false;
         }
     };
 
