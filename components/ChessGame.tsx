@@ -43,11 +43,9 @@ const ChessSquare = React.memo(({
     fileLabel
 }: any) => {
 
-    // Separate symbol maps so white and black pieces look visually distinct
-    // White pieces use hollow/outline unicode characters; black use filled variants.
-    const whiteSymbolMap: Record<string, string> = { p: '♙', r: '♖', n: '♘', b: '♗', q: '♕', k: '♔' };
-    const blackSymbolMap: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
-    const symbol = piece ? (piece.color === 'w' ? whiteSymbolMap[piece.type] : blackSymbolMap[piece.type]) : null;
+    // Map piece type to lichess cburnett SVG piece images
+    const pieceTypeUpper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
+    const pieceSrc = piece ? `https://lichess1.org/assets/piece/cburnett/${piece.color}${pieceTypeUpper[piece.type]}.svg` : null;
 
     const handleClick = () => {
         onClick(square);
@@ -76,6 +74,8 @@ const ChessSquare = React.memo(({
             onClick={handleClick}
             onDrop={handleDrop}
             onDragOver={handleDragOver}
+            onDragStart={handleDragStart}
+            draggable={!!piece}
             onKeyDown={(e) => e.key === 'Enter' && handleClick()}
             tabIndex={0}
             role="button"
@@ -106,22 +106,22 @@ const ChessSquare = React.memo(({
                 />
             )}
 
-            {/* Piece Render */}
-            {piece && (
-                <motion.span
+            {/* Piece Render — SVG image from lichess cburnett set */}
+            {piece && pieceSrc && (
+                <motion.div
                     layoutId={`piece-${square}`}
-                    transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                    style={{ WebkitTextStroke: piece.color === 'b' ? '1px rgba(255,255,255,0.4)' : '1px rgba(0,0,0,0.8)' }}
-                    className={`text-3xl md:text-5xl select-none relative z-20 leading-none ${
-                        piece.color === 'w'
-                            ? 'text-white drop-shadow-[0_2px_5px_rgba(0,0,0,0.8)]'
-                            : 'text-black drop-shadow-[0_1px_4px_rgba(255,255,255,0.2)]'
-                    }`}
-                    whileHover={{ scale: 1.1 }}
+                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                    className="w-[88%] h-[88%] relative z-20 flex items-center justify-center"
+                    whileHover={{ scale: 1.08 }}
                     whileTap={{ scale: 0.95 }}
                 >
-                    {symbol}
-                </motion.span>
+                    <img
+                        src={pieceSrc}
+                        alt={`${piece.color === 'w' ? 'White' : 'Black'} ${piece.type}`}
+                        className="w-full h-full object-contain select-none"
+                        draggable={false}
+                    />
+                </motion.div>
             )}
 
             {/* Labels */}
@@ -238,14 +238,24 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
     const [isGameOver, setIsGameOver] = useState(false);
     const [pendingPromotion, setPendingPromotion] = useState<{ from: Square, to: Square } | null>(null);
-    const [timeRemaining, setTimeRemaining] = useState({ w: 600, b: 600 });
     const [showMovesPanel, setShowMovesPanel] = useState(false);
     const [draggedSquare, setDraggedSquare] = useState<Square | null>(null);
-    const TIMER_INCREMENT = 3; // seconds added after each move (chess.com style)
 
     const isP2P = !!socket && !!socketGame;
     const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest);
 
+    // BUG 3 FIX: Read time control from table (tournament can specify custom limits)
+    // Fallback: 10 min base, +3s increment (standard rapid)
+    const baseTime: number = (table as any).timeControl?.base ?? 600;
+    const TIMER_INCREMENT: number = (table as any).timeControl?.increment ?? 3;
+
+    // Initialise timer from table's time control (handles tournament custom time limits)
+    const [timeRemaining, setTimeRemaining] = useState({ w: baseTime, b: baseTime });
+
+    // Re-init timer if table.timeControl changes (e.g. navigating between games)
+    useEffect(() => {
+        setTimeRemaining({ w: baseTime, b: baseTime });
+    }, [baseTime]);
     const moveHistory = game.history();
     const displayGame = useMemo(() => {
         if (viewIndex === moveHistory.length - 1 || viewIndex === -1) return game;
@@ -337,8 +347,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             // so the winner was NEVER declared through this path. Fixed to `isP2P`.
             if (socketGame.winner) {
                 setIsGameOver(true);
-                if (!isP2P) {
+                // BUG 2 FIX: was `!isP2P` which meant this block NEVER ran for P2P games.
+                // Changed to `isP2P` so P2P winner is correctly resolved.
+                if (isP2P) {
                     if (socketGame.winner === user.id) onGameEnd('win');
+                    else if (socketGame.winner === null) onGameEnd('draw' as any);
                     else onGameEnd('loss');
                 }
             }
@@ -409,7 +422,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 playSFX(isWinner ? 'win' : 'loss');
                 if (!currentIsP2P) onGameEnd(isWinner ? 'win' : 'loss');
             } else {
-                if (!currentIsP2P) onGameEnd('quit');
+                // BUG 1 FIX: draw conditions (stalemate, insufficient material, etc.)
+                // must use 'draw', NOT 'quit' which triggers a forfeit/loss in GameRoom
+                if (!currentIsP2P) onGameEnd('draw' as any);
             }
         }
     }, [onGameEnd]);
@@ -601,10 +616,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const opponent = !isP2P ? { name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" }
         : (socketGame?.profiles ? socketGame.profiles[socketGame.players.find((id: string) => id !== user.id)] : { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" });
 
-    // Get piece symbol for promotion modal
-    const getPieceSymbol = (type: string) => {
-        const map: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚' };
-        return map[type];
+    // Get SVG src for promotion modal piece
+    const getPieceSrc = (type: string, color: 'w' | 'b') => {
+        const upper: Record<string, string> = { p: 'P', r: 'R', n: 'N', b: 'B', q: 'Q', k: 'K' };
+        return `https://lichess1.org/assets/piece/cburnett/${color}${upper[type]}.svg`;
     };
 
     return (
@@ -623,9 +638,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     <button
                                         key={type}
                                         onClick={() => { executeMove(pendingPromotion.from, pendingPromotion.to, type); setPendingPromotion(null); }}
-                                        className="w-16 h-16 bg-white/10 hover:bg-gold-500/20 border border-white/20 hover:border-gold-500 rounded-xl flex items-center justify-center text-4xl transition-all"
+                                        className="w-16 h-16 bg-white/10 hover:bg-gold-500/20 border border-white/20 hover:border-gold-500 rounded-xl flex items-center justify-center p-2 transition-all"
                                     >
-                                        <span className={myColor === 'w' ? 'text-white' : 'text-purple-500'}>{getPieceSymbol(type)}</span>
+                                        <img
+                                            src={getPieceSrc(type, myColor)}
+                                            alt={type}
+                                            className="w-full h-full object-contain"
+                                            draggable={false}
+                                        />
                                     </button>
                                 ))}
                             </div>
@@ -706,7 +726,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 </div>
                 <div className="flex flex-col items-center">
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
-                    <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-xl font-display font-bold text-white">{Math.max(0, table.stake) > 0 ? (table.stake * 2).toLocaleString() + ' FCFA' : 'Practice'}</div>
                 </div>
                 <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
             </div>
@@ -732,12 +752,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <img src={opponent.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="Opponent" />
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">{opponent.name}</span>
-                        <span className={`text-[10px] font-bold flex items-center gap-1 ${
-                            opponentColor === 'w' ? 'text-slate-100' : 'text-purple-400'
-                        }`}>
-                            <span className="text-base leading-none">
-                                {opponentColor === 'w' ? '♙' : '♟'}
-                            </span>
+                        <span className="text-[10px] font-bold flex items-center gap-1 text-slate-300">
+                            <img
+                                src={`https://lichess1.org/assets/piece/cburnett/${opponentColor}P.svg`}
+                                alt={opponentColor === 'w' ? 'White' : 'Black'}
+                                className="w-4 h-4 object-contain"
+                            />
                             {opponentColor === 'w' ? 'White' : 'Black'}
                         </span>
                     </div>
@@ -805,12 +825,12 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <img src={user.avatar} className="w-10 h-10 rounded-full border border-white/20" alt="Me" />
                     <div className="flex flex-col">
                         <span className="text-sm font-bold text-white">You</span>
-                        <span className={`text-[10px] font-bold flex items-center gap-1 ${
-                            myColor === 'w' ? 'text-slate-100' : 'text-purple-400'
-                        }`}>
-                            <span className="text-base leading-none">
-                                {myColor === 'w' ? '♙' : '♟'}
-                            </span>
+                        <span className="text-[10px] font-bold flex items-center gap-1 text-slate-300">
+                            <img
+                                src={`https://lichess1.org/assets/piece/cburnett/${myColor}P.svg`}
+                                alt={myColor === 'w' ? 'White' : 'Black'}
+                                className="w-4 h-4 object-contain"
+                            />
                             {myColor === 'w' ? 'White' : 'Black'}
                         </span>
                     </div>
@@ -818,29 +838,32 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <div className="flex items-center gap-0.5 ml-2 h-6">
                         {(() => {
                             const verboseHistory = game.history({ verbose: true });
-                            const captured: string[] = [];
+                            // m.color = who moved; m.captured = type of piece taken (always lowercase)
+                            const opponentCaptures: string[] = []; // pieces I captured (opponent lost)
+                            const myLosses: string[] = [];         // pieces opponent captured (I lost)
                             verboseHistory.forEach((m: any) => {
-                                if (m.captured) captured.push(m.captured);
+                                if (!m.captured) return;
+                                if (m.color === myColor) opponentCaptures.push(m.captured);
+                                else myLosses.push(m.captured);
                             });
-                            const myCaptured = captured.filter(c => myColor === 'w' ? c === c.toUpperCase() : c === c.toLowerCase());
-                            const oppCaptured = captured.filter(c => myColor === 'w' ? c === c.toLowerCase() : c === c.toUpperCase());
-                            const pieceSymbols: Record<string, string> = { p: '♟', r: '♜', n: '♞', b: '♝', q: '♛', k: '♚', P: '♙', R: '♖', N: '♘', B: '♗', Q: '♕', K: '♔' };
+                            const oppPieceColor = myColor === 'w' ? 'b' : 'w';
+                            const upper: Record<string,string> = { p:'P',n:'N',b:'B',r:'R',q:'Q',k:'K' };
                             return (
                                 <>
-                                    {oppCaptured.length > 0 && (
-                                        <div className="flex items-center gap-0">
-                                            {oppCaptured.map((c, i) => (
-                                                <span key={i} className="text-[10px] text-white/70" title={`Captured: ${c}`}>{pieceSymbols[c]}</span>
-                                            ))}
-                                        </div>
-                                    )}
-                                    {myCaptured.length > 0 && (
-                                        <div className="flex items-center gap-0 ml-1">
-                                            {myCaptured.map((c, i) => (
-                                                <span key={i} className="text-[10px] text-red-400/70" title={`Lost: ${c}`}>{pieceSymbols[c]}</span>
-                                            ))}
-                                        </div>
-                                    )}
+                                    {opponentCaptures.map((c, i) => (
+                                        <img key={`cap-${i}`}
+                                            src={`https://lichess1.org/assets/piece/cburnett/${oppPieceColor}${upper[c]}.svg`}
+                                            className="w-4 h-4 object-contain opacity-80"
+                                            alt={c} draggable={false}
+                                        />
+                                    ))}
+                                    {myLosses.map((c, i) => (
+                                        <img key={`lost-${i}`}
+                                            src={`https://lichess1.org/assets/piece/cburnett/${myColor}${upper[c]}.svg`}
+                                            className="w-4 h-4 object-contain opacity-40"
+                                            alt={c} draggable={false}
+                                        />
+                                    ))}
                                 </>
                             );
                         })()}

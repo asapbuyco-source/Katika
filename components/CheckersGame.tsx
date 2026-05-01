@@ -126,7 +126,17 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     const [mustJumpFrom, setMustJumpFrom] = useState<string | null>(null);
     const [showForfeitModal, setShowForfeitModal] = useState(false);
     const [showRulesModal, setShowRulesModal] = useState(false);
-    const [timeRemaining, setTimeRemaining] = useState({ me: 600, opponent: 600 });
+
+    // Initialise timer from table's time control (handles tournament custom time limits)
+    // Fallback: 10 min base
+    const baseTime: number = (table as any).timeControl?.base ?? 600;
+    const [timeRemaining, setTimeRemaining] = useState({ me: baseTime, opponent: baseTime });
+
+    // Re-init timer if table.timeControl changes (e.g. navigating between games)
+    useEffect(() => {
+        setTimeRemaining({ me: baseTime, opponent: baseTime });
+    }, [baseTime]);
+
     const [isGameOver, setIsGameOver] = useState(false);
     const [moveHistory, setMoveHistory] = useState<{ from: string; to: string; notation: string; player: 'me' | 'opponent' }[]>([]);
     const [showMovesPanel, setShowMovesPanel] = useState(false);
@@ -777,7 +787,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 </div>
                 <div className="flex flex-col items-center">
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
-                    <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-xl font-display font-bold text-white">{Math.max(0, table.stake) > 0 ? (table.stake * 2).toLocaleString() + ' FCFA' : 'Practice'}</div>
                 </div>
                 <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
             </div>

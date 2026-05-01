@@ -208,7 +208,22 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
         );
     };
 
+    // BUG 4 FIX: Determine if user is eliminated (lost a match) vs just waiting for next round
+    const getMyStatus = () => {
+        if (!matches || !user) return 'unknown';
+        // Any completed match where user was a participant
+        const myCompleted = matches.filter(m =>
+            m.status === 'completed' &&
+            (m.player1?.id === user.id || m.player2?.id === user.id)
+        );
+        if (myCompleted.length === 0) return 'waiting'; // no match yet (pre-tournament)
+        const lastMatch = myCompleted[myCompleted.length - 1];
+        if (lastMatch.winnerId === user.id) return 'advancing'; // won, waiting for next round
+        return 'eliminated';
+    };
+
     const myNextMatch = getMyNextMatch();
+    const myStatus = getMyStatus();
 
     const getBracketRounds = () => {
         const rounds: Record<number, TournamentMatch[]> = {};
@@ -724,8 +739,22 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         </div>
                                     )
                                 ) : (
-                                    <div className="text-center py-4 text-slate-500">
-                                        <p>No active match. You may be waiting for the next round or have been eliminated.</p>
+                                    <div className="text-center py-4">
+                                        {myStatus === 'advancing' ? (
+                                            <>
+                                                <div className="text-gold-400 text-xl font-black mb-2 flex items-center justify-center gap-2">
+                                                    <Crown size={20} /> Advancing!
+                                                </div>
+                                                <p className="text-slate-400 text-sm">You won your last match. Waiting for the next round to begin...</p>
+                                            </>
+                                        ) : myStatus === 'eliminated' ? (
+                                            <>
+                                                <div className="text-red-400 text-xl font-black mb-2">Eliminated</div>
+                                                <p className="text-slate-400 text-sm">You were eliminated from this tournament.</p>
+                                            </>
+                                        ) : (
+                                            <p className="text-slate-500 text-sm">Waiting for your first match to be assigned.</p>
+                                        )}
                                     </div>
                                 )}
                             </div>

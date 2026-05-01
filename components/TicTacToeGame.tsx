@@ -277,7 +277,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs flex items-center gap-2">
                         {isP2P && <Wifi size={12} className="animate-pulse" />} Pot Size
                     </div>
-                    <div className="text-xl font-display font-bold text-white">{(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-xl font-display font-bold text-white">{Math.max(0, table.stake) > 0 ? (table.stake * 2).toLocaleString() + ' FCFA' : 'Practice'}</div>
                 </div>
                 <div className="w-32 hidden md:block">
                     <AIReferee externalLog={refereeLog} />

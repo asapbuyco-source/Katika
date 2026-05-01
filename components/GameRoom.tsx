@@ -493,7 +493,7 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
                 </button>
                 <div className="flex flex-col items-center">
                     <div className="text-[10px] text-gold-500/70 uppercase tracking-widest font-bold">Prize Pool</div>
-                    <div className="text-gold-400 font-black text-xl drop-shadow-[0_0_12px_rgba(251,191,36,0.4)]">💰 {(table.stake * 2).toLocaleString()} FCFA</div>
+                    <div className="text-gold-400 font-black text-xl drop-shadow-[0_0_12px_rgba(251,191,36,0.4)]">{Math.max(0, table.stake) > 0 ? `💰 ${(table.stake * 2).toLocaleString()} FCFA` : '💰 Practice'}</div>
                 </div>
                 <div className={`flex flex-col items-center px-3 py-1.5 rounded-xl text-xs font-bold border transition-all ${
                     timeLeft <= 10 ? 'bg-red-500/20 border-red-500 text-red-400 animate-pulse' : 'bg-white/5 border-white/10 text-slate-400'
