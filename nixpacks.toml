@@ -1,5 +1,11 @@
+[phases.setup]
+cmds = [
+    "echo 'Setting NODE_ENV=production'",
+    "export NODE_ENV=production"
+]
+
 [phases.install]
-cmds = ["npm install --prefer-offline"]
+cmds = ["npm install --prefer-offline --production=false"]
 
 [phases.build]
 cmds = ["npm run build"]

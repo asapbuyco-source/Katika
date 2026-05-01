@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /socket.io/
+Disallow: /game/
+Disallow: /tournament/
+
+Sitemap: https://vantage-gaming.cm/sitemap.xml

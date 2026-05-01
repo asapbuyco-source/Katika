@@ -161,11 +161,11 @@ export interface Tournament {
   gameType: string;
   entryFee: number;
   prizePool: number;
-  type: 'fixed' | 'dynamic'; // New field: Fixed = House Funded, Dynamic = User Funded
+  type: 'fixed' | 'dynamic'; // Fixed = House Funded, Dynamic = User Funded
   startTime: string; // ISO String
   maxPlayers: number;
   participants: string[]; // User IDs
-  status: 'registration' | 'active' | 'completed';
+  status: 'registration' | 'active' | 'completed' | 'cancelled';
   winnerId?: string;
 }
 

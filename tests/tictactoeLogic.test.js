@@ -1,43 +1,71 @@
 import { describe, it, expect } from 'vitest';
+import { validateMove, checkWinner, isBoardFull, createInitialState } from '../server/tictactoeLogic.js';
 
-const checkWinnerLocal = (squares) => {
-    const lines = [
-        [0, 1, 2], [3, 4, 5], [6, 7, 8],
-        [0, 3, 6], [1, 4, 7], [2, 5, 8],
-        [0, 4, 8], [2, 4, 6]
-    ];
-    for (let i = 0; i < lines.length; i++) {
-        const [a, b, c] = lines[i];
-        if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
-            return { winner: squares[a], line: lines[i] };
-        }
-    }
-    return null;
-};
-
-describe('TicTacToe Game Logic Constraints', () => {
-    it('should correctly identify X horizontal victory', () => {
-        const board = ['X', 'X', 'X', 'O', null, null, null, 'O', null];
-        const res = checkWinnerLocal(board);
-        expect(res).toBeTruthy();
-        expect(res.winner).toBe('X');
-        expect(res.line).toEqual([0, 1, 2]);
+describe('TicTacToe Logic', () => {
+    describe('createInitialState', () => {
+        it('should create empty board', () => {
+            const state = createInitialState();
+            expect(state.board).toHaveLength(9);
+            expect(state.board.every(c => c === null)).toBe(true);
+        });
     });
 
-    it('should correctly identify O diagonal victory', () => {
-        const board = ['O', 'X', null, 'X', 'O', null, null, null, 'O'];
-        const res = checkWinnerLocal(board);
-        expect(res.winner).toBe('O');
-        expect(res.line).toEqual([0, 4, 8]);
+    describe('validateMove', () => {
+        it('should accept valid move', () => {
+            const board = Array(9).fill(null);
+            const result = validateMove(board, 4, 'X');
+            expect(result.valid).toBe(true);
+        });
+
+        it('should reject occupied cell', () => {
+            const board = Array(9).fill(null);
+            board[4] = 'X';
+            const result = validateMove(board, 4, 'O');
+            expect(result.valid).toBe(false);
+        });
+
+        it('should reject invalid index', () => {
+            const board = Array(9).fill(null);
+            const result = validateMove(board, 9, 'X');
+            expect(result.valid).toBe(false);
+        });
     });
 
-    it('should correctly identify an ongoing incomplete game (no winner)', () => {
-        const board = ['X', 'O', 'X', null, 'O', null, null, null, null];
-        expect(checkWinnerLocal(board)).toBeNull();
+    describe('checkWinner', () => {
+        it('should detect row wins', () => {
+            const board = ['X', 'X', 'X', null, null, null, null, null, null];
+            const result = checkWinner(board);
+            expect(result.winner).toBe('X');
+        });
+
+        it('should detect column wins', () => {
+            const board = ['X', null, null, 'X', null, null, 'X', null, null];
+            const result = checkWinner(board);
+            expect(result.winner).toBe('X');
+        });
+
+        it('should detect diagonal wins', () => {
+            const board = ['X', null, null, null, 'X', null, null, null, 'X'];
+            const result = checkWinner(board);
+            expect(result.winner).toBe('X');
+        });
+
+        it('should return null for no winner', () => {
+            const board = ['X', 'O', 'X', 'O', 'O', 'X', null, null, null];
+            const result = checkWinner(board);
+            expect(result).toBeNull();
+        });
     });
 
-    it('should correctly identify a full board draw (no winner)', () => {
-        const board = ['X', 'O', 'X', 'X', 'O', 'O', 'O', 'X', 'X'];
-        expect(checkWinnerLocal(board)).toBeNull();
+    describe('isBoardFull', () => {
+        it('should return true for full board', () => {
+            const board = ['X', 'O', 'X', 'X', 'O', 'X', 'O', 'X', 'O'];
+            expect(isBoardFull(board)).toBe(true);
+        });
+
+        it('should return false for partial board', () => {
+            const board = ['X', null, 'O', null, null, null, null, null, null];
+            expect(isBoardFull(board)).toBe(false);
+        });
     });
 });

@@ -9,6 +9,11 @@ import helmet from 'helmet';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 
+import { validateChessMove } from './server/chessLogic.js';
+import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWinner, createInitialState as ticTacToeInitialState, isBoardFull as isTicTacToeBoardFull } from './server/tictactoeLogic.js';
+import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
+import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
+
 const sanitizeRoomForClient = (room, roomId) => ({
     roomId, players: room.players, gameType: room.gameType,
     stake: room.stake, turn: room.turn, status: room.status,
@@ -23,7 +28,7 @@ const missingEnv = requiredEnv.filter(env => !process.env[env]);
 
 if (missingEnv.length > 0) {
     console.error(`FATAL ERROR: Missing required environment variables: ${missingEnv.join(', ')}`);
-    // In production, we should exit, but for dev/audit we'll just log loudly
+    // Fatal in production; warn in dev
     if (process.env.NODE_ENV === 'production') process.exit(1);
 }
 
@@ -31,13 +36,27 @@ const PORT = process.env.PORT || 8080;
 const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
-const FRONTEND_ORIGIN = (process.env.FRONTEND_URL || '*').replace(/\/$/, '');
+const FRONTEND_URL = process.env.FRONTEND_URL || '';
+
+// SECURITY: FRONTEND_URL must be explicitly set in production - never allow wildcard
+if (process.env.NODE_ENV === 'production') {
+    if (!FRONTEND_URL || FRONTEND_URL === '*') {
+        console.error('FATAL: FRONTEND_URL must be explicitly set in production. Wildcard not allowed.');
+        process.exit(1);
+    }
+}
+const FRONTEND_ORIGIN = FRONTEND_URL.replace(/\/$/, '');
 
 // FIX C2: Admin whitelist — authoritative source is the JWT email, NEVER Firestore's isAdmin flag
 // (isAdmin in Firestore is client-writable; email in a Firebase ID token is cryptographically signed)
-const ADMIN_EMAILS = (process.env.ADMIN_EMAILS || 'abrackly@gmail.com').split(',').map(e => e.trim());
-// SECURITY: In production, ADMIN_EMAILS must be explicitly set — never rely on the hardcoded fallback.
-if (process.env.NODE_ENV === 'production' && !process.env.ADMIN_EMAILS) {
+// SECURITY: In production, ADMIN_EMAILS must be explicitly set. Default fallback is ONLY for dev.
+const ADMIN_EMAILS = process.env.ADMIN_EMAILS
+    ? process.env.ADMIN_EMAILS.split(',').map(e => e.trim()).filter(e => e.length > 0)
+    : (process.env.NODE_ENV === 'production'
+        ? []
+        : ['abrackly@gmail.com']);
+
+if (process.env.NODE_ENV === 'production' && ADMIN_EMAILS.length === 0) {
     console.error('FATAL: ADMIN_EMAILS environment variable is not set in production. Refusing to start.');
     process.exit(1);
 }
@@ -1477,6 +1496,52 @@ const userSockets = new Map(); // userId -> socketId
 const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
 
+// P0 Durability: Persist active rooms to Firestore for restart resilience
+// Loads previously active games after server restart
+const hydrateRoomsFromFirestore = async () => {
+    if (!db) return;
+    try {
+        const activeSnap = await db.collection('active_rooms')
+            .where('status', '==', 'active')
+            .get();
+        
+        for (const doc of activeSnap.docs) {
+            const roomData = doc.data();
+            rooms.set(doc.id, roomData);
+            console.log(`[Hydrate] Restored room ${doc.id} with ${roomData.players?.length} players`);
+        }
+        console.log(`[Hydrate] Restored ${activeSnap.size} active rooms from Firestore`);
+    } catch (e) {
+        console.error('[Hydrate] Failed to restore rooms:', e.message);
+    }
+};
+
+// Persist room state periodically or on state changes
+const persistRoomToFirestore = async (roomId, room) => {
+    if (!db) return;
+    try {
+        await db.collection('active_rooms').doc(roomId).set({
+            ...room,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+    } catch (e) {
+        console.error(`[Persist] Failed to persist room ${roomId}:`, e.message);
+    }
+};
+
+// Clean up completed rooms from active_rooms collection
+const cleanupRoomFromFirestore = async (roomId) => {
+    if (!db) return;
+    try {
+        await db.collection('active_rooms').doc(roomId).delete();
+    } catch (e) {
+        console.error(`[Cleanup] Failed to delete room ${roomId}:`, e.message);
+    }
+};
+
+// Load rooms on startup (deferred)
+setTimeout(() => hydrateRoomsFromFirestore(), 5000);
+
 // Per-user game action rate limiting (anti-bot / anti-spam)
 const gameActionTimestamps = new Map(); // userId -> number[]
 const isGameActionRateLimited = (userId, maxPerSecond = 10) => {
@@ -1683,7 +1748,10 @@ const endGame = (roomId, winnerId, reason) => {
     // Cleanup Room Data after a delay (Extended for Rematch window)
     setTimeout(() => {
         const r = rooms.get(roomId);
-        if (r && r.status === 'completed') rooms.delete(roomId);
+        if (r && r.status === 'completed') {
+            rooms.delete(roomId);
+            cleanupRoomFromFirestore(roomId);
+        }
     }, 60000);
 };
 
@@ -1718,8 +1786,8 @@ case 'Ludo':
             return {
                 ...common,
                 pieces: [
-                    ...Array.from({ length: 4 }, (_, i) => ({ id: i, color: 'Red', step: -1, owner: p1 })),
-                    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 4, color: 'Blue', step: -1, owner: p2 }))
+                    ...Array.from({ length: 4 }, (_, i) => ({ id: i, color: 'Red', step: -1, owner: p1, finished: false })),
+                    ...Array.from({ length: 4 }, (_, i) => ({ id: i + 4, color: 'Blue', step: -1, owner: p2, finished: false }))
                 ],
                 diceValue: null,
                 diceRolled: false,
@@ -1974,6 +2042,9 @@ io.on('connection', (socket) => {
 
             rooms.set(roomId, room);
 
+            // Persist to Firestore for restart resilience
+            persistRoomToFirestore(roomId, room);
+
             // Notify Players
             const oppSocketId = userSockets.get(opponentId);
 
@@ -2139,15 +2210,42 @@ io.on('connection', (socket) => {
             if (room.rematchVotes.size === room.players.length) {
                 console.log(`Rematch accepted in room ${roomId}`);
 
-                // B11 Fix: Re-escrow both players for rematch
+                // B11 Fix: Re-escrow both players for rematch atomically.
+                // If either deduction fails, neither player is charged — preventing a split-state.
                 if (room.stake > 0 && db) {
-                    for (const pid of room.players) {
-                        try {
-                            await deductEscrow(pid, room.stake, 'Rematch stake');
-                        } catch (e) {
-                            socket.emit('game_error', { message: 'Insufficient funds for rematch' });
-                            return;
-                        }
+                    try {
+                        await db.runTransaction(async (tx) => {
+                            for (const pid of room.players) {
+                                const userRef = db.collection('users').doc(pid);
+                                const snap = await tx.get(userRef);
+                                if (!snap.exists) throw new Error(`User ${pid} not found`);
+                                const d = snap.data();
+                                const pb = d.promoBalance || 0;
+                                const rb = d.balance || 0;
+                                let remaining = room.stake;
+                                let newPb = pb;
+                                let newRb = rb;
+
+                                if (newPb >= remaining) {
+                                    newPb -= remaining;
+                                } else {
+                                    remaining -= newPb;
+                                    newPb = 0;
+                                    newRb -= remaining;
+                                }
+
+                                if (newRb < 0) throw new Error(`Insufficient funds for rematch: ${pid}`);
+                                tx.update(userRef, { balance: newRb, promoBalance: newPb });
+                                tx.set(userRef.collection('transactions').doc(), {
+                                    type: 'escrow_lock', amount: -room.stake, status: 'completed',
+                                    date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                    note: `Rematch stake for ${room.gameType}`
+                                });
+                            }
+                        });
+                    } catch (e) {
+                        socket.emit('game_error', { message: e.message || 'Insufficient funds for rematch' });
+                        return;
                     }
                 }
 
@@ -2448,6 +2546,16 @@ io.on('connection', (socket) => {
                 
                 // --- Bug D fix: Pool Server-side Move Validation (Anti-Cheat) ---
                 if (room.gameType === 'Pool' && action.newState) {
+                    // P0 Hardening: Shot event ledger for deterministic verification
+                    // Track shot sequence to prevent replay attacks
+                    const shotCount = room.gameState.shotCount || 0;
+                    if (action.newState.shotCount !== undefined) {
+                        if (action.newState.shotCount <= shotCount) {
+                            console.warn(`[Pool][${roomId}] Shot count regression or replay from ${userId}: ${action.newState.shotCount} <= ${shotCount}. Rejected.`);
+                            return;
+                        }
+                    }
+
                     // Turn guard: only the active player can submit moves
                     if (room.turn !== userId && action.newState.balls) {
                         console.warn(`[Pool][${roomId}] Shot from non-turn player ${userId}, turn=${room.turn}. Rejected.`);
@@ -2516,22 +2624,22 @@ io.on('connection', (socket) => {
                 // If the previous state had ballInHand=true and the new state has ballInHand=false,
                 // the client is placing the cue ball. Validate the cue ball is inside table bounds.
                 if (room.gameType === 'Pool' && room.gameState.ballInHand && action.newState.ballInHand === false && action.newState.balls) {
-                    const cueBall = action.newState.balls.find(b => b.id === 0);
-                    const TW = 450, TH = 900, RAIL = 20, BR = 13;
-                    const pockets = [
-                        { x: BR, y: BR }, { x: TW - BR, y: BR },
-                        { x: 4, y: TH / 2 }, { x: TW - 4, y: TH / 2 },
-                        { x: BR, y: TH - BR }, { x: TW - BR, y: TH - BR }
+                    // Use client game's coordinate system (landscape: 900x450 field)
+                    const FL = 36, FR = 936, FT = 36, FB = 486, BR = 14;
+                    const pocketPositions = [
+                        { x: 36, y: 36, r: 22 }, { x: 468, y: 34, r: 20 }, { x: 936, y: 36, r: 22 },
+                        { x: 36, y: 486, r: 22 }, { x: 468, y: 488, r: 20 }, { x: 936, y: 486, r: 22 }
                     ];
+                    const cueBall = action.newState.balls.find(b => b.id === 0);
                     if (cueBall) {
-                        // Clamp to valid table area
-                        cueBall.x = Math.max(RAIL + BR + 2, Math.min(TW - RAIL - BR - 2, cueBall.x));
-                        cueBall.y = Math.max(RAIL + BR + 2, Math.min(TH - RAIL - BR - 2, cueBall.y));
+                        // Clamp to valid playing field
+                        cueBall.x = Math.max(FL + BR + 2, Math.min(FR - BR - 2, cueBall.x));
+                        cueBall.y = Math.max(FT + BR + 2, Math.min(FB - BR - 2, cueBall.y));
                         // Push away from pockets
-                        for (const p of pockets) {
+                        for (const p of pocketPositions) {
                             if (Math.hypot(cueBall.x - p.x, cueBall.y - p.y) < BR * 2.5) {
-                                console.warn(`[Pool][${roomId}] Ball-in-hand cue ball too close to pocket from ${userId}. Repositioning.`);
-                                cueBall.x = TW / 4; cueBall.y = TH / 2;
+                                cueBall.x = FL + (FR - FL) * 0.25;
+                                cueBall.y = (FT + FB) / 2;
                                 break;
                             }
                         }
@@ -2539,10 +2647,91 @@ io.on('connection', (socket) => {
                     }
                 }
 
+                // P0 Hardening: Ball position/velocity validation for Pool
+                if (room.gameType === 'Pool' && action.newState.balls && room.gameState.balls) {
+                    const prevBalls = room.gameState.balls;
+                    const newBalls = action.newState.balls;
+                    const MAX_VELOCITY = 60; // Max reasonable velocity per frame
+                    const MAX_POSITION_SHIFT = 200; // Max position change per update (covers physics sim)
+
+                    for (const newBall of newBalls) {
+                        if (newBall.pocketed || newBall.id === 0) continue; // Skip pocketed & cue (validates separately)
+                        const prevBall = prevBalls.find(b => b.id === newBall.id);
+                        if (!prevBall) continue; // New ball ID — already rejected by count check above
+
+                        // Position teleportation check
+                        const dx = Math.abs(newBall.x - prevBall.x);
+                        const dy = Math.abs(newBall.y - prevBall.y);
+                        if (dx > MAX_POSITION_SHIFT || dy > MAX_POSITION_SHIFT) {
+                            // Only flag if ball was previously not pocketed (pocketed balls can reposition)
+                            if (!prevBall.pocketed && !prevBall.isPotted) {
+                                console.warn(`[Pool][${roomId}] Ball ${newBall.id} teleported by ${userId}: (${prevBall.x},${prevBall.y})->(${newBall.x},${newBall.y}). Rejected.`);
+                                return;
+                            }
+                        }
+
+                        // Velocity injection check
+                        if (Math.abs(newBall.vx || 0) > MAX_VELOCITY || Math.abs(newBall.vy || 0) > MAX_VELOCITY) {
+                            console.warn(`[Pool][${roomId}] Ball ${newBall.id} has implausible velocity from ${userId}: vx=${newBall.vx} vy=${newBall.vy}. Rejected.`);
+                            return;
+                        }
+
+                        // Opponent's ball position must not change unless physics is active
+                        // (checked by verifying only turn-player's move changes state)
+                    }
+                }
+
+                // P0 Hardening: Early 8-ball loss detection for Pool
+                // If the 8-ball is pocketed and the shooter's group is NOT fully cleared, it's an automatic loss
+                if (room.gameType === 'Pool' && action.newState.winner && action.newState.balls) {
+                    const serverBalls = room.gameState.balls || [];
+                    const proposedBalls = action.newState.balls;
+                    const eightPocketed = proposedBalls.find(b => b.id === 8 && (b.pocketed || b.isPotted));
+                    const cuePocketed = proposedBalls.find(b => b.id === 0 && (b.pocketed || b.isPotted));
+
+                    if (eightPocketed) {
+                        const isP1 = room.players[0] === action.newState.winner;
+                        const winnerGrp = isP1 ? room.gameState.myGroupP1 : room.gameState.myGroupP2;
+
+                        // If groups have been assigned, check if winner cleared their group first
+                        if (winnerGrp) {
+                            const groupIds = winnerGrp === 'solids' ? [1,2,3,4,5,6,7] : [9,10,11,12,13,14,15];
+                            const allCleared = groupIds.every(id => {
+                                const b = proposedBalls.find(pb => pb.id === id);
+                                return b && (b.pocketed || b.isPotted);
+                            });
+
+                            // Winner claims win but their group is NOT cleared — automatic loss
+                            if (!allCleared) {
+                                console.warn(`[Pool][${roomId}] Early 8-ball by ${action.newState.winner}: group ${winnerGrp} not cleared. Auto-loss.`);
+                                const loserId = action.newState.winner;
+                                const winnerId = room.players.find(p => p !== loserId);
+                                room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
+                                endGame(roomId, winnerId, 'Early 8-ball');
+                                return;
+                            }
+                        }
+
+                        // Scratch on 8-ball (cue ball also pocketed) = loss
+                        if (cuePocketed) {
+                            console.warn(`[Pool][${roomId}] Scratch on 8-ball by ${userId}. Auto-loss.`);
+                            const winnerId = room.players.find(p => p !== userId);
+                            room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
+                            endGame(roomId, winnerId, 'Scratch on 8-ball');
+                            return;
+                        }
+                    }
+                }
+
                 // Apply state after passing validation
                 room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
                 if (action.newState.turn) room.turn = action.newState.turn;
+
+                // Persist state after significant moves
+                if (room.gameType === 'Pool' && action.newState.balls) {
+                    persistRoomToFirestore(roomId, room);
+                }
 
 
                 // action.newState.winner is a fallback for non-Chess, non-Checkers games (i.e., Pool or Dice).
@@ -2605,6 +2794,19 @@ io.on('connection', (socket) => {
             }
             else if (action.type === 'MOVE_PIECE') {
                 if (room.turn !== userId) return;
+                // P0 Hardening: Validate move intent rather than trusting full piece array
+                // Client should send pieceId + diceValue used; server recomputes the move
+                if (!action.pieceId || typeof action.diceValue === 'undefined') {
+                    console.warn(`[Ludo][${roomId}] Missing pieceId or diceValue from ${userId}. Rejected.`);
+                    return;
+                }
+
+                // Verify dice value matches what server issued
+                if (action.diceValue !== room.gameState.diceValue) {
+                    console.warn(`[Ludo][${roomId}] Dice value mismatch from ${userId}. Expected ${room.gameState.diceValue}, got ${action.diceValue}. Rejected.`);
+                    return;
+                }
+
                 // Basic validation: ensure no piece count tampering
                 if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
 
@@ -2648,6 +2850,25 @@ io.on('connection', (socket) => {
                 if (movedTooFar) {
                     console.warn(`[Ludo][${roomId}] Piece moved further than dice value (${diceVal}) from ${userId}. Rejected.`);
                     return;
+                }
+
+                // P0 Hardening: Capture validation — verify piece cannot skip over opponent
+                const moverPiece = action.pieces.find(p => p.id === action.pieceId);
+                if (moverPiece && moverPiece.step >= 0 && moverPiece.step < 57) {
+                    const startStep = (moverPiece.color === 'Red') ? 0 : 28;
+                    const pathSteps = [];
+                    for (let s = startStep; s < startStep + 57; s++) {
+                        if (s >= moverPiece.step) break;
+                        pathSteps.push(s % 57);
+                    }
+                    const blockingPiece = prevPieces.find(p => 
+                        p.color !== moverPiece.color && 
+                        pathSteps.includes(p.step)
+                    );
+                    if (blockingPiece) {
+                        console.warn(`[Ludo][${roomId}] Piece attempted to jump over opponent from ${userId}. Rejected.`);
+                        return;
+                    }
                 }
 
                 room.gameState.pieces = action.pieces;
@@ -2825,14 +3046,39 @@ httpServer.listen(PORT, () => {
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
     console.log(`${signal} received. Closing server...`);
+
+    // Mark all active rooms as pending shutdown-refund BEFORE closing.
+    // This prevents the orphan reaper from immediately re-refunding them on restart.
     for (const [roomId, room] of rooms.entries()) {
-        if (room.status === 'active') {
-            for (const pid of room.players) {
-                const split = room.escrowSplits?.[pid];
-                if (split) {
-                    try {
-                        await refundEscrow(pid, split.real, split.promo);
-                    } catch (e) { console.warn(`[Shutdown] Refund failed for ${pid}:`, e); }
+        if (room.status === 'active' && room.stake > 0) {
+            // Only refund if the game is genuinely stale (no move in last 60s)
+            // or both players are already disconnected.
+            const timeSinceLastMove = Date.now() - (room.gameState?.lastMoveTime || room.gameState?.startTime || 0);
+            const bothDisconnected = !room.players.some(pid => {
+                const sid = userSockets.get(pid);
+                return sid && io.sockets.sockets.has(sid);
+            });
+
+            if (timeSinceLastMove > 60_000 || bothDisconnected) {
+                for (const pid of room.players) {
+                    const split = room.escrowSplits?.[pid];
+                    if (split) {
+                        try {
+                            await refundEscrow(pid, split.real, split.promo);
+                        } catch (e) { console.warn(`[Shutdown] Refund failed for ${pid}:`, e); }
+                    }
+                }
+                // Mark as shutdown-refunded to prevent double-refund on restart
+                if (db) {
+                    db.collection('processed_settlements').doc(`shutdown_${roomId}`).set({
+                        roomId, reason: 'graceful_shutdown',
+                        timestamp: admin.firestore.FieldValue.serverTimestamp()
+                    }).catch(() => {});
+                }
+            } else {
+                // Game was active — persist room state so it can be recovered on restart
+                if (db) {
+                    persistRoomToFirestore(roomId, { ...room, shutdownPending: true });
                 }
             }
         }

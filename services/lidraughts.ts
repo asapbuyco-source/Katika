@@ -1,7 +1,14 @@
-
 // Lidraughts API Service
-const getToken = () => import.meta.env.VITE_LIDRAUGHTS_TOKEN || 'xf1AKIWA1hD6zs5x';
-const API_TOKEN = getToken();
+// Token must be set via VITE_LIDRAUGHTS_TOKEN environment variable.
+// Throws if token is missing — never silently falls back to a committed value.
+
+const getToken = (): string => {
+    const token = import.meta.env.VITE_LIDRAUGHTS_TOKEN;
+    if (!token) {
+        throw new Error('[Lidraughts] VITE_LIDRAUGHTS_TOKEN environment variable is not set.');
+    }
+    return token;
+};
 
 const BASE_URL = "https://lidraughts.org/api";
 
@@ -12,20 +19,20 @@ export interface LidraughtsGame {
     perf: string;
 }
 
-// Map 1-32 notation to Row/Col (0-7)
 export const toCoords = (square: number) => {
     const row = Math.floor((square - 1) / 4);
     const col = ((square - 1) % 4) * 2 + ((row % 2 === 0) ? 1 : 0);
     return { r: row, c: col };
 };
 
-// Map Row/Col (0-7) to 1-32 notation
 export const toNotation = (r: number, c: number) => {
     return (r * 4) + Math.floor(c / 2) + 1;
 };
 
 export const createLidraughtsGame = async (level: number = 1, retries = 2): Promise<LidraughtsGame | null> => {
     let lastError: any;
+    const token = getToken();
+
     for (let attempt = 0; attempt <= retries; attempt++) {
         try {
             const controller = new AbortController();
@@ -37,7 +44,7 @@ export const createLidraughtsGame = async (level: number = 1, retries = 2): Prom
 
             const response = await fetch(`${BASE_URL}/challenge/ai`, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${getToken()}` },
+                headers: { 'Authorization': `Bearer ${token}` },
                 body: formData,
                 signal: controller.signal
             });
@@ -60,12 +67,13 @@ export const createLidraughtsGame = async (level: number = 1, retries = 2): Prom
 };
 
 export const fetchLidraughtsState = async (gameId: string) => {
+    const token = getToken();
     try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 5000);
         const response = await fetch(`${BASE_URL}/board/game/stream/${gameId}`, {
             headers: {
-                'Authorization': `Bearer ${getToken()}`,
+                'Authorization': `Bearer ${token}`,
                 'Accept': 'application/x-ndjson'
             },
             signal: controller.signal
@@ -89,13 +97,11 @@ export const fetchLidraughtsState = async (gameId: string) => {
 };
 
 export const makeLidraughtsMove = async (gameId: string, moveString: string) => {
-    // moveString example: "24-20" or "24x15"
+    const token = getToken();
     try {
         const response = await fetch(`${BASE_URL}/board/game/${gameId}/move/${moveString}`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${getToken()}`
-            }
+            headers: { 'Authorization': `Bearer ${token}` }
         });
         return response.ok;
     } catch (e) {
@@ -103,4 +109,3 @@ export const makeLidraughtsMove = async (gameId: string, moveString: string) => 
         return false;
     }
 };
-    

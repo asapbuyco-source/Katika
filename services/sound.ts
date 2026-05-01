@@ -85,7 +85,7 @@ const playNoise = (duration: number) => {
     }
 };
 
-export type SFXType = 'click' | 'move' | 'capture' | 'dice' | 'win' | 'loss' | 'error' | 'turn' | 'notification' | 'king';
+export type SFXType = 'click' | 'move' | 'capture' | 'dice' | 'win' | 'loss' | 'error' | 'turn' | 'notification' | 'king' | 'shoot';
 
 export const playSFX = (type: SFXType) => {
     try {
@@ -113,6 +113,10 @@ export const playSFX = (type: SFXType) => {
             case 'king':
                 playTone(400, 'sine', 0.2, 0.1);
                 playTone(600, 'sine', 0.4, 0.1, 0.1);
+                break;
+            case 'shoot':
+                playTone(180, 'sawtooth', 0.15, 0.05);
+                playTone(120, 'square', 0.1, 0.08);
                 break;
             case 'win':
                 playTone(523.25, 'sine', 0.3, 0.1, 0);   // C5
