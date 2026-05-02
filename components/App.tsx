@@ -511,7 +511,7 @@ const AppContent = () => {
                                                 activeGameTable.gameType === 'Dice' ? <DiceGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                                                     activeGameTable.gameType === 'Chess' ? <ChessGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                                                         activeGameTable.gameType === 'TicTacToe' ? <TicTacToeGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
-                                                            activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
+                                                            activeGameTable.gameType === 'Pool' ? <PoolGame table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} /> :
                                                                 activeGameTable.gameType === 'Ludo' ? <GameRoom table={activeGameTable} user={user} onGameEnd={handleGameEnd} socket={socket} socketGame={socketGame} /> :
                                                                     <div className="flex items-center justify-center h-full text-2xl font-bold text-slate-500">Game Mode Not Available</div>}
                                         </>

@@ -16,7 +16,7 @@ const motion = originalMotion as any;
 interface CheckersGameProps {
     table: Table;
     user: AppUser;
-    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
     socketGame?: any;
 }
@@ -292,7 +292,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     const winner = data.winner;
                     if (winner === 'white') onGameEnd('win');
                     else if (winner === 'black') onGameEnd('loss');
-                    else onGameEnd('quit');
+                    else onGameEnd('draw');
                 }
             }
         }, 1500);

@@ -42,6 +42,14 @@
       ]
     },
     {
+      "collectionGroup": "disputes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "roomId", "order": "ASCENDING" },
+        { "fieldPath": "filedBy", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "game_logs",
       "queryScope": "COLLECTION",
       "fields": [

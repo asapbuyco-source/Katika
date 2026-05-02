@@ -3,8 +3,8 @@
 
 export const COLORS = ['Red', 'Blue'];
 export const HOME_STEP = -1;
-export const MAX_STEP = 56;
-export const PATH_LENGTH = 57;
+export const MAX_STEP = 57;
+export const PATH_LENGTH = 58;
 
 export const createInitialPieces = (players) => {
     const pieces = [];

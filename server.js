@@ -94,12 +94,12 @@ app.use(helmet());
 app.use(helmet.contentSecurityPolicy({
     directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "https://cdn.tailwindcss.com", "'unsafe-inline'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https://api.dicebear.com", "https://i.pravatar.cc", "https://www.google.com"],
         connectSrc: ["'self'",
-            (process.env.FRONTEND_URL || '*'),
+            process.env.FRONTEND_URL || 'http://localhost:5173',
             "https://*.googleapis.com",
             "https://*.firebaseio.com",
             "https://live.fapshi.com",
@@ -162,14 +162,55 @@ const io = new Server(httpServer, {
     },
 });
 
+// Socket.IO authentication middleware — tri-mode via SOCKET_AUTH env var
+// 'off'  = allow all connections (dev mode)
+// 'log'  = allow all, log auth failures (staging verification)
+// 'enforce' = reject unauthenticated connections
+const SOCKET_AUTH_MODE = process.env.SOCKET_AUTH || 'off';
+
+io.use(async (socket, next) => {
+    if (SOCKET_AUTH_MODE === 'off') return next();
+
+    if (socket.user) return next();
+
+    const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+    if (!token) {
+        if (SOCKET_AUTH_MODE === 'log') {
+            console.warn(`[Auth] Socket ${socket.id} connected without token (log mode)`);
+            return next();
+        }
+        return next(new Error('Authentication required'));
+    }
+
+    try {
+        const decoded = await admin.auth().verifyIdToken(token);
+        socket.user = decoded;
+        if (SOCKET_AUTH_MODE === 'log') {
+            console.log(`[Auth] Socket ${socket.id} authenticated as ${decoded.uid} (log mode)`);
+        }
+        next();
+    } catch (err) {
+        if (SOCKET_AUTH_MODE === 'log') {
+            console.warn(`[Auth] Socket ${socket.id} failed token verification (log mode): ${err.message}`);
+            return next();
+        }
+        next(new Error('Invalid token'));
+    }
+});
+
 // Socket.IO connection rate limiting
 const connectionsByIP = new Map();
+const MAX_CONNECTIONS_PER_IP = 10000;
 io.use((socket, next) => {
-    const ip = socket.handshake.address;
+    const ip = (socket.handshake.headers['x-forwarded-for'] || '').split(',')[0].trim() || socket.handshake.address;
     const count = connectionsByIP.get(ip) || 0;
     if (count >= 10) {
         console.warn(`Socket rate limit exceeded for IP: ${ip}`);
         return next(new Error('Too many connections'));
+    }
+    if (connectionsByIP.size >= MAX_CONNECTIONS_PER_IP) {
+        const oldestKey = connectionsByIP.keys().next().value;
+        connectionsByIP.delete(oldestKey);
     }
     connectionsByIP.set(ip, count + 1);
     setTimeout(() => {
@@ -255,26 +296,44 @@ app.post('/api/pay/initiate', verifyAuth, blockGuests, async (req, res) => {
             : null);
         const webhookUrl = rawBase ? `${rawBase}/api/pay/webhook` : undefined;
 
-        const response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
-            method: 'POST',
-            headers: {
-                'apiuser': FAPSHI_USER_TOKEN,
-                'apikey': FAPSHI_API_KEY,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                amount,
-                email,
-                userId,
-                redirectUrl,
-                ...(webhookUrl ? { webhook: webhookUrl } : {})
-            })
-        });
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 15000);
+        let response;
+        try {
+            response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+                method: 'POST',
+                headers: {
+                    'apiuser': FAPSHI_USER_TOKEN,
+                    'apikey': FAPSHI_API_KEY,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    amount,
+                    email,
+                    userId,
+                    redirectUrl,
+                    ...(webhookUrl ? { webhook: webhookUrl } : {})
+                }),
+                signal: controller.signal
+            });
+        } catch (err) {
+            clearTimeout(timeout);
+            if (err.name === 'AbortError') {
+                console.error('[Initiate] Fapshi request timed out after 15s');
+                return res.status(504).json({ error: 'Payment service timeout. Please try again.' });
+            }
+            throw err;
+        }
+        clearTimeout(timeout);
         const data = await response.json();
         if (!response.ok) return res.status(response.status).json(data);
 
         // Store pending deposit so webhook can look up userId + amount by transId
         if (data.transId) {
+            if (pendingDeposits.size >= 10000) {
+                const oldestKey = pendingDeposits.keys().next().value;
+                pendingDeposits.delete(oldestKey);
+            }
             pendingDeposits.set(data.transId, { userId, depositAmount });
             setTimeout(() => pendingDeposits.delete(data.transId), 2 * 60 * 60 * 1000);
             // FIX C5: Also persist to Firestore so deposits survive server restarts
@@ -306,9 +365,20 @@ app.post('/api/pay/webhook', async (req, res) => {
 
         // FIX: Webhook MUST ALWAYS verify with the Fapshi API directly to prevent spoofing.
         // Even if we know the pending deposit locally, we cannot trust req.body.status without verification.
-        const verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
-            headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY }
-        });
+        const verifyController = new AbortController();
+        const verifyTimeout = setTimeout(() => verifyController.abort(), 15000);
+        let verifyRes;
+        try {
+            verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+                headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY },
+                signal: verifyController.signal
+            });
+        } catch (e) {
+            clearTimeout(verifyTimeout);
+            console.error('[Webhook] Fapshi verification timed out for transId:', transId);
+            return;
+        }
+        clearTimeout(verifyTimeout);
         
         if (!verifyRes.ok) {
             console.error(`[Webhook Security] Fapshi returned ${verifyRes.status} for transId ${transId}`);
@@ -451,6 +521,8 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
 
         if (!amount || typeof amount !== 'number' || !Number.isInteger(amount))
             return res.status(400).json({ error: 'Invalid amount.' });
+        if (amount <= 0)
+            return res.status(400).json({ error: 'Amount must be positive.' });
         if (amount < 1000)
             return res.status(400).json({ error: 'Minimum withdrawal is 1,000 FCFA.' });
         if (amount > 500_000)
@@ -491,11 +563,30 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         }
 
         // STEP 2: Call Fapshi — balance is already safely debited
-        const fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
-            method: 'POST',
-            headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' })
-        });
+        const payoutController = new AbortController();
+        const payoutTimeout = setTimeout(() => payoutController.abort(), 15000);
+        let fapshiRes;
+        try {
+            fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
+                method: 'POST',
+                headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' }),
+                signal: payoutController.signal
+            });
+        } catch (err) {
+            clearTimeout(payoutTimeout);
+            if (err.name === 'AbortError') {
+                console.error(`[Disburse] Fapshi payout timed out after 15s for ${userId}`);
+                await db.runTransaction(async (tx) => {
+                    const userDoc = await tx.get(userRef);
+                    if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
+                    if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp(), error: 'payout_timeout' });
+                }).catch(e => console.error('[Disburse] Refund transaction failed:', e));
+                return res.status(504).json({ error: 'Payment service timeout. Please try again.' });
+            }
+            throw err;
+        }
+        clearTimeout(payoutTimeout);
         const fapshiData = await fapshiRes.json();
 
         if (!fapshiRes.ok) {
@@ -605,6 +696,42 @@ app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) 
 });
 
 // ─── TOURNAMENT CORE LOGIC ──────────────────────────────────────────────────
+
+// Server endpoint: tournament match activation (replaces client Firestore write)
+app.post('/api/tournaments/match-activate', verifyAuth, blockGuests, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const { matchId } = req.body;
+    const userId = req.user.uid;
+    if (!matchId) return res.status(400).json({ error: 'matchId required' });
+    try {
+        const matchSnap = await db.collection('tournament_matches').doc(matchId).get();
+        if (!matchSnap.exists) return res.status(404).json({ error: 'Match not found' });
+        const matchData = matchSnap.data();
+        if (!(matchData.players || []).includes(userId)) return res.status(403).json({ error: 'Not a player in this match' });
+        if (matchData.status !== 'pending') return res.status(409).json({ error: 'Match already active or completed' });
+        await db.collection('tournament_matches').doc(matchId).update({ status: 'active', startedAt: admin.firestore.FieldValue.serverTimestamp() });
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[MatchActivate]', e);
+        res.status(500).json({ error: 'Failed to activate match' });
+    }
+});
+
+// Server endpoint: tournament status update (admin only, replaces client Firestore write)
+app.post('/api/tournaments/update-status', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const { tournamentId, status } = req.body;
+    if (!tournamentId || !status) return res.status(400).json({ error: 'tournamentId and status required' });
+    const validStatuses = ['registration', 'active', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    try {
+        await db.collection('tournaments').doc(tournamentId).update({ status });
+        res.json({ success: true, tournamentId, status });
+    } catch (e) {
+        console.error('[TournamentStatus]', e);
+        res.status(500).json({ error: 'Failed to update tournament status' });
+    }
+});
 
 /**
  * Finalise a tournament once the last match is done.
@@ -769,7 +896,7 @@ const startTournamentLogic = async (tournamentId) => {
         // Shuffle participants
         const participants = [...tData.participants];
         for (let i = participants.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = crypto.randomInt(i + 1);
             [participants[i], participants[j]] = [participants[j], participants[i]];
         }
 
@@ -1188,13 +1315,59 @@ app.get('/api/pay/status/:transId', verifyAuth, async (req, res) => {
         if (!transId || transId.length === 0) {
             return res.status(400).json({ error: 'Invalid transaction ID.' });
         }
-        const response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
-            headers: {
-                'apiuser': FAPSHI_USER_TOKEN,
-                'apikey': FAPSHI_API_KEY
+        const statusController = new AbortController();
+        const statusTimeout = setTimeout(() => statusController.abort(), 15000);
+        let response;
+        try {
+            response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+                headers: {
+                    'apiuser': FAPSHI_USER_TOKEN,
+                    'apikey': FAPSHI_API_KEY
+                },
+                signal: statusController.signal
+            });
+        } catch (err) {
+            clearTimeout(statusTimeout);
+            if (err.name === 'AbortError') {
+                return res.status(504).json({ error: 'Payment service timeout. Please try again.' });
             }
-        });
+            throw err;
+        }
+        clearTimeout(statusTimeout);
         const data = await response.json();
+
+        // Idempotent deposit credit: if Fapshi says SUCCESSFUL and webhook hasn't
+        // processed yet, credit the user immediately via the same sentinel pattern.
+        if (data.status === 'SUCCESSFUL' && data.transId) {
+            const transId = data.transId;
+            const paymentRef = db.collection('processed_payments').doc(transId);
+            const existingSnap = await paymentRef.get();
+            if (!existingSnap.exists && db) {
+                // Try to resolve userId and amount from pending records
+                const pending = pendingDeposits.get(transId);
+                if (pending) {
+                    const userRef = db.collection('users').doc(pending.userId);
+                    try {
+                        await db.runTransaction(async (tx) => {
+                            const [paySnap, userSnap] = await Promise.all([tx.get(paymentRef), tx.get(userRef)]);
+                            if (paySnap.exists()) return;
+                            if (!userSnap.exists()) return;
+                            tx.update(userRef, { balance: (userSnap.data().balance || 0) + pending.depositAmount });
+                            tx.set(paymentRef, {
+                                creditedAt: admin.firestore.FieldValue.serverTimestamp(),
+                                source: 'status_endpoint_fallback',
+                                userId: pending.userId,
+                                amount: pending.depositAmount
+                            });
+                        });
+                        console.log(`[Status] Idempotent credit for transId=${transId} via /api/pay/status fallback`);
+                    } catch (e) {
+                        console.error(`[Status] Failed to credit transId=${transId}:`, e.message);
+                    }
+                }
+            }
+        }
+
         res.status(response.status).json(data);
     } catch (err) {
         console.error('Fapshi status proxy error:', err);
@@ -1328,7 +1501,7 @@ app.post('/api/disputes/file', verifyAuth, async (req, res) => {
         });
 
         // Notify admin sockets
-        io.emit('admin_alert', { type: 'new_dispute', roomId, filedBy: userId });
+        io.to('admins').emit('admin_alert', { type: 'new_dispute', roomId, filedBy: userId });
 
         console.log(`[Dispute] Filed: room=${roomId} by=${userId}`);
         res.json({ success: true, status: 'open', message: 'Dispute filed. Review within 30 minutes. Your stake is held safely.' });
@@ -1539,16 +1712,18 @@ const cleanupRoomFromFirestore = async (roomId) => {
     }
 };
 
-// Load rooms on startup (deferred)
-setTimeout(() => hydrateRoomsFromFirestore(), 5000);
-
 // Per-user game action rate limiting (anti-bot / anti-spam)
 const gameActionTimestamps = new Map(); // userId -> number[]
+const MAX_GAME_ACTION_USERS = 50000;
 const isGameActionRateLimited = (userId, maxPerSecond = 10) => {
     const now = Date.now();
     const timestamps = (gameActionTimestamps.get(userId) || []).filter(t => now - t < 1000);
     if (timestamps.length >= maxPerSecond) return true;
     timestamps.push(now);
+    if (gameActionTimestamps.size >= MAX_GAME_ACTION_USERS) {
+        const oldestKey = gameActionTimestamps.keys().next().value;
+        gameActionTimestamps.delete(oldestKey);
+    }
     gameActionTimestamps.set(userId, timestamps);
     return false;
 };
@@ -1563,6 +1738,10 @@ const recordOutcomeAndCheckAnomaly = (userId, isWin) => {
     const history = gameOutcomeHistory.get(userId) || { wins: 0, total: 0 };
     history.total++;
     if (isWin) history.wins++;
+    if (gameOutcomeHistory.size >= 10000) {
+        const oldestKey = gameOutcomeHistory.keys().next().value;
+        gameOutcomeHistory.delete(oldestKey);
+    }
     gameOutcomeHistory.set(userId, history);
 
     // Flag if win rate > 85% sustained over 20+ games
@@ -1578,7 +1757,7 @@ const recordOutcomeAndCheckAnomaly = (userId, isWin) => {
             }, { merge: true }).catch(e => console.error('[AntiCheat] Flag write failed:', e));
         }
         // Notify admin sockets
-        io.emit('admin_alert', { type: 'anomalous_win_rate', userId, winRate });
+        io.to('admins').emit('admin_alert', { type: 'anomalous_win_rate', userId, winRate });
     }
 };
 
@@ -1838,7 +2017,8 @@ io.on('connection', (socket) => {
 
     socket.on('refresh_token', async ({ token }) => {
         try {
-            await admin.auth().verifyIdToken(token);
+            const decoded = await admin.auth().verifyIdToken(token);
+            socket.user = decoded;
             clearTimeout(tokenExpiryTimer);
             tokenExpiryTimer = setTimeout(() => {
                 console.warn(`[Auth] Forcing disconnect for ${socket.id} due to token expiry (55m)`);
@@ -1871,7 +2051,15 @@ io.on('connection', (socket) => {
             console.error('Invalid join_game payload');
             return;
         }
-        const userId = userProfile.id;
+        const userId = (socket.user && socket.user.uid) || userProfile.id;
+        if (socket.user && socket.user.uid && socket.user.uid !== userProfile.id) {
+            console.warn(`[Auth] Socket userId mismatch: socket=${socket.user.uid} profile=${userProfile.id}`);
+            socket.emit('error', { message: 'Authentication mismatch' });
+            return;
+        }
+        if (socket.user && socket.user.email && ADMIN_EMAILS.includes(socket.user.email)) {
+            socket.join('admins');
+        }
 
         // ── Login streak (fire-and-forget, internal) ───────────────────────────
         if (db) {
@@ -2093,7 +2281,7 @@ io.on('connection', (socket) => {
 
     // 2. REJOIN EXPLICIT
     socket.on('rejoin_game', ({ userProfile }) => {
-        const userId = userProfile.id;
+        const userId = (socket.user && socket.user.uid) || userProfile.id;
 
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));
@@ -2241,6 +2429,7 @@ io.on('connection', (socket) => {
                                     date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                     note: `Rematch stake for ${room.gameType}`
                                 });
+                            });
                             }
                         });
                     } catch (e) {
@@ -2278,6 +2467,15 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // --- POOL GROUP ASSIGNMENT ---
+        if (action.type === 'GROUP_ASSIGN') {
+            if (!room.players.includes(userId)) return;
+            room.gameState.myGroupP1 = action.myGroupP1;
+            room.gameState.myGroupP2 = action.myGroupP2;
+            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+            return;
+        }
+
         // --- DICE LOGIC ---
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
             if (room.turn !== userId) return;
@@ -2306,6 +2504,8 @@ io.on('connection', (socket) => {
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
                             const winner = room.gameState.scores[p1] >= 3 ? p1 : p2;
                             endGame(roomId, winner, 'Score Limit Reached');
+                        } else if ((room.gameState.currentRound || 1) >= 20) {
+                            endGame(roomId, null, 'Draw');
                         } else {
                             room.gameState.currentRound++;
                             room.gameState.roundRolls = {};
@@ -2540,10 +2740,24 @@ io.on('connection', (socket) => {
                         console.warn(`[Chess][${roomId}] PGN validation error from ${userId}:`, e.message);
                         return;
                     }
+                    if (action.newState.timers) {
+                        const maxTime = 1800;
+                        for (const [pid, t] of Object.entries(action.newState.timers)) {
+                            if (!room.players.includes(pid)) continue;
+                            if (typeof t !== 'number' || t < 0 || t > maxTime) {
+                                console.warn(`[Chess][${roomId}] Invalid timer from ${userId}: ${pid}=${t}. Rejected.`);
+                                return;
+                            }
+                            const prevTime = room.gameState.timers?.[pid];
+                            if (prevTime !== undefined && t > prevTime + 3) {
+                                console.warn(`[Chess][${roomId}] Timer increased suspiciously: ${pid} ${prevTime}->${t}. Rejected.`);
+                                return;
+                            }
+                        }
+                    }
                 }
                 // --- End chess validation ---
-                // --- End chess validation ---
-                
+
                 // --- Bug D fix: Pool Server-side Move Validation (Anti-Cheat) ---
                 if (room.gameType === 'Pool' && action.newState) {
                     // P0 Hardening: Shot event ledger for deterministic verification
@@ -2814,7 +3028,10 @@ io.on('connection', (socket) => {
                 const prevPieces = room.gameState.pieces;
                 const movedIllegally = action.pieces.some((p, i) => {
                     const prev = prevPieces[i];
-                    if (p.owner !== userId) return p.step !== prev.step;
+                    if (p.owner !== userId) {
+                        if (p.step === -1 && prev.step >= 0) return false;
+                        return p.step !== prev.step;
+                    }
                     return false;
                 });
                 if (movedIllegally) {
@@ -2852,22 +3069,36 @@ io.on('connection', (socket) => {
                     return;
                 }
 
+                const outOfBounds = action.pieces.some(p => {
+                    if (p.owner !== userId) return false;
+                    if (p.step > 56 && !p.finished) return true;
+                    if (p.step < -1) return true;
+                    return false;
+                });
+                if (outOfBounds) {
+                    console.warn(`[Ludo][${roomId}] Piece out of bounds from ${userId}. Rejected.`);
+                    return;
+                }
+
                 // P0 Hardening: Capture validation — verify piece cannot skip over opponent
+                // Step-delta check: only validate the path between previous and current step
                 const moverPiece = action.pieces.find(p => p.id === action.pieceId);
                 if (moverPiece && moverPiece.step >= 0 && moverPiece.step < 57) {
-                    const startStep = (moverPiece.color === 'Red') ? 0 : 28;
-                    const pathSteps = [];
-                    for (let s = startStep; s < startStep + 57; s++) {
-                        if (s >= moverPiece.step) break;
-                        pathSteps.push(s % 57);
-                    }
-                    const blockingPiece = prevPieces.find(p => 
-                        p.color !== moverPiece.color && 
-                        pathSteps.includes(p.step)
-                    );
-                    if (blockingPiece) {
-                        console.warn(`[Ludo][${roomId}] Piece attempted to jump over opponent from ${userId}. Rejected.`);
-                        return;
+                    const pieceFrom = prevPieces.find(p => p.id === action.pieceId);
+                    if (pieceFrom && pieceFrom.step >= 0) {
+                        const startStep = (moverPiece.color === 'Red') ? 0 : 28;
+                        const fromRel = (pieceFrom.step - startStep + 57) % 57;
+                        const toRel = (moverPiece.step - startStep + 57) % 57;
+                        const prevOppPieces = prevPieces.filter(p => p.color !== moverPiece.color && p.step >= 0 && p.step < 52);
+                        const blocked = prevOppPieces.some(opp => {
+                            const oppRel = (opp.step - startStep + 57) % 57;
+                            if (fromRel < toRel) return oppRel > fromRel && oppRel < toRel;
+                            return oppRel > fromRel || oppRel < toRel;
+                        });
+                        if (blocked) {
+                            console.warn(`[Ludo][${roomId}] Piece jumped over opponent from ${userId}. Rejected.`);
+                            return;
+                        }
                     }
                 }
 
@@ -3035,16 +3266,33 @@ const reconcileOrphanedEscrows = async () => {
     }
 };
 
-httpServer.listen(PORT, () => {
-    console.log(`Vantage Game Server running on port ${PORT}`);
-    if (!process.env.FAPSHI_API_KEY) console.warn('WARNING: FAPSHI_API_KEY not set.');
-    
-    // Trigger reconciliation asynchronously
-    reconcileOrphanedEscrows();
-});
+async function startServer() {
+    try {
+        await hydrateRoomsFromFirestore();
+        httpServer.listen(PORT, () => {
+            console.log(`Vantage Game Server running on port ${PORT}`);
+            if (!process.env.FAPSHI_API_KEY) console.warn('WARNING: FAPSHI_API_KEY not set.');
+            reconcileOrphanedEscrows();
+        });
+    } catch (err) {
+        console.error('[Startup] Failed to start server:', err);
+        process.exit(1);
+    }
+}
+startServer();
 
 // Graceful shutdown
 const gracefulShutdown = async (signal) => {
+    console.log(`${signal} received. Persisting active rooms before shutdown...`);
+
+    for (const [roomId, room] of rooms.entries()) {
+        if (room.status === 'active') {
+            await persistRoomToFirestore(roomId, room).catch(e =>
+                console.error(`[Shutdown] Failed to persist room ${roomId}:`, e.message)
+            );
+        }
+    }
+
     console.log(`${signal} received. Closing server...`);
 
     // Mark all active rooms as pending shutdown-refund BEFORE closing.

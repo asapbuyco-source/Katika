@@ -13,7 +13,7 @@ import type { Square } from 'chess.js';
 interface ChessGameProps {
     table: Table;
     user: User;
-    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
     socketGame?: any;
 }
@@ -351,7 +351,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 // Changed to `isP2P` so P2P winner is correctly resolved.
                 if (isP2P) {
                     if (socketGame.winner === user.id) onGameEnd('win');
-                    else if (socketGame.winner === null) onGameEnd('draw' as any);
+                    else if (socketGame.winner === null) onGameEnd('draw');
                     else onGameEnd('loss');
                 }
             }
@@ -424,7 +424,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             } else {
                 // BUG 1 FIX: draw conditions (stalemate, insufficient material, etc.)
                 // must use 'draw', NOT 'quit' which triggers a forfeit/loss in GameRoom
-                if (!currentIsP2P) onGameEnd('draw' as any);
+                if (!currentIsP2P) onGameEnd('draw');
             }
         }
     }, [onGameEnd]);

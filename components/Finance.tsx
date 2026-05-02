@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, creditDepositIdempotent, auth } from '../services/firebase';
+import { getUserTransactions, auth } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { useSocket } from '../services/SocketContext';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight, Shield } from 'lucide-react';
@@ -137,16 +137,6 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
                 if (status === 'SUCCESSFUL') {
                     if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
                     pollIntervalRef.current = null;
-
-                    if (!user.id.startsWith('guest-')) {
-                        // Only credit client-side if the webhook hasn't already done it.
-                        // creditDepositIdempotent uses a Firestore sentinel so even if both
-                        // paths fire, only one credit is written.
-                        if (!creditedTransIds.current.has(response.transId)) {
-                            creditedTransIds.current.add(response.transId);
-                            await creditDepositIdempotent(user.id, response.transId, depositAmount);
-                        }
-                    }
 
                     // Let the live subscribeToUser listener in App.tsx pick up the
                     // real Firestore balance automatically (Bug C2 fix — no stale value).

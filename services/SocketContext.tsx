@@ -7,9 +7,10 @@ import React, {
     ReactNode
 } from 'react';
 import { io, Socket } from 'socket.io-client';
+import { onIdTokenChanged } from 'firebase/auth';
 import { SocketGameState } from '../types';
 import { useAppState } from './AppContext';
-import { setTournamentMatchActive, reportTournamentMatchResult } from './firebase';
+import { auth, reportTournamentMatchResult } from './firebase';
 import { playSFX } from './sound';
 
 // ─── Context Shaped ─────────────────────────────────────────────────────────────
@@ -78,6 +79,12 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             timeout: 20000,
             transports: ['polling', 'websocket'],
             autoConnect: true,
+            auth: async () => {
+                const user = auth.currentUser;
+                if (!user) return {};
+                const token = await user.getIdToken();
+                return { token };
+            }
         });
 
         newSocket.on('connect', () => {
@@ -116,8 +123,16 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         const handleMatchFound = (gameState: SocketGameState) => {
             if (gameState.tournamentMatchId) {
-                setTournamentMatchActive(gameState.tournamentMatchId)
-                    .catch(e => console.error('Failed to activate tournament match:', e));
+                const user = auth.currentUser;
+                if (user) {
+                    user.getIdToken().then(token => {
+                        fetch('/api/tournaments/match-activate', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ matchId: gameState.tournamentMatchId })
+                        }).catch(e => console.error('Failed to activate tournament match:', e));
+                    });
+                }
             }
             setSocketGame(gameState);
             setIsWaitingForSocketMatch(false);
@@ -218,6 +233,22 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             socket.emit('rejoin_game', { userProfile: state.user });
         }
     }, [socket, isConnected, state.user, viewRef]);
+
+    // ── Token refresh: keep socket auth valid for long-lived connections ──────
+    useEffect(() => {
+        if (!socket) return;
+        const unsubscribe = onIdTokenChanged(auth, async (user) => {
+            if (user && isConnected) {
+                try {
+                    const token = await user.getIdToken();
+                    socket.emit('refresh_token', { token });
+                } catch (e) {
+                    console.warn('[Socket] Token refresh failed:', e);
+                }
+            }
+        });
+        return unsubscribe;
+    }, [socket, isConnected]);
 
     // ── Auto-bypass if connection takes too long ───────────────────────────────
     // 45s gives 3G connections (common in Cameroon) enough time for the

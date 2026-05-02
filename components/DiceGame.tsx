@@ -14,7 +14,7 @@ const motion = originalMotion as any;
 interface DiceGameProps {
     table: Table;
     user: AppUser;
-    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
     socketGame?: any;
 }

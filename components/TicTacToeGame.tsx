@@ -11,7 +11,7 @@ import { Socket } from 'socket.io-client';
 interface TicTacToeGameProps {
     table: Table;
     user: User;
-    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
     socketGame?: any;
 }
@@ -213,7 +213,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 setIsDraw(true);
                 if (nextStreak >= 3) {
                     playSFX('loss');
-                    setTimeout(() => onGameEnd('quit'), 2500);
+                    setTimeout(() => onGameEnd('draw'), 2500);
                 } else {
                     playSFX('notification');
                     setTimeout(() => {

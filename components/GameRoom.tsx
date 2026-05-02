@@ -10,7 +10,7 @@ import { GameChat } from './GameChat';
 interface GameRoomProps {
     table: Table;
     user: User;
-    onGameEnd: (result: 'win' | 'loss' | 'quit') => void;
+    onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
     socketGame?: any;
 }

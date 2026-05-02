@@ -1,52 +1,44 @@
-// Table dimensions
+// ── Table Dimensions ──────────────────────────────────────────────────────────
 export const TABLE_WIDTH = 900;
 export const TABLE_HEIGHT = 450;
 export const CUSHION_THICKNESS = 36;
-export const CORNER_POCKET_RADIUS = 22;
-export const SIDE_POCKET_RADIUS = 20;
+export const RAIL_WIDTH = 38;
+export const CORNER_POCKET_RADIUS = 24;
+export const SIDE_POCKET_RADIUS = 21;
 
-// Ball
+// ── Ball ──────────────────────────────────────────────────────────────────────
 export const BALL_RADIUS = 14;
 
-// Physics
-export const FRICTION = 0.985;
-export const SPIN_FRICTION = 0.92;
-export const MIN_VELOCITY = 0.08;
-export const BALL_RESTITUTION = 0.96;
-export const CUSHION_RESTITUTION = 0.72;
+// ── Physics (tuned from GML 5.1 reference) ───────────────────────────────────
+export const FRICTION = 0.9845;        // per-frame rolling friction
+export const SPIN_FRICTION = 0.92;     // spin decay
+export const MIN_VELOCITY = 0.12;      // below this → zero (avoids eternal rolling)
+export const BALL_RESTITUTION = 0.96;  // realistic ball-ball collisions (was 1.0)
+export const CUSHION_RESTITUTION = 0.80; // cushion energy retention
+export const SUBSTEPS = 10;            // physics sub-steps per frame for accuracy
 
-// Cue
-export const CUE_LENGTH = 300;
-export const CUE_WIDTH_BACK = 10;
-export const CUE_WIDTH_TIP = 3;
-export const MAX_POWER = 28;
+// ── Cue ───────────────────────────────────────────────────────────────────────
+export const CUE_LENGTH = 290;
+export const CUE_WIDTH_BACK = 5.5;
+export const CUE_WIDTH_TIP = 1.5;
+export const MAX_POWER = 22;
 
-// Colors
-export const FELT_COLOR = '#1a6b3a';
-export const FELT_COLOR_2 = '#175f33';
-export const CUSHION_COLOR = '#1d5c2e';
-export const WOOD_COLOR = '#6b3a1f';
-export const WOOD_COLOR_2 = '#8B4513';
-export const POCKET_COLOR = '#0a0a0a';
+// ── Visual Colors ─────────────────────────────────────────────────────────────
+export const FELT_COLOR   = '#0f7a38';
+export const FELT_COLOR_2 = '#0a6228';
+export const CUSHION_COLOR = '#0d8838';
+export const CUSHION_HIGHLIGHT = '#12a848';
+export const WOOD_COLOR   = '#5a3a20';
+export const WOOD_COLOR_2 = '#3d2512';
+export const POCKET_COLOR = '#050505';
 
-// Ball colors for 8-ball pool
+// ── Ball Colors ───────────────────────────────────────────────────────────────
 export const BALL_COLORS: Record<number, string> = {
-    0: '#f8f8f0',
-    1: '#f5c542',
-    2: '#1a44c8',
-    3: '#e02020',
-    4: '#9b59b6',
-    5: '#e07820',
-    6: '#1e8c1e',
-    7: '#8B0000',
-    8: '#111111',
-    9: '#f5c542',
-    10: '#1a44c8',
-    11: '#e02020',
-    12: '#9b59b6',
-    13: '#e07820',
-    14: '#1e8c1e',
-    15: '#8B0000',
+    0:  '#f0f0f0',
+    1:  '#f5c518', 2:  '#1a3fbf', 3:  '#d42020', 4:  '#6b2fa0',
+    5:  '#e8751a', 6:  '#1a8a3a', 7:  '#8b1a1a', 8:  '#1a1a1a',
+    9:  '#f5c518', 10: '#1a3fbf', 11: '#d42020', 12: '#6b2fa0',
+    13: '#e8751a', 14: '#1a8a3a', 15: '#8b1a1a',
 };
 
 export const BALL_IS_STRIPE: Record<number, boolean> = {
@@ -54,26 +46,24 @@ export const BALL_IS_STRIPE: Record<number, boolean> = {
     13: true, 14: true, 15: true,
 };
 
-// Pocket positions
+// ── Pocket Positions (in table-local space: 0,0 = cushion top-left) ──────────
 export const POCKETS = [
-    { x: CUSHION_THICKNESS, y: CUSHION_THICKNESS, r: CORNER_POCKET_RADIUS },
-    { x: TABLE_WIDTH / 2 + CUSHION_THICKNESS, y: CUSHION_THICKNESS - 2, r: SIDE_POCKET_RADIUS },
-    { x: TABLE_WIDTH + CUSHION_THICKNESS, y: CUSHION_THICKNESS, r: CORNER_POCKET_RADIUS },
-    { x: CUSHION_THICKNESS, y: TABLE_HEIGHT + CUSHION_THICKNESS, r: CORNER_POCKET_RADIUS },
-    { x: TABLE_WIDTH / 2 + CUSHION_THICKNESS, y: TABLE_HEIGHT + CUSHION_THICKNESS + 2, r: SIDE_POCKET_RADIUS },
-    { x: TABLE_WIDTH + CUSHION_THICKNESS, y: TABLE_HEIGHT + CUSHION_THICKNESS, r: CORNER_POCKET_RADIUS },
+    { x: CUSHION_THICKNESS + 3,                        y: CUSHION_THICKNESS + 3,                        r: CORNER_POCKET_RADIUS },
+    { x: TABLE_WIDTH / 2 + CUSHION_THICKNESS,           y: CUSHION_THICKNESS - 2,                        r: SIDE_POCKET_RADIUS   },
+    { x: TABLE_WIDTH + CUSHION_THICKNESS - 3,           y: CUSHION_THICKNESS + 3,                        r: CORNER_POCKET_RADIUS },
+    { x: CUSHION_THICKNESS + 3,                        y: TABLE_HEIGHT + CUSHION_THICKNESS - 3,          r: CORNER_POCKET_RADIUS },
+    { x: TABLE_WIDTH / 2 + CUSHION_THICKNESS,           y: TABLE_HEIGHT + CUSHION_THICKNESS + 2,         r: SIDE_POCKET_RADIUS   },
+    { x: TABLE_WIDTH + CUSHION_THICKNESS - 3,           y: TABLE_HEIGHT + CUSHION_THICKNESS - 3,         r: CORNER_POCKET_RADIUS },
 ];
 
-// Field boundaries
-export const FIELD_LEFT = CUSHION_THICKNESS;
-export const FIELD_RIGHT = TABLE_WIDTH + CUSHION_THICKNESS;
-export const FIELD_TOP = CUSHION_THICKNESS;
+// ── Field Boundaries (playing surface edges) ──────────────────────────────────
+export const FIELD_LEFT   = CUSHION_THICKNESS;
+export const FIELD_RIGHT  = TABLE_WIDTH  + CUSHION_THICKNESS;
+export const FIELD_TOP    = CUSHION_THICKNESS;
 export const FIELD_BOTTOM = TABLE_HEIGHT + CUSHION_THICKNESS;
 
-// Rack position
-export const RACK_X = FIELD_LEFT + (TABLE_WIDTH * 0.72);
-export const RACK_Y = FIELD_TOP + TABLE_HEIGHT / 2;
-
-// Break position
-export const BREAK_X = FIELD_LEFT + TABLE_WIDTH * 0.25;
-export const BREAK_Y = FIELD_TOP + TABLE_HEIGHT / 2;
+// ── Rack & Break Positions ────────────────────────────────────────────────────
+export const RACK_X   = FIELD_LEFT + TABLE_WIDTH  * 0.72;
+export const RACK_Y   = FIELD_TOP  + TABLE_HEIGHT / 2;
+export const BREAK_X  = FIELD_LEFT + TABLE_WIDTH  * 0.25;
+export const BREAK_Y  = FIELD_TOP  + TABLE_HEIGHT / 2;
