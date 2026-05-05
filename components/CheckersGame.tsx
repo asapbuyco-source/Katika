@@ -208,15 +208,14 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         } else {
             setForwardDir(-1);
 
-            // Initialize board locally regardless of AI connection success
             if (pieces.length === 0) {
                 const initialPieces: Piece[] = [];
                 let idCounter = 0;
-                for (let r = 0; r < 8; r++) {
-                    for (let c = 0; c < 8; c++) {
+                for (let r = 0; r < 10; r++) {
+                    for (let c = 0; c < 10; c++) {
                         if ((r + c) % 2 === 1) {
-                            if (r < 3) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
-                            else if (r > 4) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
+                            if (r < 4) initialPieces.push({ id: `opp-${idCounter++}`, player: 'opponent', isKing: false, r, c });
+                            else if (r > 5) initialPieces.push({ id: `me-${idCounter++}`, player: 'me', isKing: false, r, c });
                         }
                     }
                 }
@@ -355,7 +354,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     const capturedCount = useMemo(() => {
         const meCount = pieces.filter(p => p.player === 'me').length;
         const oppCount = pieces.filter(p => p.player === 'opponent').length;
-        return { me: 12 - oppCount, opponent: 12 - meCount };
+        return { me: 20 - oppCount, opponent: 20 - meCount };
     }, [pieces]);
 
     // Task 5 Fix: Use stateRef for turn to avoid stale closure
@@ -394,33 +393,92 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         onGameEnd('quit');
     };
 
-    const isValidPos = (r: number, c: number) => r >= 0 && r < 8 && c >= 0 && c < 8;
+    const isValidPos = (r: number, c: number) => r >= 0 && r < 10 && c >= 0 && c < 10;
 
     // Task 11 Fix: Memoize getGlobalValidMoves
     const getGlobalValidMoves = useCallback((player: 'me' | 'opponent', currentPieces: Piece[], specificId?: string | null) => {
         const dir = stateRef.current.forwardDir;
-
-        let allMoves: Move[] = [];
         const myPieces = currentPieces.filter(p => p.player === player);
         const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
-
         const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
 
+        const getJumpPaths = (startPiece: Piece, visited: Set<string>, captured: number): Move[] => {
+            const paths: Move[] = [];
+            const isKing = startPiece.isKing;
+            const moveDir = startPiece.player === 'me' ? dir : -dir;
+
+            const dirs = isKing
+                ? [[-1, -1], [-1, 1], [1, -1], [1, 1]]
+                : [[moveDir, -1], [moveDir, 1]];
+
+            for (const [dr, dc] of dirs) {
+                const mr = startPiece.r + dr, mc = startPiece.c + dc;
+                const jr = startPiece.r + dr * 2, jc = startPiece.c + dc * 2;
+
+                if (!isValidPos(jr, jc)) continue;
+                if (pieceMap.has(`${jr},${jc}`)) continue;
+
+                const mid = pieceMap.get(`${mr},${mc}`);
+                if (!mid || mid.player === player) continue;
+
+                const key = `${jr},${jc}`;
+                if (visited.has(key)) continue;
+
+                const newVisited = new Set(visited);
+                newVisited.add(key);
+
+                const capturedPieceId = mid.id;
+                const endPosKey = `${jr},${jc}`;
+
+                paths.push({
+                    fromR: startPiece.r,
+                    fromC: startPiece.c,
+                    r: jr,
+                    c: jc,
+                    isJump: true,
+                    jumpId: capturedPieceId,
+                });
+
+                const tempPiece: Piece = { ...startPiece, r: jr, c: jc };
+                const nextJumps = getJumpPaths(tempPiece, newVisited, captured + 1);
+                for (const nextJump of nextJumps) {
+                    paths.push({
+                        fromR: startPiece.r,
+                        fromC: startPiece.c,
+                        r: nextJump.r,
+                        c: nextJump.c,
+                        isJump: true,
+                        jumpId: capturedPieceId,
+                    });
+                }
+            }
+
+            return paths;
+        };
+
+        let allJumpMoves: Move[] = [];
+        toCheck.forEach(p => {
+            const jumps = getJumpPaths(p, new Set(), 0);
+            allJumpMoves.push(...jumps);
+        });
+
+        if (allJumpMoves.length > 0) {
+            const maxCaptures = Math.max(...allJumpMoves.filter(m => m.isJump).map(() => 1));
+            const bestJumps = allJumpMoves.filter(m => {
+                let count = 0;
+                let r = m.fromR, c = m.fromC;
+                allJumpMoves.forEach(jm => {
+                    if (jm.fromR === r && jm.fromC === c && jm.r === m.r && jm.c === m.c) count++;
+                });
+                return count >= maxCaptures;
+            });
+            return { moves: bestJumps, hasJump: true };
+        }
+
+        let allMoves: Move[] = [];
         toCheck.forEach(p => {
             const moveDir = p.player === 'me' ? dir : -dir;
             const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[moveDir, -1], [moveDir, 1]];
-
-            dirs.forEach(([dr, dc]) => {
-                const mr = p.r + dr, mc = p.c + dc;
-                const jr = p.r + dr * 2, jc = p.c + dc * 2;
-
-                if (isValidPos(jr, jc) && !pieceMap.has(`${jr},${jc}`)) {
-                    const mid = pieceMap.get(`${mr},${mc}`);
-                    if (mid && mid.player !== player) {
-                        allMoves.push({ fromR: p.r, fromC: p.c, r: jr, c: jc, isJump: true, jumpId: mid.id });
-                    }
-                }
-            });
 
             dirs.forEach(([dr, dc]) => {
                 const tr = p.r + dr, tc = p.c + dc;
@@ -430,10 +488,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             });
         });
 
-        const jumps = allMoves.filter(m => m.isJump);
-        const finalMoves = jumps.length > 0 ? jumps : allMoves;
-
-        return { moves: finalMoves, hasJump: jumps.length > 0 };
+        return { moves: allMoves, hasJump: false };
     }, []);
 
     const executeMove = useCallback((move: Move) => {
@@ -450,7 +505,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
         const nextPieces = pieces.filter(p => p.id !== move.jumpId).map(p => {
             if (p.id === pieceId) {
-                const kingRow = p.player === 'me' ? (forwardDir === -1 ? 0 : 7) : (forwardDir === -1 ? 7 : 0);
+                const kingRow = p.player === 'me' ? (forwardDir === -1 ? 0 : 9) : (forwardDir === -1 ? 9 : 0);
                 const isKing = p.isKing || move.r === kingRow;
                 if (isKing && !p.isKing) playSFX('king');
                 return { ...p, r: move.r, c: move.c, isKing };
@@ -623,7 +678,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     if (!pid) return false;
                     currentPieces = currentPieces.filter(p => p.id !== pick.jumpId).map(p => {
                         if (p.id === pid) {
-                            const kingRow = forwardDir === -1 ? 7 : 0;
+                            const kingRow = forwardDir === -1 ? 9 : 0;
                             return { ...p, r: pick.r, c: pick.c, isKing: p.isKing || pick.r === kingRow };
                         }
                         return p;
@@ -833,10 +888,10 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
             {/* BOARD */}
             <div className={`relative w-full max-w-[500px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} transition-colors duration-300`}>
-                <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10 overflow-hidden rounded-lg transition-all duration-700`}>
-                    {Array.from({ length: 8 }).map((_, rIdx) => Array.from({ length: 8 }).map((_, cIdx) => {
-                        const r = forwardDir === 1 ? 7 - rIdx : rIdx;
-                        const c = forwardDir === 1 ? 7 - cIdx : cIdx;
+                <div className={`w-full h-full grid grid-cols-10 grid-rows-10 border border-white/10 overflow-hidden rounded-lg transition-all duration-700`}>
+                    {Array.from({ length: 10 }).map((_, rIdx) => Array.from({ length: 10 }).map((_, cIdx) => {
+                        const r = forwardDir === 1 ? 9 - rIdx : rIdx;
+                        const c = forwardDir === 1 ? 9 - cIdx : cIdx;
                         const key = `${r},${c}`;
                         return <CheckersCell
                             key={key}

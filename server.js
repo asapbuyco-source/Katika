@@ -1976,14 +1976,14 @@ case 'Ludo':
             return {
                 ...common,
                 pieces: [
-                    ...Array.from({ length: 3 }, (_, r) =>
-                        Array.from({ length: 8 }, (_, c) =>
-                            (r + c) % 2 === 1 ? { id: `p2-${r * 8 + c}`, owner: p2, isKing: false, r, c } : null
+                    ...Array.from({ length: 4 }, (_, r) =>
+                        Array.from({ length: 10 }, (_, c) =>
+                            (r + c) % 2 === 1 ? { id: `p2-${r * 10 + c}`, owner: p2, isKing: false, r, c } : null
                         ).filter(Boolean)
                     ).flat(),
-                    ...Array.from({ length: 3 }, (_, r) =>
-                        Array.from({ length: 8 }, (_, c) =>
-                            (r + c) % 2 === 1 ? { id: `p1-${(r + 5) * 8 + c}`, owner: p1, isKing: false, r: r + 5, c } : null
+                    ...Array.from({ length: 4 }, (_, r) =>
+                        Array.from({ length: 10 }, (_, c) =>
+                            (r + c) % 2 === 1 ? { id: `p1-${(r + 6) * 10 + c}`, owner: p1, isKing: false, r: r + 6, c } : null
                         ).filter(Boolean)
                     ).flat()
                 ],
@@ -2535,30 +2535,25 @@ io.on('connection', (socket) => {
                 const { fromR, fromC, toR, toC } = action;
                 const pieces = room.gameState.pieces;
 
-                // (A) Bounds check
-                if (toR < 0 || toR > 7 || toC < 0 || toC > 7) {
+                if (toR < 0 || toR > 9 || toC < 0 || toC > 9) {
                     console.warn(`[Checkers][${roomId}] OOB move by ${userId}. Rejected.`);
                     return;
                 }
 
-                // Task 1 Fix: Enforce mustJumpFrom for multi-jump chains
                 if (room.gameState.mustJumpFrom) {
                     const [mjR, mjC] = room.gameState.mustJumpFrom.split(',').map(Number);
-                    const jumpDist = Math.abs(toR - fromR);
-                    if (fromR !== mjR || fromC !== mjC || jumpDist !== 2) {
+                    if (fromR !== mjR || fromC !== mjC) {
                         console.warn(`[Checkers][${roomId}] Must continue jump from (${mjR},${mjC}). Rejected.`);
                         return;
                     }
                 }
 
-                // (B) The piece being moved must exist and belong to userId
                 const piece = pieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
                 if (!piece) {
                     console.warn(`[Checkers][${roomId}] No owned piece at (${fromR},${fromC}) for ${userId}. Rejected.`);
                     return;
                 }
 
-                // (C) Destination must be empty
                 if (pieces.some(p => p.r === toR && p.c === toC)) {
                     console.warn(`[Checkers][${roomId}] Destination (${toR},${toC}) occupied. Rejected.`);
                     return;
@@ -2567,59 +2562,84 @@ io.on('connection', (socket) => {
                 const dR = toR - fromR;
                 const dC = toC - fromC;
                 const absDR = Math.abs(dR);
-                const absDC = Math.abs(toC - fromC);
+                const absDC = Math.abs(dC);
 
-                // (D) Must move diagonally
                 if (absDR !== absDC) {
                     console.warn(`[Checkers][${roomId}] Non-diagonal move by ${userId}. Rejected.`);
                     return;
                 }
 
-                // (E) Direction check for non-kings — applies to BOTH normal moves AND jumps (Fix M7)
-                // Server determines forward based on who is player[0] vs player[1]
                 const isPlayer1 = room.players[0] === userId;
-                const forwardDir = isPlayer1 ? -1 : 1; // player1 moves up (row decreases), player2 moves down
+                const forwardDir = isPlayer1 ? -1 : 1;
+
                 if (!piece.isKing && Math.sign(dR) !== forwardDir) {
                     console.warn(`[Checkers][${roomId}] Backward non-king move by ${userId}. Rejected.`);
                     return;
                 }
 
-                // (F) Step size: 1 (normal) or 2 (jump)
-                if (absDR !== 1 && absDR !== 2) {
-                    console.warn(`[Checkers][${roomId}] Invalid step size ${absDR} by ${userId}. Rejected.`);
-                    return;
-                }
+                let updatedPieces = pieces.map(p => ({ ...p }));
 
-                let updatedPieces = pieces.map(p => ({ ...p })); // deep-ish clone
+                if (absDR > 1) {
+                    if (piece.isKing) {
+                        const stepDr = dR === 0 ? 0 : dR / absDR;
+                        const stepDc = dC === 0 ? 0 : dC / absDC;
+                        let midR = fromR + stepDr, midC = fromC + stepDc;
+                        let foundCaptured = false;
+                        let capturedIdx = -1;
+                        let foundEnemy = false;
 
-                if (absDR === 2) {
-                    // (G) Jump: captured piece must be an opponent piece in the middle square
-                    const midR = (fromR + toR) / 2;
-                    const midC = (fromC + toC) / 2;
-                    const capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC && p.owner !== userId);
-                    if (capturedIdx === -1) {
-                        console.warn(`[Checkers][${roomId}] Jump with no enemy piece at mid (${midR},${midC}) by ${userId}. Rejected.`);
-                        return;
+                        while (midR !== toR || midC !== toC) {
+                            const midPiece = updatedPieces.find(p => p.r === midR && p.c === midC);
+                            if (midPiece) {
+                                if (midPiece.owner === userId) {
+                                    console.warn(`[Checkers][${roomId}] King path blocked by own piece at (${midR},${midC}). Rejected.`);
+                                    return;
+                                }
+                                if (!foundCaptured) {
+                                    capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC);
+                                    foundCaptured = true;
+                                } else {
+                                    console.warn(`[Checkers][${roomId}] King capture path has multiple enemies. Rejected.`);
+                                    return;
+                                }
+                                foundEnemy = true;
+                            }
+                            midR += stepDr;
+                            midC += stepDc;
+                        }
+
+                        if (!foundEnemy) {
+                            console.warn(`[Checkers][${roomId}] King jump with no enemy piece on path by ${userId}. Rejected.`);
+                            return;
+                        }
+                        updatedPieces.splice(capturedIdx, 1);
+                    } else {
+                        if (absDR !== 2) {
+                            console.warn(`[Checkers][${roomId}] Non-king long move (${absDR}) by ${userId}. Rejected.`);
+                            return;
+                        }
+                        const midR = (fromR + toR) / 2;
+                        const midC = (fromC + toC) / 2;
+                        const capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC && p.owner !== userId);
+                        if (capturedIdx === -1) {
+                            console.warn(`[Checkers][${roomId}] Jump with no enemy piece at mid (${midR},${midC}) by ${userId}. Rejected.`);
+                            return;
+                        }
+                        updatedPieces.splice(capturedIdx, 1);
                     }
-                    updatedPieces.splice(capturedIdx, 1);
                 } else {
-                    // (H) Normal move — ensure no available jump was skipped (must-jump rule)
                     const hasMandatoryJump = pieces
                         .filter(p => p.owner === userId)
                         .some(p => {
-                            const dirs = p.isKing ? [-1, 1] : [forwardDir];
-                            return dirs.some(dr =>
-                                [-1, 1].some(dc => {
-                                    const midR = p.r + dr;
-                                    const midC = p.c + dc;
-                                    const landR = p.r + dr * 2;
-                                    const landC = p.c + dc * 2;
-                                    const hasEnemy = pieces.some(e => e.owner !== userId && e.r === midR && e.c === midC);
-                                    const landFree = !pieces.some(e => e.r === landR && e.c === landC);
-                                    const inBounds = landR >= 0 && landR <= 7 && landC >= 0 && landC <= 7;
-                                    return hasEnemy && landFree && inBounds;
-                                })
-                            );
+                            const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[forwardDir,-1],[forwardDir,1]];
+                            return dirs.some(([dr, dc]) => {
+                                const midR = p.r + dr, midC = p.c + dc;
+                                const landR = p.r + dr * 2, landC = p.c + dc * 2;
+                                const hasEnemy = pieces.some(e => e.owner !== userId && e.r === midR && e.c === midC);
+                                const landFree = !pieces.some(e => e.r === landR && e.c === landC);
+                                const inBounds = landR >= 0 && landR <= 9 && landC >= 0 && landC <= 9;
+                                return hasEnemy && landFree && inBounds;
+                            });
                         });
                     if (hasMandatoryJump) {
                         console.warn(`[Checkers][${roomId}] ${userId} skipped mandatory jump. Rejected.`);
@@ -2627,36 +2647,31 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                // (I) Apply the move
                 const movedPiece = updatedPieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
                 movedPiece.r = toR;
                 movedPiece.c = toC;
 
-                // (J) King promotion
-                const promotionRow = isPlayer1 ? 0 : 7;
+                const promotionRow = isPlayer1 ? 0 : 9;
                 if (!movedPiece.isKing && toR === promotionRow) {
                     movedPiece.isKing = true;
                 }
 
-                // (K) Win detection — opponent has no pieces OR no legal moves (stalemate)
                 const opponentId = room.players.find(id => id !== userId);
                 const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
 
                 const opponentHasLegalMove = opponentPieces.some(p => {
                     const isOppPlayer1 = room.players[0] === opponentId;
                     const oppFwdDir = isOppPlayer1 ? -1 : 1;
-                    const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[oppFwdDir, -1], [oppFwdDir, 1]];
-                    const pieceMap = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
+                    const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[oppFwdDir,-1],[oppFwdDir,1]];
+                    const pieceMapOp = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
                     return dirs.some(([dr, dc]) => {
                         const mr = p.r + dr, mc = p.c + dc;
                         const jr = p.r + dr * 2, jc = p.c + dc * 2;
-                        // Check jump
-                        if (jr >= 0 && jr <= 7 && jc >= 0 && jc <= 7 && !pieceMap.has(`${jr},${jc}`)) {
-                            const mid = pieceMap.get(`${mr},${mc}`);
+                        if (jr >= 0 && jr <= 9 && jc >= 0 && jc <= 9 && !pieceMapOp.has(`${jr},${jc}`)) {
+                            const mid = pieceMapOp.get(`${mr},${mc}`);
                             if (mid && mid.owner !== opponentId) return true;
                         }
-                        // Check normal move
-                        if (mr >= 0 && mr <= 7 && mc >= 0 && mc <= 7 && !pieceMap.has(`${mr},${mc}`)) return true;
+                        if (mr >= 0 && mr <= 9 && mc >= 0 && mc <= 9 && !pieceMapOp.has(`${mr},${mc}`)) return true;
                         return false;
                     });
                 });
@@ -2668,17 +2683,16 @@ io.on('connection', (socket) => {
                     return;
                 }
 
-                // Task 1 Fix: Multi-jump continuation check
                 const movedDirs = movedPiece.isKing
                     ? [[-1,-1],[-1,1],[1,-1],[1,1]]
-                    : [[forwardDir, -1], [forwardDir, 1]];
+                    : [[forwardDir,-1],[forwardDir,1]];
                 const pieceMapAfter = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
                 let hasMoreJumps = false;
-                if (absDR === 2) {
+                if (absDR > 1 || piece.isKing) {
                     hasMoreJumps = movedDirs.some(([dr, dc]) => {
                         const mr2 = toR + dr, mc2 = toC + dc;
                         const jr2 = toR + dr * 2, jc2 = toC + dc * 2;
-                        if (jr2 < 0 || jr2 > 7 || jc2 < 0 || jc2 > 7) return false;
+                        if (jr2 < 0 || jr2 > 9 || jc2 < 0 || jc2 > 9) return false;
                         if (pieceMapAfter.has(`${jr2},${jc2}`)) return false;
                         const mid2 = pieceMapAfter.get(`${mr2},${mc2}`);
                         return mid2 && mid2.owner !== userId;
@@ -2689,7 +2703,7 @@ io.on('connection', (socket) => {
                 room.gameState.mustJumpFrom = hasMoreJumps ? `${toR},${toC}` : null;
                 room.turn = hasMoreJumps ? userId : opponentId;
                 io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
-                return; // handled — do NOT fall through to generic newState branch
+                return;
             }
             // =====================================================================
             // End Checkers validation

@@ -20,13 +20,13 @@ export interface LidraughtsGame {
 }
 
 export const toCoords = (square: number) => {
-    const row = Math.floor((square - 1) / 4);
-    const col = ((square - 1) % 4) * 2 + ((row % 2 === 0) ? 1 : 0);
+    const row = Math.floor((square - 1) / 5);
+    const col = ((square - 1) % 5) * 2 + (row % 2 === 0 ? 1 : 0);
     return { r: row, c: col };
 };
 
 export const toNotation = (r: number, c: number) => {
-    return (r * 4) + Math.floor(c / 2) + 1;
+    return (r % 2 === 0 ? r * 5 + Math.floor(c / 2) : r * 5 + Math.floor((c - 1) / 2)) + 1;
 };
 
 export const createLidraughtsGame = async (level: number = 1, retries = 2): Promise<LidraughtsGame | null> => {
@@ -40,7 +40,7 @@ export const createLidraughtsGame = async (level: number = 1, retries = 2): Prom
             const formData = new FormData();
             formData.append('level', level.toString());
             formData.append('color', 'white');
-            formData.append('variant', 'english');
+            formData.append('variant', 'standard');
 
             const response = await fetch(`${BASE_URL}/challenge/ai`, {
                 method: 'POST',
