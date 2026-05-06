@@ -37,7 +37,7 @@ export {
     getTournamentMatches, createTournament, deleteTournament,
     updateTournamentStatus, startTournament, setTournamentMatchActive,
     setTournamentMatchCheckedIn, reportTournamentMatchResult, registerForTournament,
-    fetchServerTimeOffset, getServerTime
+    fetchServerTimeOffset, getServerTime, normalizeTimestamp
 } from './firebase/tournaments';
 
 export {

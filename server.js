@@ -2429,7 +2429,6 @@ io.on('connection', (socket) => {
                                     date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
                                     note: `Rematch stake for ${room.gameType}`
                                 });
-                            });
                             }
                         });
                     } catch (e) {
@@ -2532,119 +2531,129 @@ io.on('connection', (socket) => {
             // Server validates ownership, bounds, diagonal, jump, king promo, win.
             // =====================================================================
             if (room.gameType === 'Checkers' && action.fromR !== undefined) {
+                // Server-side Checkers engine helper
+                const getGlobalValidMovesCheckers = (playerUserId, currentPieces, forwardDir, specificId = null) => {
+                    const myPieces = currentPieces.filter(p => p.owner === playerUserId);
+                    const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
+                    const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
+
+                    const isValidPos = (r, c) => r >= 0 && r < 10 && c >= 0 && c < 10;
+
+                    const getJumpSequences = (startPiece, visitedIds) => {
+                        const sequences = [];
+                        const isKing = startPiece.isKing;
+                        const dirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+                        for (const [dr, dc] of dirs) {
+                            let step = 1;
+                            let foundEnemy = null;
+                            
+                            while (true) {
+                                const mr = startPiece.r + dr * step;
+                                const mc = startPiece.c + dc * step;
+                                if (!isValidPos(mr, mc)) break;
+                                
+                                const mid = pieceMap.get(`${mr},${mc}`);
+                                if (mid) {
+                                    if (mid.owner === playerUserId) break;
+                                    if (foundEnemy) break;
+                                    if (visitedIds.has(mid.id)) break;
+                                    foundEnemy = mid;
+                                } else if (foundEnemy) {
+                                    const jumpMove = {
+                                        fromR: startPiece.r, fromC: startPiece.c,
+                                        r: mr, c: mc, isJump: true, jumpId: foundEnemy.id
+                                    };
+                                    
+                                    const newVisited = new Set(visitedIds);
+                                    newVisited.add(foundEnemy.id);
+                                    
+                                    const tempPiece = { ...startPiece, r: mr, c: mc };
+                                    const nextSequences = getJumpSequences(tempPiece, newVisited);
+                                    
+                                    if (nextSequences.length === 0) {
+                                        sequences.push([jumpMove]);
+                                    } else {
+                                        for (const seq of nextSequences) {
+                                            sequences.push([jumpMove, ...seq]);
+                                        }
+                                    }
+                                }
+                                
+                                if (!isKing && step >= 2) break;
+                                step++;
+                            }
+                        }
+                        return sequences;
+                    };
+
+                    let allSequences = [];
+                    toCheck.forEach(p => {
+                        allSequences.push(...getJumpSequences(p, new Set()));
+                    });
+
+                    if (allSequences.length > 0) {
+                        const maxCaptures = Math.max(...allSequences.map(seq => seq.length));
+                        const bestSequences = allSequences.filter(seq => seq.length === maxCaptures);
+                        
+                        const uniqueFirstMoves = new Map();
+                        bestSequences.forEach(seq => {
+                            const firstMove = seq[0];
+                            const key = `${firstMove.fromR},${firstMove.fromC}-${firstMove.r},${firstMove.c}`;
+                            if (!uniqueFirstMoves.has(key)) {
+                                uniqueFirstMoves.set(key, firstMove);
+                            }
+                        });
+                        
+                        return { moves: Array.from(uniqueFirstMoves.values()), hasJump: true };
+                    }
+
+                    let allMoves = [];
+                    toCheck.forEach(p => {
+                        const moveDir = forwardDir;
+                        const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[moveDir, -1], [moveDir, 1]];
+
+                        for (const [dr, dc] of dirs) {
+                            let step = 1;
+                            while (true) {
+                                const tr = p.r + dr * step;
+                                const tc = p.c + dc * step;
+                                if (!isValidPos(tr, tc)) break;
+                                if (pieceMap.has(`${tr},${tc}`)) break;
+                                
+                                allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
+                                
+                                if (!p.isKing) break;
+                                step++;
+                            }
+                        }
+                    });
+
+                    return { moves: allMoves, hasJump: false };
+                };
+
                 const { fromR, fromC, toR, toC } = action;
                 const pieces = room.gameState.pieces;
-
-                if (toR < 0 || toR > 9 || toC < 0 || toC > 9) {
-                    console.warn(`[Checkers][${roomId}] OOB move by ${userId}. Rejected.`);
-                    return;
-                }
-
-                if (room.gameState.mustJumpFrom) {
-                    const [mjR, mjC] = room.gameState.mustJumpFrom.split(',').map(Number);
-                    if (fromR !== mjR || fromC !== mjC) {
-                        console.warn(`[Checkers][${roomId}] Must continue jump from (${mjR},${mjC}). Rejected.`);
-                        return;
-                    }
-                }
-
-                const piece = pieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
-                if (!piece) {
-                    console.warn(`[Checkers][${roomId}] No owned piece at (${fromR},${fromC}) for ${userId}. Rejected.`);
-                    return;
-                }
-
-                if (pieces.some(p => p.r === toR && p.c === toC)) {
-                    console.warn(`[Checkers][${roomId}] Destination (${toR},${toC}) occupied. Rejected.`);
-                    return;
-                }
-
-                const dR = toR - fromR;
-                const dC = toC - fromC;
-                const absDR = Math.abs(dR);
-                const absDC = Math.abs(dC);
-
-                if (absDR !== absDC) {
-                    console.warn(`[Checkers][${roomId}] Non-diagonal move by ${userId}. Rejected.`);
-                    return;
-                }
-
                 const isPlayer1 = room.players[0] === userId;
                 const forwardDir = isPlayer1 ? -1 : 1;
-
-                if (!piece.isKing && Math.sign(dR) !== forwardDir) {
-                    console.warn(`[Checkers][${roomId}] Backward non-king move by ${userId}. Rejected.`);
+                
+                // 1. Get valid moves using authoritative server engine
+                const { moves, hasJump } = getGlobalValidMovesCheckers(userId, pieces, forwardDir, room.gameState.mustJumpFrom);
+                
+                // 2. Find if proposed move matches a valid move
+                const validMove = moves.find(m => m.fromR === fromR && m.fromC === fromC && m.r === toR && m.c === toC);
+                
+                if (!validMove) {
+                    console.warn(`[Checkers][${roomId}] Invalid move by ${userId}. Rejected.`);
                     return;
                 }
 
+                // 3. Apply the move
                 let updatedPieces = pieces.map(p => ({ ...p }));
-
-                if (absDR > 1) {
-                    if (piece.isKing) {
-                        const stepDr = dR === 0 ? 0 : dR / absDR;
-                        const stepDc = dC === 0 ? 0 : dC / absDC;
-                        let midR = fromR + stepDr, midC = fromC + stepDc;
-                        let foundCaptured = false;
-                        let capturedIdx = -1;
-                        let foundEnemy = false;
-
-                        while (midR !== toR || midC !== toC) {
-                            const midPiece = updatedPieces.find(p => p.r === midR && p.c === midC);
-                            if (midPiece) {
-                                if (midPiece.owner === userId) {
-                                    console.warn(`[Checkers][${roomId}] King path blocked by own piece at (${midR},${midC}). Rejected.`);
-                                    return;
-                                }
-                                if (!foundCaptured) {
-                                    capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC);
-                                    foundCaptured = true;
-                                } else {
-                                    console.warn(`[Checkers][${roomId}] King capture path has multiple enemies. Rejected.`);
-                                    return;
-                                }
-                                foundEnemy = true;
-                            }
-                            midR += stepDr;
-                            midC += stepDc;
-                        }
-
-                        if (!foundEnemy) {
-                            console.warn(`[Checkers][${roomId}] King jump with no enemy piece on path by ${userId}. Rejected.`);
-                            return;
-                        }
-                        updatedPieces.splice(capturedIdx, 1);
-                    } else {
-                        if (absDR !== 2) {
-                            console.warn(`[Checkers][${roomId}] Non-king long move (${absDR}) by ${userId}. Rejected.`);
-                            return;
-                        }
-                        const midR = (fromR + toR) / 2;
-                        const midC = (fromC + toC) / 2;
-                        const capturedIdx = updatedPieces.findIndex(p => p.r === midR && p.c === midC && p.owner !== userId);
-                        if (capturedIdx === -1) {
-                            console.warn(`[Checkers][${roomId}] Jump with no enemy piece at mid (${midR},${midC}) by ${userId}. Rejected.`);
-                            return;
-                        }
-                        updatedPieces.splice(capturedIdx, 1);
-                    }
-                } else {
-                    const hasMandatoryJump = pieces
-                        .filter(p => p.owner === userId)
-                        .some(p => {
-                            const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[forwardDir,-1],[forwardDir,1]];
-                            return dirs.some(([dr, dc]) => {
-                                const midR = p.r + dr, midC = p.c + dc;
-                                const landR = p.r + dr * 2, landC = p.c + dc * 2;
-                                const hasEnemy = pieces.some(e => e.owner !== userId && e.r === midR && e.c === midC);
-                                const landFree = !pieces.some(e => e.r === landR && e.c === landC);
-                                const inBounds = landR >= 0 && landR <= 9 && landC >= 0 && landC <= 9;
-                                return hasEnemy && landFree && inBounds;
-                            });
-                        });
-                    if (hasMandatoryJump) {
-                        console.warn(`[Checkers][${roomId}] ${userId} skipped mandatory jump. Rejected.`);
-                        return;
-                    }
+                
+                if (validMove.isJump) {
+                    const capturedIdx = updatedPieces.findIndex(p => p.id === validMove.jumpId);
+                    if (capturedIdx !== -1) updatedPieces.splice(capturedIdx, 1);
                 }
 
                 const movedPiece = updatedPieces.find(p => p.r === fromR && p.c === fromC && p.owner === userId);
@@ -2656,51 +2665,31 @@ io.on('connection', (socket) => {
                     movedPiece.isKing = true;
                 }
 
+                // 4. Check for continuation jumps or game over
                 const opponentId = room.players.find(id => id !== userId);
-                const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
-
-                const opponentHasLegalMove = opponentPieces.some(p => {
-                    const isOppPlayer1 = room.players[0] === opponentId;
-                    const oppFwdDir = isOppPlayer1 ? -1 : 1;
-                    const dirs = p.isKing ? [[-1,-1],[-1,1],[1,-1],[1,1]] : [[oppFwdDir,-1],[oppFwdDir,1]];
-                    const pieceMapOp = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
-                    return dirs.some(([dr, dc]) => {
-                        const mr = p.r + dr, mc = p.c + dc;
-                        const jr = p.r + dr * 2, jc = p.c + dc * 2;
-                        if (jr >= 0 && jr <= 9 && jc >= 0 && jc <= 9 && !pieceMapOp.has(`${jr},${jc}`)) {
-                            const mid = pieceMapOp.get(`${mr},${mc}`);
-                            if (mid && mid.owner !== opponentId) return true;
-                        }
-                        if (mr >= 0 && mr <= 9 && mc >= 0 && mc <= 9 && !pieceMapOp.has(`${mr},${mc}`)) return true;
-                        return false;
-                    });
-                });
-
-                if (opponentPieces.length === 0 || !opponentHasLegalMove) {
-                    room.gameState.pieces = updatedPieces;
-                    const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
-                    endGame(roomId, userId, reason);
-                    return;
+                
+                let hasMoreJumps = false;
+                if (validMove.isJump) {
+                    const { hasJump: canContinue } = getGlobalValidMovesCheckers(userId, updatedPieces, forwardDir, movedPiece.id);
+                    hasMoreJumps = canContinue;
                 }
 
-                const movedDirs = movedPiece.isKing
-                    ? [[-1,-1],[-1,1],[1,-1],[1,1]]
-                    : [[forwardDir,-1],[forwardDir,1]];
-                const pieceMapAfter = new Map(updatedPieces.map(x => [`${x.r},${x.c}`, x]));
-                let hasMoreJumps = false;
-                if (absDR > 1 || piece.isKing) {
-                    hasMoreJumps = movedDirs.some(([dr, dc]) => {
-                        const mr2 = toR + dr, mc2 = toC + dc;
-                        const jr2 = toR + dr * 2, jc2 = toC + dc * 2;
-                        if (jr2 < 0 || jr2 > 9 || jc2 < 0 || jc2 > 9) return false;
-                        if (pieceMapAfter.has(`${jr2},${jc2}`)) return false;
-                        const mid2 = pieceMapAfter.get(`${mr2},${mc2}`);
-                        return mid2 && mid2.owner !== userId;
-                    });
+                if (!hasMoreJumps) {
+                    // Check if opponent has any legal moves left
+                    const oppForwardDir = isPlayer1 ? 1 : -1;
+                    const { moves: oppMoves } = getGlobalValidMovesCheckers(opponentId, updatedPieces, oppForwardDir, null);
+                    
+                    if (oppMoves.length === 0) {
+                        const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
+                        room.gameState.pieces = updatedPieces;
+                        const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
+                        endGame(roomId, userId, reason);
+                        return;
+                    }
                 }
 
                 room.gameState.pieces = updatedPieces;
-                room.gameState.mustJumpFrom = hasMoreJumps ? `${toR},${toC}` : null;
+                room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
                 room.turn = hasMoreJumps ? userId : opponentId;
                 io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                 return;

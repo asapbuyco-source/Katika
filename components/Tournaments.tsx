@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Trophy, Calendar, Users, ChevronRight, Lock, Play, Crown, Info, RefreshCw, AlertTriangle, Clock, CheckCircle2, X, Wallet, Shield, Star, Coins, TrendingUp, Bell, Loader2 } from 'lucide-react';
 import { User, Tournament, TournamentMatch } from '../types';
-import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn, fetchServerTimeOffset, getServerTime } from '../services/firebase';
+import { getTournaments, registerForTournament, subscribeToUser, subscribeToTournament, subscribeToTournamentMatches, setTournamentMatchCheckedIn, fetchServerTimeOffset, getServerTime, normalizeTimestamp } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { useLanguage } from '../services/i18n';
 import { useToast } from '../services/toast';
@@ -246,8 +246,8 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
 
         useEffect(() => {
             const tick = () => {
-                const diff = new Date(startTime).getTime() - getServerTime();
-                if (diff <= 0) {
+                const diff = normalizeTimestamp(startTime).getTime() - getServerTime();
+                if (isNaN(diff) || diff <= 0) {
                     setParts({ d: 0, h: 0, m: 0, s: 0, past: true });
                 } else {
                     const d = Math.floor(diff / 86400000);
@@ -321,10 +321,16 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
         const [urgent, setUrgent] = useState(false);
 
         useEffect(() => {
-            const timer = setInterval(() => {
-                const start = new Date(startTime).getTime();
+            const tick = () => {
+                const start = normalizeTimestamp(startTime).getTime();
                 const now = getServerTime();
                 const diff = start - now;
+
+                if (isNaN(diff)) {
+                    setTimeLeft('—');
+                    setUrgent(false);
+                    return;
+                }
 
                 if (diff > 0) {
                     // Countdown to start
@@ -334,11 +340,14 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                     setUrgent(false);
                 } else if (status === 'active') {
                     // Match is live — show elapsed vs forfeit window
-                    const elapsed = Math.floor(-diff / 60000);
-                    const remaining = 5 - elapsed;
-                    if (remaining > 0) {
-                        setTimeLeft(`LIVE — ${remaining}m to join`);
-                        setUrgent(remaining <= 2);
+                    const elapsed = Math.abs(diff);
+                    const forfeitWindowMs = 5 * 60 * 1000; // 5 minutes
+                    const remainingMs = forfeitWindowMs - elapsed;
+                    if (remainingMs > 0) {
+                        const rm = Math.floor(remainingMs / 60000);
+                        const rs = Math.floor((remainingMs % 60000) / 1000);
+                        setTimeLeft(`LIVE — ${rm}:${rs.toString().padStart(2, '0')} to join`);
+                        setUrgent(remainingMs <= 2 * 60 * 1000);
                     } else {
                         setTimeLeft('FORFEITING SOON...');
                         setUrgent(true);
@@ -351,7 +360,11 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                     setTimeLeft('—');
                     setUrgent(false);
                 }
-            }, 1000);
+            };
+            // BUG 2 FIX: call tick immediately so initial value is rendered before
+            // the first interval fires (prevents blank display for first second).
+            tick();
+            const timer = setInterval(tick, 1000);
             return () => clearInterval(timer);
         }, [startTime, status]);
 
@@ -454,7 +467,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                     <div className="flex gap-3">
                                         <Clock className="text-blue-400 shrink-0" size={16} />
                                         <p className="text-slate-400 leading-snug">
-                                            Start Time: <span className="text-white font-bold">{new Date(regTarget.startTime).toLocaleString()}</span>.
+                                            Start Time: <span className="text-white font-bold">{normalizeTimestamp(regTarget.startTime).toLocaleString()}</span>.
                                             <br />Be online 5 minutes early.
                                         </p>
                                     </div>
@@ -551,7 +564,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                     <div className="flex items-center gap-2 mb-6">
                                         <span className="text-[10px] px-2 py-0.5 bg-white/10 rounded text-slate-300 font-mono">{tourn.participants.length}/{tourn.maxPlayers} Players</span>
                                         <span className="text-slate-500 text-[10px]">|</span>
-                                        <span className="text-slate-400 text-[10px] font-mono">{new Date(tourn.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                        <span className="text-slate-400 text-[10px] font-mono">{normalizeTimestamp(tourn.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                     </div>
 
                                     <div className="space-y-3 relative z-10 bg-black/20 p-3 rounded-xl border border-white/5">
@@ -624,7 +637,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         status={selectedTournament.status}
                                     />
                                     <span className="text-xs text-slate-500">
-                                        {new Date(selectedTournament.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                        {normalizeTimestamp(selectedTournament.startTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                                     </span>
                                 </div>
                             </div>
@@ -810,7 +823,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         <Calendar size={16} className="text-gold-400" /> Match Schedule
                                     </div>
                                     <div>
-                                        Matches begin strictly at <span className="text-white font-bold">{new Date(selectedTournament.startTime).toLocaleString() || "TBD"}</span>.
+                                        Matches begin strictly at <span className="text-white font-bold">{normalizeTimestamp(selectedTournament.startTime).toLocaleString() || "TBD"}</span>.
                                         Please be online 5 minutes before.
                                     </div>
                                 </li>
@@ -854,7 +867,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                 </div>
                             ) : matches.length === 0 ? (
                                 <div className="text-center text-slate-500 mt-20 flex flex-col items-center gap-4">
-                                    {new Date(selectedTournament.startTime).getTime() < getServerTime() ? (
+                                    {normalizeTimestamp(selectedTournament.startTime).getTime() < getServerTime() ? (
                                         <>
                                             <Loader2 className="animate-spin text-gold-500" size={40} />
                                             <span>Please wait. The server is configuring your opponents...</span>

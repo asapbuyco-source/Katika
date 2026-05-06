@@ -13,6 +13,9 @@ export const useGameController = () => {
 
     const { user, activeTable, incomingChallenge } = state;
     const isTransitioningRef = useRef(false);
+    // BUG 3 FIX: Persist tournamentMatchId across state resets so finalizeGameEnd
+    // can still navigate to the tournament bracket even after SET_ACTIVE_TABLE: null.
+    const activeTournamentMatchIdRef = useRef<string | null>(null);
 
     // ── Table helper ───────────────────────────────────────────────────────────
     const constructTableFromSocket = useCallback((game: SocketGameState): Table => {
@@ -88,7 +91,12 @@ export const useGameController = () => {
 
     const handleMatchFound = useCallback((table: Table) => {
         dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
-        if (table.tournamentMatchId) setTournamentMatchActive(table.tournamentMatchId);
+        if (table.tournamentMatchId) {
+            setTournamentMatchActive(table.tournamentMatchId);
+            // BUG 3 FIX: store tournamentMatchId in a stable ref so it survives
+            // SET_ACTIVE_TABLE: null dispatched inside handleGameEnd.
+            activeTournamentMatchIdRef.current = table.tournamentMatchId;
+        }
         dispatch({ type: 'SET_VIEW', payload: 'game' });
     }, [dispatch]);
 
@@ -103,6 +111,8 @@ export const useGameController = () => {
 
         if (tournamentMatchId) {
             localStorage.setItem('vantage_active_tournament_match', tournamentMatchId);
+            // BUG 3 FIX: persist in ref before we null activeGameTable
+            activeTournamentMatchIdRef.current = tournamentMatchId;
             if (user) {
                 try {
                     const parts = tournamentMatchId.split('-');
@@ -127,7 +137,10 @@ export const useGameController = () => {
         if (socket && socketGame) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
-        const tournamentMatchId = activeGameTable?.tournamentMatchId;
+
+        // BUG 3 FIX: use the stable ref — activeGameTable may already be null
+        // because handleGameEnd dispatches SET_ACTIVE_TABLE: null before this is called.
+        const tournamentMatchId = activeTournamentMatchIdRef.current;
         const isTournament = !!tournamentMatchId;
 
         let pendingTournamentId: string | null = null;
@@ -151,6 +164,8 @@ export const useGameController = () => {
 
         dispatch({ type: 'SET_GAME_RESULT', payload: null });
         localStorage.removeItem('vantage_active_tournament_match');
+        // Clear the ref after navigation decision is made
+        activeTournamentMatchIdRef.current = null;
 
         setTimeout(() => {
             isTransitioningRef.current = false;

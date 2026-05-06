@@ -395,97 +395,105 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
     const isValidPos = (r: number, c: number) => r >= 0 && r < 10 && c >= 0 && c < 10;
 
-    // Task 11 Fix: Memoize getGlobalValidMoves
+    // Task 11 Fix: Memoize getGlobalValidMoves and implement International Draughts Rules
     const getGlobalValidMoves = useCallback((player: 'me' | 'opponent', currentPieces: Piece[], specificId?: string | null) => {
         const dir = stateRef.current.forwardDir;
         const myPieces = currentPieces.filter(p => p.player === player);
         const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
         const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
 
-        const getJumpPaths = (startPiece: Piece, visited: Set<string>, captured: number): Move[] => {
-            const paths: Move[] = [];
+        // Recursive function to find all jump sequences and their capture depths
+        const getJumpSequences = (startPiece: Piece, visitedIds: Set<string>): Move[][] => {
+            const sequences: Move[][] = [];
             const isKing = startPiece.isKing;
-            const moveDir = startPiece.player === 'me' ? dir : -dir;
-
-            const dirs = isKing
-                ? [[-1, -1], [-1, 1], [1, -1], [1, 1]]
-                : [[moveDir, -1], [moveDir, 1]];
+            const dirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]]; // Jumps always in all 4 dirs
 
             for (const [dr, dc] of dirs) {
-                const mr = startPiece.r + dr, mc = startPiece.c + dc;
-                const jr = startPiece.r + dr * 2, jc = startPiece.c + dc * 2;
-
-                if (!isValidPos(jr, jc)) continue;
-                if (pieceMap.has(`${jr},${jc}`)) continue;
-
-                const mid = pieceMap.get(`${mr},${mc}`);
-                if (!mid || mid.player === player) continue;
-
-                const key = `${jr},${jc}`;
-                if (visited.has(key)) continue;
-
-                const newVisited = new Set(visited);
-                newVisited.add(key);
-
-                const capturedPieceId = mid.id;
-                const endPosKey = `${jr},${jc}`;
-
-                paths.push({
-                    fromR: startPiece.r,
-                    fromC: startPiece.c,
-                    r: jr,
-                    c: jc,
-                    isJump: true,
-                    jumpId: capturedPieceId,
-                });
-
-                const tempPiece: Piece = { ...startPiece, r: jr, c: jc };
-                const nextJumps = getJumpPaths(tempPiece, newVisited, captured + 1);
-                for (const nextJump of nextJumps) {
-                    paths.push({
-                        fromR: startPiece.r,
-                        fromC: startPiece.c,
-                        r: nextJump.r,
-                        c: nextJump.c,
-                        isJump: true,
-                        jumpId: capturedPieceId,
-                    });
+                let step = 1;
+                let foundEnemy: Piece | null = null;
+                
+                while (true) {
+                    const mr = startPiece.r + dr * step;
+                    const mc = startPiece.c + dc * step;
+                    if (!isValidPos(mr, mc)) break;
+                    
+                    const mid = pieceMap.get(`${mr},${mc}`);
+                    if (mid) {
+                        if (mid.player === player) break; // Blocked by own piece
+                        if (foundEnemy) break; // Two enemies in a row, invalid
+                        if (visitedIds.has(mid.id)) break; // Cannot jump same piece twice, acts as block
+                        foundEnemy = mid;
+                    } else if (foundEnemy) {
+                        // Empty square after an enemy. Valid landing spot!
+                        const jumpMove: Move = {
+                            fromR: startPiece.r, fromC: startPiece.c,
+                            r: mr, c: mc,
+                            isJump: true, jumpId: foundEnemy.id
+                        };
+                        
+                        const newVisited = new Set(visitedIds);
+                        newVisited.add(foundEnemy.id);
+                        
+                        const tempPiece: Piece = { ...startPiece, r: mr, c: mc };
+                        const nextSequences = getJumpSequences(tempPiece, newVisited);
+                        
+                        if (nextSequences.length === 0) {
+                            sequences.push([jumpMove]);
+                        } else {
+                            for (const seq of nextSequences) {
+                                sequences.push([jumpMove, ...seq]);
+                            }
+                        }
+                    }
+                    
+                    if (!isKing && step >= 2) break; // Men can only check step=1 (enemy) and step=2 (land)
+                    step++;
                 }
             }
-
-            return paths;
+            return sequences;
         };
 
-        let allJumpMoves: Move[] = [];
+        let allSequences: Move[][] = [];
         toCheck.forEach(p => {
-            const jumps = getJumpPaths(p, new Set(), 0);
-            allJumpMoves.push(...jumps);
+            allSequences.push(...getJumpSequences(p, new Set()));
         });
 
-        if (allJumpMoves.length > 0) {
-            const maxCaptures = Math.max(...allJumpMoves.filter(m => m.isJump).map(() => 1));
-            const bestJumps = allJumpMoves.filter(m => {
-                let count = 0;
-                let r = m.fromR, c = m.fromC;
-                allJumpMoves.forEach(jm => {
-                    if (jm.fromR === r && jm.fromC === c && jm.r === m.r && jm.c === m.c) count++;
-                });
-                return count >= maxCaptures;
+        if (allSequences.length > 0) {
+            const maxCaptures = Math.max(...allSequences.map(seq => seq.length));
+            const bestSequences = allSequences.filter(seq => seq.length === maxCaptures);
+            
+            const uniqueFirstMoves = new Map<string, Move>();
+            bestSequences.forEach(seq => {
+                const firstMove = seq[0];
+                const key = `${firstMove.fromR},${firstMove.fromC}-${firstMove.r},${firstMove.c}`;
+                if (!uniqueFirstMoves.has(key)) {
+                    uniqueFirstMoves.set(key, firstMove);
+                }
             });
-            return { moves: bestJumps, hasJump: true };
+            
+            return { moves: Array.from(uniqueFirstMoves.values()), hasJump: true };
         }
 
+        // Normal moves
         let allMoves: Move[] = [];
         toCheck.forEach(p => {
             const moveDir = p.player === 'me' ? dir : -dir;
             const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[moveDir, -1], [moveDir, 1]];
 
-            dirs.forEach(([dr, dc]) => {
-                const tr = p.r + dr, tc = p.c + dc;
-                if (isValidPos(tr, tc) && !pieceMap.has(`${tr},${tc}`)) {
+            for (const [dr, dc] of dirs) {
+                let step = 1;
+                while (true) {
+                    const tr = p.r + dr * step;
+                    const tc = p.c + dc * step;
+                    if (!isValidPos(tr, tc)) break;
+                    if (pieceMap.has(`${tr},${tc}`)) break; // Blocked
+                    
                     allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
+                    
+                    if (!p.isKing) break; // Men only move 1 square
+                    step++;
                 }
-            });
+            }
         });
 
         return { moves: allMoves, hasJump: false };

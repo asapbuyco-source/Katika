@@ -10,6 +10,25 @@ import { Tournament, TournamentMatch } from '../../types';
 import { getApiUrl } from './init';
 import { auth } from './init';
 
+/**
+ * Normalizes a Firestore Timestamp object OR an ISO date string to a JS Date.
+ * Firestore SDK may return `{ seconds: number, nanoseconds: number }` instead
+ * of a plain string when data is read from Firestore snapshots — calling
+ * `new Date(timestampObject)` on those produces "Invalid Date" (NaN).
+ */
+export const normalizeTimestamp = (val: any): Date => {
+    if (!val) return new Date(NaN);
+    // Firestore Timestamp object (has toDate method or seconds field)
+    if (typeof val === 'object' && typeof val.toDate === 'function') {
+        return val.toDate();
+    }
+    if (typeof val === 'object' && typeof val.seconds === 'number') {
+        return new Date(val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1e6));
+    }
+    // Plain string or number
+    return new Date(val);
+};
+
 let _serverTimeOffset = 0;
 
 export const fetchServerTimeOffset = async () => {

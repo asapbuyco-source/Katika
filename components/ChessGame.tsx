@@ -229,7 +229,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     useEffect(() => { window.scrollTo(0, 0); }, []);
     const [game, setGame] = useState(new Chess());
     const [viewIndex, setViewIndex] = useState<number>(-1);
-    const [myColor, setMyColor] = useState<'w' | 'b'>('w');
+    // BUG 5a FIX: initialize to null until server confirms our color.
+    // Prevents the wrong player's clock from ticking before color is known.
+    const [myColor, setMyColor] = useState<'w' | 'b' | null>(null);
     const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
     const [optionSquares, setOptionSquares] = useState<Record<string, { background: string; borderRadius?: string }>>({});
     const [showForfeitModal, setShowForfeitModal] = useState(false);
@@ -240,9 +242,44 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const [pendingPromotion, setPendingPromotion] = useState<{ from: Square, to: Square } | null>(null);
     const [showMovesPanel, setShowMovesPanel] = useState(false);
     const [draggedSquare, setDraggedSquare] = useState<Square | null>(null);
+    // BUG 4 FIX: Track whether all 12 piece SVGs have been preloaded from CDN.
+    const [boardReady, setBoardReady] = useState(false);
 
     const isP2P = !!socket && !!socketGame;
+    // BUG 5a FIX: For bot games, we are always White. Resolve immediately so the
+    // board doesn't need to wait for a socketGame event.
     const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest);
+
+    // BUG 4 FIX: Preload all 12 piece SVGs before showing the board.
+    // Once all images have loaded (or after 2s timeout), set boardReady = true.
+    useEffect(() => {
+        if (isBotGame && myColor === null) setMyColor('w');
+
+        const pieces = ['P', 'N', 'B', 'R', 'Q', 'K'];
+        const colors = ['w', 'b'];
+        const srcs = colors.flatMap(c => pieces.map(p =>
+            `https://lichess1.org/assets/piece/cburnett/${c}${p}.svg`
+        ));
+        let settled = false;
+        const settle = () => {
+            if (settled) return;
+            settled = true;
+            setBoardReady(true);
+        };
+        // Timeout fallback: don't block the board forever on slow connections
+        const timeout = setTimeout(settle, 2500);
+        let loaded = 0;
+        srcs.forEach(src => {
+            const img = new Image();
+            img.onload = img.onerror = () => {
+                loaded++;
+                if (loaded === srcs.length) settle();
+            };
+            img.src = src;
+        });
+        return () => clearTimeout(timeout);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // BUG 3 FIX: Read time control from table (tournament can specify custom limits)
     // Fallback: 10 min base, +3s increment (standard rapid)
@@ -336,11 +373,19 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             if (wasLatest || viewIndex === -1) setViewIndex(newGame.history().length - 1);
             checkGameOver(newGame);
 
+            // BUG 5b/5c FIX: Map timer values by USER ID (not player index / color).
+            // The server stores timers as { [userId]: seconds }, so we read them
+            // directly by user ID to avoid the color-inversion when players[0]
+            // is not guaranteed to be White.
             if (socketGame.gameState && socketGame.gameState.timers && socketGame.players) {
+                const myId = user.id;
+                const oppId = socketGame.players.find((id: string) => id !== user.id) || '';
+                const derivedMyColor = socketGame.players[0] === user.id ? 'w' : 'b';
+                const derivedOppColor = derivedMyColor === 'w' ? 'b' : 'w';
                 setTimeRemaining({
-                    w: socketGame.gameState.timers[socketGame.players[0]] || 600,
-                    b: socketGame.gameState.timers[socketGame.players[1]] || 600
-                });
+                    [derivedMyColor]: socketGame.gameState.timers[myId] ?? baseTime,
+                    [derivedOppColor]: socketGame.gameState.timers[oppId] ?? baseTime,
+                } as { w: number; b: number });
             }
 
             // Bug B fix: condition was inverted — in P2P games (!isP2P === false)
@@ -374,7 +419,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     }, [isP2P, socket, user.id, onGameEnd]);
 
     useEffect(() => {
-        if (isGameOver || viewIndex !== -1) return;
+        // BUG 5a FIX: Don't run the timer until myColor is resolved.
+        if (isGameOver || viewIndex !== -1 || myColor === null) return;
         
         const interval = setInterval(() => {
             if (stateRef.current.opponentDisconnected) return;
@@ -382,6 +428,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 const liveGame = stateRef.current.game;
                 const turnColor = liveGame.turn();
                 const liveMyColor = stateRef.current.myColor;
+                if (liveMyColor === null) return prev;
                 
                 if (turnColor === liveMyColor) {
                     if (prev[liveMyColor] <= 1) {
@@ -407,7 +454,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         }, 1000);
         
         return () => clearInterval(interval);
-    }, [isGameOver, viewIndex]); // minimal deps - rely on ref for everything else
+    }, [isGameOver, viewIndex, myColor]); // added myColor dep — timer must not start until color is resolved
 
     const checkGameOver = useCallback((currentGamState: Chess) => {
         // Bug A fix: read from stateRef so this callback never captures a stale
@@ -491,7 +538,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
     // Local Bot AI Logic
     useEffect(() => {
-        if (isBotGame && !isGameOver && game.turn() !== myColor) {
+        // BUG 5a FIX: don't trigger bot until myColor is resolved
+        if (isBotGame && !isGameOver && myColor !== null && game.turn() !== myColor) {
             const timer = setTimeout(() => {
                 const difficulty = socketGame?.gameState?.difficulty || 'medium';
                 const move = getBestMove(game, difficulty);
@@ -612,9 +660,40 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         onGameEnd('quit');
     };
 
-    const opponentColor = myColor === 'w' ? 'b' : 'w';
+    const opponentColor = myColor === 'w' ? 'b' : myColor === 'b' ? 'w' : 'b';
     const opponent = !isP2P ? { name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" }
         : (socketGame?.profiles ? socketGame.profiles[socketGame.players.find((id: string) => id !== user.id)] : { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" });
+
+    // BUG 4 FIX: Show a skeleton board while piece SVGs are loading.
+    // This prevents the blank/empty board flash on first render.
+    if (!boardReady || myColor === null) {
+        return (
+            <div className="h-[100dvh] overflow-y-auto bg-royal-950 flex flex-col items-center justify-center p-4">
+                <div className="w-full max-w-[600px] aspect-square bg-[#302e2b] rounded-xl shadow-2xl p-1 md:p-2 border-4 border-[#302e2b] relative overflow-hidden">
+                    {/* Skeleton board — proper chess colours, no pieces */}
+                    <div className="w-full h-full grid grid-cols-8 grid-rows-8">
+                        {Array.from({ length: 64 }).map((_, i) => {
+                            const row = Math.floor(i / 8);
+                            const col = i % 8;
+                            const isDark = (row + col) % 2 === 1;
+                            return (
+                                <div
+                                    key={i}
+                                    className="w-full h-full"
+                                    style={{ backgroundColor: isDark ? '#779952' : '#ebecd0' }}
+                                />
+                            );
+                        })}
+                    </div>
+                    {/* Overlay spinner */}
+                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/40 backdrop-blur-[2px] rounded-xl gap-3">
+                        <RefreshCw size={32} className="text-gold-400 animate-spin" />
+                        <span className="text-white font-bold text-sm uppercase tracking-widest">Loading Board...</span>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     // Get SVG src for promotion modal piece
     const getPieceSrc = (type: string, color: 'w' | 'b') => {
