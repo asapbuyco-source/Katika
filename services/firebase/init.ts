@@ -1,6 +1,11 @@
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, enableIndexedDbPersistence } from "firebase/firestore";
+import {
+    initializeFirestore,
+    getFirestore,
+    persistentLocalCache,
+    persistentMultipleTabManager,
+} from "firebase/firestore";
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -14,18 +19,24 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
 
-// NET-1: Enable Firestore offline persistence with graceful fallback for incognito
-if (typeof window !== 'undefined') {
-    enableIndexedDbPersistence(db).catch((err) => {
-        if (err.code === 'failed-precondition') {
-            console.warn('[Firestore] Offline persistence failed: multiple tabs open. Caching disabled.');
-        } else if (err.code === 'unimplemented') {
-            console.warn('[Firestore] Offline persistence failed: browser not supported. Caching disabled.');
-        }
-    });
-}
+// NET-1: Persistent offline cache via the modern FirestoreSettings.cache API.
+// persistentMultipleTabManager allows multiple browser tabs to share the cache.
+// Falls back to the default (memory-only) instance if already initialized (e.g. Vite HMR)
+// or in unsupported environments (incognito mode).
+export const db = (() => {
+    try {
+        return initializeFirestore(app, {
+            localCache: persistentLocalCache({
+                tabManager: persistentMultipleTabManager(),
+            }),
+        });
+    } catch {
+        // initializeFirestore throws if the app was already initialized — use the
+        // existing instance instead. This happens during Vite HMR hot reloads.
+        return getFirestore(app);
+    }
+})();
 
 export const getApiUrl = () => {
     const rawUrl = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');

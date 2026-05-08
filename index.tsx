@@ -1,5 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
+import './index.css';  // Tailwind via PostCSS — replaces CDN <script>
 import App from './components/App';
 
 // Global error handlers for production

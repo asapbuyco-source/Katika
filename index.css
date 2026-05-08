@@ -1,0 +1,19 @@
+/* ── Tailwind base directives ─────────────────────────────────────────────────
+   These three lines replace the CDN <script src="https://cdn.tailwindcss.com">
+   tag with a proper build-time PostCSS compilation.
+   ─────────────────────────────────────────────────────────────────────────── */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base Variables (Default Dark) ───────────────────────────────────────────
+   These are now the canonical CSS variables — the identical block in index.html
+   is kept as a fallback for the brief moment before this stylesheet loads.
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  --c-royal-950: 15 10 31;
+  --c-royal-900: 26 16 60;
+  --c-royal-800: 45 27 105;
+  --c-text-white: 255 255 255;
+  --c-text-base: 226 232 240;
+}

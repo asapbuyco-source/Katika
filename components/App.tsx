@@ -67,11 +67,27 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     }
 
     static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-        // ChunkLoadError = lazy() failed because the network dropped mid-navigation.
-        // Auto-reload the page to re-fetch the chunk — transparent to the user.
-        const isChunkError = error.name === 'ChunkLoadError' || /loading chunk/i.test(error.message);
+        // Detect ALL forms of chunk/module load failures:
+        // - Chrome/Edge:  "Failed to fetch dynamically imported module: …"
+        // - Webpack/Vite: "Loading chunk N failed"
+        // - Legacy:       error.name === 'ChunkLoadError'
+        const isChunkError =
+            error.name === 'ChunkLoadError' ||
+            /loading chunk/i.test(error.message) ||
+            /failed to fetch dynamically imported module/i.test(error.message) ||
+            /failed to load module script/i.test(error.message);
+
         if (isChunkError) {
-            window.location.reload();
+            // Reload loop guard: only auto-reload up to 2 times per session.
+            // If the JS assets are genuinely missing (broken deploy), reloading
+            // infinitely harms users — show a "clear cache and retry" screen instead.
+            const key = 'vantage_chunk_reload_count';
+            const attempts = parseInt(sessionStorage.getItem(key) || '0', 10);
+            if (attempts < 2) {
+                sessionStorage.setItem(key, String(attempts + 1));
+                window.location.reload();
+            }
+            // Max reloads hit — fall through to render the error UI below
         }
         return { hasError: true, isChunkError };
     }
@@ -101,12 +117,35 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                 </div>
             );
         }
-        // ChunkLoadError: show a brief loading indicator while the page reloads
+        // ChunkLoadError: show spinner while reloading, or "Update available" after max retries
         if (this.state.hasError && this.state.isChunkError) {
+            const attempts = parseInt(sessionStorage.getItem('vantage_chunk_reload_count') || '0', 10);
+            const exhausted = attempts >= 2;
             return (
-                <div className="min-h-screen flex flex-col items-center justify-center bg-royal-950 gap-4">
-                    <Loader2 size={36} className="text-gold-500 animate-spin" />
-                    <p className="text-slate-400 text-sm">Reconnecting...</p>
+                <div className="min-h-screen flex flex-col items-center justify-center bg-royal-950 gap-5 p-6 text-center">
+                    {exhausted ? (
+                        <>
+                            <RefreshCw size={40} className="text-gold-500" />
+                            <h2 className="text-xl font-bold text-white">Update Available</h2>
+                            <p className="text-slate-400 text-sm max-w-xs">
+                                A new version of Vantage was deployed. Clear your browser cache and reload to get the latest build.
+                            </p>
+                            <button
+                                onClick={() => {
+                                    sessionStorage.removeItem('vantage_chunk_reload_count');
+                                    window.location.reload();
+                                }}
+                                className="px-6 py-3 bg-gold-500 rounded-xl text-black font-bold hover:bg-gold-400 transition-colors"
+                            >
+                                Reload Now
+                            </button>
+                        </>
+                    ) : (
+                        <>
+                            <Loader2 size={36} className="text-gold-500 animate-spin" />
+                            <p className="text-slate-400 text-sm">Loading update...</p>
+                        </>
+                    )}
                 </div>
             );
         }
@@ -667,11 +706,12 @@ export default function App() {
         <LanguageProvider>
             <ThemeProvider>
                 <AppStateProvider>
-                    <SocketProvider>
-                        <ToastProvider>
+                    {/* ToastProvider MUST wrap SocketProvider — SocketContext calls useToast() */}
+                    <ToastProvider>
+                        <SocketProvider>
                             <AppContent />
-                        </ToastProvider>
-                    </SocketProvider>
+                        </SocketProvider>
+                    </ToastProvider>
                 </AppStateProvider>
             </ThemeProvider>
         </LanguageProvider>

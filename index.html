@@ -42,7 +42,7 @@
   <!-- Preconnect improves font load speed by resolving DNS early, critical on slow 3G -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <script src="https://cdn.tailwindcss.com"></script>
+
   <link
     href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;700&display=swap"
     rel="stylesheet">
@@ -113,45 +113,7 @@
     }
     </script>
 
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          fontFamily: {
-            sans: ['Inter', 'sans-serif'],
-            display: ['Space Grotesk', 'sans-serif'],
-          },
-          colors: {
-            royal: {
-              900: 'rgb(var(--c-royal-900) / <alpha-value>)',
-              800: 'rgb(var(--c-royal-800) / <alpha-value>)',
-              700: '#432c9a',
-              950: 'rgb(var(--c-royal-950) / <alpha-value>)',
-            },
-            gold: {
-              400: '#fbbf24',
-              500: '#f59e0b',
-              600: '#d97706',
-            },
-            cam: {
-              green: '#007a5e',
-              red: '#ce1126',
-              yellow: '#fcd116',
-            },
-            white: 'rgb(var(--c-text-white) / <alpha-value>)',
-            'slate-200': 'rgb(var(--c-text-base) / <alpha-value>)',
-          },
-          gridTemplateColumns: {
-            '15': 'repeat(15, minmax(0, 1fr))',
-          },
-          gridTemplateRows: {
-            '15': 'repeat(15, minmax(0, 1fr))',
-          }
-        },
-      },
-    }
-  </script>
+
   <style>
     /* Base Variables (Default Dark) - Fallback before React hydration */
     :root {
