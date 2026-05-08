@@ -1,8 +1,9 @@
 
 import React from 'react';
-import { Home, LayoutGrid, User, Bell, Wallet, ShieldAlert, MessageSquare, Trophy } from 'lucide-react';
+import { Home, LayoutGrid, User, Wallet, ShieldAlert, MessageSquare, Trophy } from 'lucide-react';
 import { ViewState, User as AppUser } from '../types';
 import { useLanguage } from '../services/i18n';
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 
 interface NavigationProps {
   currentView: ViewState;
@@ -24,8 +25,10 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
 
   return (
     <div className="fixed bottom-0 left-0 right-0 bg-royal-900/95 backdrop-blur-xl border-t border-royal-700 p-2 md:p-4 md:static md:w-24 md:h-screen md:flex-col md:border-r md:border-t-0 md:justify-start md:gap-10 z-50 transition-all safe-area-bottom">
-      <div className="hidden md:flex flex-col items-center mt-8 mb-4">
+      {/* Desktop: logo + signal meter stacked */}
+      <div className="hidden md:flex flex-col items-center mt-8 mb-2 gap-3">
         <div className="w-10 h-10 bg-gold-500 rounded-lg flex items-center justify-center text-black font-bold text-xl shadow-lg shadow-gold-500/20">V</div>
+        <NetworkSignalIndicator variant="sidebar" />
       </div>
 
       <div className="flex justify-between md:justify-around items-center md:flex-col md:gap-8 w-full px-2 md:px-0">
@@ -87,6 +90,11 @@ export const Navigation: React.FC<NavigationProps> = ({ currentView, setView, us
             )}
           </button>
         )}
+
+        {/* Mobile: signal indicator as last item in bottom bar */}
+        <div className="flex md:hidden">
+          <NetworkSignalIndicator variant="bottombar" />
+        </div>
       </div>
     </div>
   );

@@ -4,6 +4,7 @@ import React, {
     useState,
     useEffect,
     useRef,
+    useCallback,
     ReactNode
 } from 'react';
 import { io, Socket } from 'socket.io-client';
@@ -12,8 +13,13 @@ import { SocketGameState } from '../types';
 import { useAppState } from './AppContext';
 import { auth, reportTournamentMatchResult } from './firebase';
 import { playSFX } from './sound';
+import { useToast } from './toast';
 
-// ─── Context Shaped ─────────────────────────────────────────────────────────────
+interface QueuedEmission {
+    event: string;
+    data: any;
+    timestamp: number;
+}
 
 interface SocketContextValue {
     socket: Socket | null;
@@ -24,24 +30,28 @@ interface SocketContextValue {
     connectionError: string | null;
     bypassConnection: boolean;
     connectionTime: number;
+    pingMs: number | null;
+    signalStrength: 0 | 1 | 2 | 3 | 4;
     setSocketGame: (game: SocketGameState | null) => void;
     setIsWaitingForSocketMatch: (v: boolean) => void;
     setBypassConnection: (v: boolean) => void;
+    resetAll: () => void;
 }
 
 const SocketContext = createContext<SocketContextValue | undefined>(undefined);
 
-// ─── Provider ──────────────────────────────────────────────────────────────────
-
 export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const { state, dispatch, viewRef } = useAppState();
+    const toast = useToast();
 
     const [socket, setSocket] = useState<Socket | null>(null);
     const [isConnected, setIsConnected] = useState(false);
-    const [hasConnectedOnce, setHasConnectedOnce] = useState(false);
+    const [hasConnectedOnce, setHasConnectedOnce] = useState(
+        () => sessionStorage.getItem('vantage_connected_once') === '1'
+    );
     const [socketGame, setSocketGameRaw] = useState<SocketGameState | null>(null);
 
-    const setSocketGame = React.useCallback((gameOrUpdater: SocketGameState | null | ((prev: SocketGameState | null) => SocketGameState | null)) => {
+    const setSocketGame = useCallback((gameOrUpdater: SocketGameState | null | ((prev: SocketGameState | null) => SocketGameState | null)) => {
         if (gameOrUpdater === null) {
             sessionStorage.removeItem('vantage_active_room');
         } else if (typeof gameOrUpdater === 'object' && (gameOrUpdater as SocketGameState).roomId) {
@@ -49,21 +59,91 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
         setSocketGameRaw(gameOrUpdater);
     }, []);
+
+    const resetAll = useCallback(() => {
+        setSocketGame(null);
+        dispatch({ type: 'RESET_GAME_STATE' });
+    }, [setSocketGame, dispatch]);
+
     const [isWaitingForSocketMatch, setIsWaitingForSocketMatch] = useState(false);
     const [connectionError, setConnectionError] = useState<string | null>(null);
     const [bypassConnection, setBypassConnection] = useState(false);
     const [connectionTime, setConnectionTime] = useState(0);
+    const [pingMs, setPingMs] = useState<number | null>(null);
 
-    // Keep a ref to socketGame so event handlers don't go stale
+    const signalStrength: 0 | 1 | 2 | 3 | 4 = !isConnected
+        ? 0
+        : pingMs === null ? 4
+        : pingMs < 80  ? 4
+        : pingMs < 200 ? 3
+        : pingMs < 400 ? 2
+        : pingMs < 700 ? 1
+        : 1;
+
     const socketGameRef = useRef<SocketGameState | null>(null);
     socketGameRef.current = socketGame;
 
-    // Bug C3 fix: keep a ref to state.user so handlers always access the latest user
-    // without needing to re-register every time the balance changes.
     const userRef = useRef(state.user);
     userRef.current = state.user;
 
-    // ── Initialize Socket ──────────────────────────────────────────────────────
+    // NET-2: Outbound emission queue for critical game actions.
+    // Uses a socketRef to avoid stale closure — flushEmissionQueue fires inside
+    // the 'connect' handler where React state (isConnected) is still false.
+    const pendingEmissions = useRef<QueuedEmission[]>([]);
+    const isReconnectingRef = useRef(false);
+    const socketRef = useRef<Socket | null>(null);
+
+    const flushEmissionQueue = useCallback(() => {
+        const s = socketRef.current;
+        if (!s || pendingEmissions.current.length === 0) return;
+        const queued = [...pendingEmissions.current];
+        pendingEmissions.current = [];
+        console.log(`[Socket] Flushing ${queued.length} queued emission(s) after reconnect`);
+        for (const emission of queued) {
+            s.emit(emission.event, emission.data);
+        }
+    }, []);
+
+    const queueEmission = useCallback((event: string, data: any) => {
+        pendingEmissions.current.push({ event, data, timestamp: Date.now() });
+    }, []);
+
+    // NET-3: Page visibility handling - reconnect if tab was hidden > 30s
+    const hiddenAtRef = useRef<number | null>(null);
+
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'hidden') {
+                hiddenAtRef.current = Date.now();
+            } else if (document.visibilityState === 'visible' && hiddenAtRef.current) {
+                const elapsed = Date.now() - hiddenAtRef.current;
+                if (elapsed > 30_000 && socket && isConnected) {
+                    console.log('[Socket] Tab hidden > 30s, forcing reconnect');
+                    socket.disconnect();
+                    socket.connect();
+                }
+                hiddenAtRef.current = null;
+            }
+        };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+    }, [socket, isConnected]);
+
+    // NET-4: getIdToken retry logic (3 attempts, 1s apart)
+    const getIdTokenWithRetry = useCallback(async (user: any, retries = 3, delayMs = 1000): Promise<string> => {
+        for (let i = 0; i < retries; i++) {
+            try {
+                const token = await user.getIdToken();
+                return token;
+            } catch (e) {
+                if (i === retries - 1) throw e;
+                await new Promise(r => setTimeout(r, delayMs));
+            }
+        }
+        return '';
+    }, []);
+
     useEffect(() => {
         const SOCKET_URL = import.meta.env.VITE_SOCKET_URL;
         const timerInterval = setInterval(() => setConnectionTime(prev => prev + 1), 1000);
@@ -75,49 +155,76 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
 
         const newSocket = io(SOCKET_URL, {
-            reconnectionAttempts: 10,
-            timeout: 20000,
-            transports: ['polling', 'websocket'],
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 15000,
+            randomizationFactor: 0.4,
+            timeout: 25000,
+            transports: ['websocket', 'polling'],
             autoConnect: true,
             auth: async () => {
                 const user = auth.currentUser;
                 if (!user) return {};
-                const token = await user.getIdToken();
-                return { token };
+                try {
+                    const token = await getIdTokenWithRetry(user);
+                    return { token };
+                } catch {
+                    return {};
+                }
             }
         });
 
         newSocket.on('connect', () => {
+            socketRef.current = newSocket;  // update ref before flush
             setIsConnected(true);
             setHasConnectedOnce(true);
+            sessionStorage.setItem('vantage_connected_once', '1');
             setBypassConnection(false);
             setConnectionError(null);
             clearInterval(timerInterval);
+            isReconnectingRef.current = false;
+            dispatch({ type: 'SET_NETWORK_STATUS', payload: 'online' });
+            flushEmissionQueue();
         });
 
-        newSocket.on('disconnect', () => setIsConnected(false));
-        newSocket.on('connect_error', (err) => setConnectionError(err.message));
+        // Single disconnect handler (deduped)
+        newSocket.on('disconnect', () => {
+            setIsConnected(false);
+            setPingMs(null);
+            dispatch({ type: 'SET_NETWORK_STATUS', payload: 'offline' });
+        });
 
+        newSocket.on('connect_error', (err) => {
+            setConnectionError(err.message);
+            dispatch({ type: 'SET_NETWORK_STATUS', payload: 'degraded' });
+        });
+
+        socketRef.current = newSocket;
         setSocket(newSocket);
 
         return () => {
             clearInterval(timerInterval);
             newSocket.close();
         };
-    }, []);
+    }, [getIdTokenWithRetry, flushEmissionQueue, dispatch]);
 
-    // ── Session Re-entry ──────────────────────────────────────────────────────
+    // Session Re-entry with acknowledgement callback (NET-6)
     useEffect(() => {
         if (!socket || !isConnected || !state.user) return;
 
         const storedRoom = sessionStorage.getItem('vantage_active_room');
         if (storedRoom) {
             console.log(`[Socket] Attempting re-entry for room: ${storedRoom}`);
-            socket.emit('rejoin_game', { userProfile: state.user });
+            socket.emit('rejoin_game', { userProfile: state.user }, (ack: any) => {
+                if (!ack || !ack.success) {
+                    console.warn('[Socket] Rejoin failed or timed out, clearing stored room');
+                    sessionStorage.removeItem('vantage_active_room');
+                }
+            });
         }
     }, [socket, isConnected, !!state.user]);
 
-    // ── Attach Game Event Handlers ─────────────────────────────────────────────
+    // Attach Game Event Handlers
     useEffect(() => {
         if (!socket) return;
 
@@ -175,32 +282,25 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             const currentGame = socketGameRef.current;
             const currentUser = userRef.current;
 
-            // FIX: Stop old match results from popping up in new matches
             if (roomId && currentGame?.roomId && roomId !== currentGame.roomId) {
                 console.warn(`[Socket] Ignored stale game_over for room ${roomId}. Current room: ${currentGame.roomId}`);
                 return;
             }
 
-            // Report tournament match result via server API (server also handles bracket advancement)
             if (currentUser && winner === currentUser.id && currentGame?.tournamentMatchId) {
                 reportTournamentMatchResult(currentGame.tournamentMatchId, winner)
                     .catch(e => console.error('Tournament result report failed:', e));
             }
 
-            // Financial settlement is handled entirely server-side by settleGame() in server.js.
-            // The server uses Firebase Admin SDK to atomically credit winnings and debit stakes.
-            // No client-side Firestore writes needed here — balance will update via subscribeToUser.
-
             if (currentUser && winner === currentUser.id) {
+                // BUG-S5 FIX: OPTIMISTIC_BALANCE_UPDATE immediately bumps the displayed
+                // balance. The real value will reconcile when subscribeToUser fires.
                 const winnings = financials?.winnings ?? 0;
-                dispatch({
-                    type: 'SET_GAME_RESULT',
-                    payload: { result: 'win', amount: winnings, financials }
-                });
+                dispatch({ type: 'OPTIMISTIC_BALANCE_UPDATE', payload: winnings });
+                dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'win', amount: winnings, financials } });
             } else if (winner) {
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'loss', amount: 0 } });
             } else {
-                // Draw — no financial movement
                 dispatch({ type: 'SET_GAME_RESULT', payload: { result: 'draw', amount: 0 } });
             }
         };
@@ -225,22 +325,26 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             socket.off('rematch_status', handleRematchStatus);
             socket.off('game_over', handleGameOver);
         };
-    }, [socket, dispatch, viewRef]); // state.user removed — userRef.current is used instead (Bug C3 fix)
+    }, [socket, dispatch, viewRef]);
 
-    // ── Rejoin on reconnect (only when there's an active game to rejoin) ──────
+    // Rejoin on reconnect (only when there's an active game to rejoin)
     useEffect(() => {
         if (socket && isConnected && state.user && socketGameRef.current && viewRef.current === 'game') {
-            socket.emit('rejoin_game', { userProfile: state.user });
+            socket.emit('rejoin_game', { userProfile: state.user }, (ack: any) => {
+                if (!ack || !ack.success) {
+                    sessionStorage.removeItem('vantage_active_room');
+                }
+            });
         }
     }, [socket, isConnected, state.user, viewRef]);
 
-    // ── Token refresh: keep socket auth valid for long-lived connections ──────
+    // Token refresh: keep socket auth valid for long-lived connections
     useEffect(() => {
         if (!socket) return;
         const unsubscribe = onIdTokenChanged(auth, async (user) => {
             if (user && isConnected) {
                 try {
-                    const token = await user.getIdToken();
+                    const token = await getIdTokenWithRetry(user);
                     socket.emit('refresh_token', { token });
                 } catch (e) {
                     console.warn('[Socket] Token refresh failed:', e);
@@ -248,16 +352,61 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             }
         });
         return unsubscribe;
-    }, [socket, isConnected]);
+    }, [socket, isConnected, getIdTokenWithRetry]);
 
-    // ── Auto-bypass if connection takes too long ───────────────────────────────
-    // 45s gives 3G connections (common in Cameroon) enough time for the
-    // polling → WebSocket upgrade handshake to complete before we give up.
+    // Auto-bypass if connection takes too long
     useEffect(() => {
-        if (connectionTime >= 45 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
+        if (connectionTime >= 60 && !isConnected && !bypassConnection && !hasConnectedOnce && !socketGame) {
             setBypassConnection(true);
         }
     }, [connectionTime, isConnected, bypassConnection, hasConnectedOnce, socketGame]);
+
+    // Live ping measurement
+    useEffect(() => {
+        if (!socket || !isConnected) return;
+        const measure = () => {
+            const t0 = performance.now();
+            socket.emit('client_ping', { t: t0 });
+        };
+        socket.on('client_pong', (data: { t: number }) => {
+            const rtt = Math.round(performance.now() - data.t);
+            setPingMs(rtt);
+        });
+        measure();
+        const interval = setInterval(measure, 5000);
+        return () => {
+            clearInterval(interval);
+            socket.off('client_pong');
+        };
+    }, [socket, isConnected]);
+
+    // Auto-reconnect on brief network blips
+    useEffect(() => {
+        if (!socket || isConnected) return;
+        const interval = setInterval(() => {
+            if (!socket.connected) {
+                console.log('[Socket] Auto-reconnect ping...');
+                socket.connect();
+            }
+        }, 8000);
+        return () => clearInterval(interval);
+    }, [socket, isConnected]);
+
+    // NET-2: Wrapper around socket.emit that queues when disconnected
+    const emit = useCallback((event: string, data: any, callback?: any) => {
+        if (socket && isConnected) {
+            if (callback) {
+                socket.emit(event, data, callback);
+            } else {
+                socket.emit(event, data);
+            }
+        } else {
+            // Queue critical game actions when disconnected
+            if (event === 'game_action' || event === 'game_move') {
+                queueEmission(event, data);
+            }
+        }
+    }, [socket, isConnected, queueEmission]);
 
     const value: SocketContextValue = {
         socket,
@@ -268,15 +417,16 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         connectionError,
         bypassConnection,
         connectionTime,
+        pingMs,
+        signalStrength,
         setSocketGame,
         setIsWaitingForSocketMatch,
         setBypassConnection,
+        resetAll,
     };
 
     return <SocketContext.Provider value={value}>{children}</SocketContext.Provider>;
 };
-
-// ─── Hook ──────────────────────────────────────────────────────────────────────
 
 export const useSocket = (): SocketContextValue => {
     const ctx = useContext(SocketContext);

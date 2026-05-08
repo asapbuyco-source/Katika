@@ -58,16 +58,22 @@ const ViewLoader = () => (
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 interface ErrorBoundaryProps { children?: ReactNode; onReset: () => void; }
-interface ErrorBoundaryState { hasError: boolean; }
+interface ErrorBoundaryState { hasError: boolean; isChunkError: boolean; }
 
 class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
     constructor(props: ErrorBoundaryProps) {
         super(props);
-        this.state = { hasError: false };
+        this.state = { hasError: false, isChunkError: false };
     }
 
-    static getDerivedStateFromError(): ErrorBoundaryState {
-        return { hasError: true };
+    static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+        // ChunkLoadError = lazy() failed because the network dropped mid-navigation.
+        // Auto-reload the page to re-fetch the chunk — transparent to the user.
+        const isChunkError = error.name === 'ChunkLoadError' || /loading chunk/i.test(error.message);
+        if (isChunkError) {
+            window.location.reload();
+        }
+        return { hasError: true, isChunkError };
     }
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -75,12 +81,12 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
     }
 
     handleReset = () => {
-        this.setState({ hasError: false });
+        this.setState({ hasError: false, isChunkError: false });
         this.props.onReset();
     };
 
     render() {
-        if (this.state.hasError) {
+        if (this.state.hasError && !this.state.isChunkError) {
             return (
                 <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center bg-royal-950">
                     <AlertTriangle size={48} className="text-red-500 mb-4" />
@@ -92,6 +98,15 @@ class GameErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState
                     >
                         Return to Lobby
                     </button>
+                </div>
+            );
+        }
+        // ChunkLoadError: show a brief loading indicator while the page reloads
+        if (this.state.hasError && this.state.isChunkError) {
+            return (
+                <div className="min-h-screen flex flex-col items-center justify-center bg-royal-950 gap-4">
+                    <Loader2 size={36} className="text-gold-500 animate-spin" />
+                    <p className="text-slate-400 text-sm">Reconnecting...</p>
                 </div>
             );
         }
@@ -150,37 +165,50 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number; opponent?: 
 };
 
 // ─── Weak Network Modal ────────────────────────────────────────────────────────
-const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-xl">
-        <motion.div
-            initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-            className="bg-royal-900 border border-yellow-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-yellow-900/50"
-        >
-            <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-yellow-500/30">
-                <WifiOff size={40} className="text-yellow-500" />
-            </div>
-            <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
-            <p className="text-slate-300 text-sm mb-6 leading-relaxed">
-                Your device has lost connection to the server.<br />
-                <span className="text-yellow-400 font-bold">Please check your internet.</span>
-            </p>
-            <div className="space-y-3">
-                <button
-                    onClick={() => window.location.reload()}
-                    className="w-full py-3.5 bg-yellow-500 hover:bg-yellow-400 text-royal-950 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors"
-                >
-                    <RefreshCw size={18} /> Refresh Page
-                </button>
-                <button
-                    onClick={onReconnect}
-                    className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors"
-                >
-                    Try Reconnecting
-                </button>
-            </div>
-        </motion.div>
-    </div>
-);
+const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => {
+    // Auto-ping the socket every 10s so brief blips recover without user action
+    useEffect(() => {
+        onReconnect(); // immediate attempt
+        const interval = setInterval(onReconnect, 10_000);
+        return () => clearInterval(interval);
+    }, [onReconnect]);
+
+    return (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-xl">
+            <motion.div
+                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                className="bg-royal-900 border border-yellow-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-yellow-900/50"
+            >
+                <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-yellow-500/30">
+                    <WifiOff size={40} className="text-yellow-500" />
+                </div>
+                <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
+                <p className="text-slate-300 text-sm mb-4 leading-relaxed">
+                    Your device lost connection to the server.<br />
+                    <span className="text-yellow-400 font-bold">Reconnecting automatically…</span>
+                </p>
+                <div className="flex items-center justify-center gap-2 text-xs text-slate-500 mb-6">
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Attempting to reconnect every 10s</span>
+                </div>
+                <div className="space-y-3">
+                    <button
+                        onClick={() => window.location.reload()}
+                        className="w-full py-3.5 bg-yellow-500 hover:bg-yellow-400 text-royal-950 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors"
+                    >
+                        <RefreshCw size={18} /> Refresh Page
+                    </button>
+                    <button
+                        onClick={onReconnect}
+                        className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors"
+                    >
+                        Try Now
+                    </button>
+                </div>
+            </motion.div>
+        </div>
+    );
+};
 
 // ─── Motion helper ─────────────────────────────────────────────────────────────
 const MV = ({ children, k }: { children: ReactNode; k: string }) => (
@@ -192,7 +220,7 @@ const MV = ({ children, k }: { children: ReactNode; k: string }) => (
 // ─── AppContent — the main routing/logic shell ─────────────────────────────────
 const AppContent = () => {
     const { state, dispatch, viewRef, lastForumMsgId } = useAppState();
-    const { socket, isConnected, hasConnectedOnce, socketGame, bypassConnection, setBypassConnection } = useSocket();
+    const { socket, isConnected, hasConnectedOnce, socketGame, bypassConnection, setBypassConnection, resetAll } = useSocket();
     const { theme } = useTheme();
     const toast = useToast();
 
@@ -218,16 +246,32 @@ const AppContent = () => {
     const [isRejoining, setIsRejoining] = React.useState(false);
     const [rejoinFailed, setRejoinFailed] = React.useState(false);
 
+    // Grace delay before showing "Connecting to Vantage Network..." blocker.
+    // A brief blip (< 4s) will NOT interrupt the user — the blocker only
+    // appears if we are *still* disconnected after this grace period.
+    const [showConnectionBlocker, setShowConnectionBlocker] = React.useState(false);
+    const blockerTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    useEffect(() => {
+        if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
+            blockerTimerRef.current = setTimeout(() => setShowConnectionBlocker(true), 4000);
+        } else {
+            if (blockerTimerRef.current) clearTimeout(blockerTimerRef.current);
+            setShowConnectionBlocker(false);
+        }
+        return () => { if (blockerTimerRef.current) clearTimeout(blockerTimerRef.current); };
+    }, [isConnected, hasConnectedOnce, user, bypassConnection]);
+
     useEffect(() => {
         const storedRoom = sessionStorage.getItem('vantage_active_room');
         if (storedRoom && !socketGame && isConnected) {
             setIsRejoining(true);
             setRejoinFailed(false);
+            // NET-6: Use acknowledgement callback to resolve early, with 12s fallback
             const timer = setTimeout(() => {
                  if (!socketGame) {
                      setRejoinFailed(true);
                  }
-            }, 5000); // Timeout fallback
+            }, 12000);
             return () => clearTimeout(timer);
         } else if (socketGame) {
             setIsRejoining(false);
@@ -296,36 +340,65 @@ const AppContent = () => {
     // app stuck in 'game' view with no active game.
 
     // ── Auth listener ────────────────────────────────────────────────────────
-    useEffect(() => {
-        let unsubUser: (() => void) | undefined;
-        let unsubChallenges: (() => void) | undefined;
-        let unsubForum: (() => void) | undefined;
+    // BUG-S4 fix: Track whether Firestore subscriptions are already active.
+    // Only re-subscribe if the user UID changes, not on token refresh.
+    const firestoreUnsubRef = useRef<{ user?: () => void; challenges?: () => void; forum?: () => void }>({});
+    const prevUserIdRef = useRef<string | null>(null);
 
+    useEffect(() => {
         const unsubAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+            const currentUid = firebaseUser?.uid ?? null;
+
+            // Only re-subscribe if the UID actually changed (not on token refresh)
+            if (currentUid === prevUserIdRef.current) {
+                dispatch({ type: 'SET_AUTH_LOADING', payload: false });
+                return;
+            }
+
+            // Clean up previous subscriptions if UID is changing
+            if (prevUserIdRef.current !== null && currentUid !== prevUserIdRef.current) {
+                firestoreUnsubRef.current.user?.();
+                firestoreUnsubRef.current.challenges?.();
+                firestoreUnsubRef.current.forum?.();
+            }
+
             if (firebaseUser) {
                 try {
                     const appUser = await syncUserProfile(firebaseUser);
                     dispatch({ type: 'SET_USER', payload: appUser });
+                    prevUserIdRef.current = appUser.id;
 
-                    unsubUser = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));
-                    unsubChallenges = subscribeToIncomingChallenges(appUser.id, challenge => dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: challenge }));
-                    unsubForum = subscribeToForum(posts => {
-                        if (posts.length > 0) {
-                            const latestId = posts[0].id;
-                            if (lastForumMsgId.current && lastForumMsgId.current !== latestId && viewRef.current !== 'forum') {
-                                dispatch({ type: 'SET_UNREAD_FORUM', payload: true });
-                                playSFX('notification');
-                            }
-                            lastForumMsgId.current = latestId;
+                    // NET-5: Stagger subscription restart: user → 0ms, challenges → 200ms, forum → 500ms
+                    firestoreUnsubRef.current.user = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));
+
+                    setTimeout(() => {
+                        if (prevUserIdRef.current === appUser.id) {
+                            firestoreUnsubRef.current.challenges = subscribeToIncomingChallenges(appUser.id, challenge => dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: challenge }));
                         }
-                    });
+                    }, 200);
+
+                    setTimeout(() => {
+                        if (prevUserIdRef.current === appUser.id) {
+                            firestoreUnsubRef.current.forum = subscribeToForum(posts => {
+                                if (posts.length > 0) {
+                                    const latestId = posts[0].id;
+                                    if (lastForumMsgId.current && lastForumMsgId.current !== latestId && viewRef.current !== 'forum') {
+                                        dispatch({ type: 'SET_UNREAD_FORUM', payload: true });
+                                        playSFX('notification');
+                                    }
+                                    lastForumMsgId.current = latestId;
+                                }
+                            });
+                        }
+                    }, 500);
                 } catch (error) {
                     console.error('[Auth] Profile sync failed:', error);
                 }
             } else {
-                unsubUser?.();
-                unsubChallenges?.();
-                unsubForum?.();
+                firestoreUnsubRef.current.user?.();
+                firestoreUnsubRef.current.challenges?.();
+                firestoreUnsubRef.current.forum?.();
+                prevUserIdRef.current = null;
                 dispatch({ type: 'SET_USER', payload: null });
             }
             dispatch({ type: 'SET_AUTH_LOADING', payload: false });
@@ -333,9 +406,9 @@ const AppContent = () => {
 
         return () => {
             unsubAuth();
-            unsubUser?.();
-            unsubChallenges?.();
-            unsubForum?.();
+            firestoreUnsubRef.current.user?.();
+            firestoreUnsubRef.current.challenges?.();
+            firestoreUnsubRef.current.forum?.();
         };
     }, [dispatch, lastForumMsgId, viewRef]);
 
@@ -412,11 +485,13 @@ const AppContent = () => {
         );
     }
 
-    if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
+    // Only block the UI after the 4s grace period has elapsed
+    if (showConnectionBlocker && !isConnected && !hasConnectedOnce && user && !bypassConnection) {
         return (
             <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center gap-4">
                 <Loader2 size={48} className="text-gold-500 animate-spin" />
                 <h2 className="text-xl font-bold text-white">Connecting to Vantage Network...</h2>
+                <p className="text-slate-500 text-xs">This usually resolves on its own. Please wait…</p>
                 <div className="flex flex-col gap-3">
                     <button
                         onClick={() => { socket?.connect(); }}
@@ -490,7 +565,7 @@ const AppContent = () => {
             )}
 
             <main id="main-scroll-container" className="flex-1 relative w-full h-screen overflow-y-auto">
-                <GameErrorBoundary onReset={() => { dispatch({ type: 'RESET_GAME_STATE' }); dispatch({ type: 'SET_VIEW', payload: user ? 'dashboard' : 'landing' }); }}>
+                <GameErrorBoundary onReset={() => { resetAll(); dispatch({ type: 'SET_VIEW', payload: user ? 'dashboard' : 'landing' }); }}>
                     <Suspense fallback={<ViewLoader />}>
                         <AnimatePresence>
                             {currentView === 'landing' && <MV k="landing">    <LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></MV>}

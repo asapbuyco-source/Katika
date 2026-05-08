@@ -11,13 +11,10 @@ export const useGameController = () => {
     const { socket, isConnected, bypassConnection, socketGame, setSocketGame } = useSocket();
     const toast = useToast();
 
-    const { user, activeTable, incomingChallenge } = state;
+    const { user, offlineTable, incomingChallenge } = state;
     const isTransitioningRef = useRef(false);
-    // BUG 3 FIX: Persist tournamentMatchId across state resets so finalizeGameEnd
-    // can still navigate to the tournament bracket even after SET_ACTIVE_TABLE: null.
     const activeTournamentMatchIdRef = useRef<string | null>(null);
 
-    // ── Table helper ───────────────────────────────────────────────────────────
     const constructTableFromSocket = useCallback((game: SocketGameState): Table => {
         if (!user) return {} as Table;
         const opponentId = game.players.find(id => id !== user.id) ?? '';
@@ -31,7 +28,7 @@ export const useGameController = () => {
         };
     }, [user]);
 
-    const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : activeTable;
+    const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : offlineTable;
 
     // ── Matchmaking ───────────────────────────────────────────────────────────
     const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string, isTournament = false) => {
@@ -55,7 +52,7 @@ export const useGameController = () => {
                     players: 2, maxPlayers: 2, status: 'active',
                     host: user
                 };
-                dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
+                dispatch({ type: 'SET_OFFLINE_TABLE', payload: table });
                 dispatch({ type: 'SET_VIEW', payload: 'game' });
             } catch (error) {
                 console.error('[App] Bot match failed:', error);
@@ -90,19 +87,14 @@ export const useGameController = () => {
     }, [incomingChallenge, user, startMatchmaking, dispatch, toast]);
 
     const handleMatchFound = useCallback((table: Table) => {
-        dispatch({ type: 'SET_ACTIVE_TABLE', payload: table });
         if (table.tournamentMatchId) {
             setTournamentMatchActive(table.tournamentMatchId);
-            // BUG 3 FIX: store tournamentMatchId in a stable ref so it survives
-            // SET_ACTIVE_TABLE: null dispatched inside handleGameEnd.
             activeTournamentMatchIdRef.current = table.tournamentMatchId;
         }
-        dispatch({ type: 'SET_VIEW', payload: 'game' });
-    }, [dispatch]);
+    }, []);
 
     // ── Game Event Flow ───────────────────────────────────────────────────────
     const handleGameEnd = useCallback(async (result: 'win' | 'loss' | 'quit' | 'draw') => {
-        // Only handle game end once
         if (isTransitioningRef.current) return;
         isTransitioningRef.current = true;
 
@@ -111,7 +103,6 @@ export const useGameController = () => {
 
         if (tournamentMatchId) {
             localStorage.setItem('vantage_active_tournament_match', tournamentMatchId);
-            // BUG 3 FIX: persist in ref before we null activeGameTable
             activeTournamentMatchIdRef.current = tournamentMatchId;
             if (user) {
                 try {
@@ -129,8 +120,19 @@ export const useGameController = () => {
         }
         dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
 
-        dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
-    }, [activeGameTable, user, dispatch]);
+        if (offlineTable) {
+            dispatch({ type: 'SET_OFFLINE_TABLE', payload: null });
+        }
+    }, [activeGameTable, user, offlineTable, dispatch]);
+
+    // BUG-S3: Reset isTransitioningRef when view transitions away from 'game'
+    // using a effect that watches currentView — more reliable than setTimeout
+    useEffect(() => {
+        if (state.currentView === 'game') return;
+        if (isTransitioningRef.current) {
+            isTransitioningRef.current = false;
+        }
+    }, [state.currentView]);
 
     const finalizeGameEnd = useCallback(() => {
         isTransitioningRef.current = true;
@@ -138,8 +140,6 @@ export const useGameController = () => {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
 
-        // BUG 3 FIX: use the stable ref — activeGameTable may already be null
-        // because handleGameEnd dispatches SET_ACTIVE_TABLE: null before this is called.
         const tournamentMatchId = activeTournamentMatchIdRef.current;
         const isTournament = !!tournamentMatchId;
 
@@ -150,7 +150,7 @@ export const useGameController = () => {
         }
 
         setSocketGame(null);
-        dispatch({ type: 'SET_ACTIVE_TABLE', payload: null });
+        dispatch({ type: 'SET_OFFLINE_TABLE', payload: null });
         dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
         dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
         dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
@@ -164,13 +164,8 @@ export const useGameController = () => {
 
         dispatch({ type: 'SET_GAME_RESULT', payload: null });
         localStorage.removeItem('vantage_active_tournament_match');
-        // Clear the ref after navigation decision is made
         activeTournamentMatchIdRef.current = null;
-
-        setTimeout(() => {
-            isTransitioningRef.current = false;
-        }, 500);
-    }, [socket, socketGame, activeGameTable, setSocketGame, dispatch]);
+    }, [socket, socketGame, setSocketGame, dispatch]);
 
     const handleRematchRequest = useCallback(() => {
         if (!user || !socket || !socketGame) return;

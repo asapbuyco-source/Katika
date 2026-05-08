@@ -15,9 +15,14 @@ import { SocketGameState } from '../types';
 export interface AppState {
     user: User | null;
     currentView: ViewState;
-    activeTable: Table | null;
+    // BUG-S1 FIX: offlineTable is ONLY for bot/solo games.
+    // Socket (P2P) game state lives exclusively in SocketContext.socketGame.
+    offlineTable: Table | null;
     matchmakingConfig: { stake: number; gameType: string; isTournament?: boolean } | null;
     authLoading: boolean;
+
+    // Network status (for UI feedback) — driven by SocketContext
+    networkStatus: 'online' | 'degraded' | 'offline';
 
     // Game End
     gameResult: {
@@ -49,7 +54,8 @@ export interface AppState {
 export type AppAction =
     | { type: 'SET_USER'; payload: User | null }
     | { type: 'SET_VIEW'; payload: ViewState }
-    | { type: 'SET_ACTIVE_TABLE'; payload: Table | null }
+    // BUG-S1 FIX: renamed from SET_ACTIVE_TABLE — only for offline/bot tables
+    | { type: 'SET_OFFLINE_TABLE'; payload: Table | null }
     | { type: 'SET_MATCHMAKING_CONFIG'; payload: { stake: number; gameType: string; isTournament?: boolean } | null }
     | { type: 'SET_AUTH_LOADING'; payload: boolean }
     | { type: 'SET_GAME_RESULT'; payload: AppState['gameResult'] }
@@ -59,6 +65,11 @@ export type AppAction =
     | { type: 'SET_INCOMING_CHALLENGE'; payload: Challenge | null }
     | { type: 'SET_UNREAD_FORUM'; payload: boolean }
     | { type: 'UPDATE_USER'; payload: Partial<User> }
+    // BUG-S5 FIX: optimistic balance update — applied immediately on game_over,
+    // reconciled when Firestore confirms via subscribeToUser.
+    | { type: 'OPTIMISTIC_BALANCE_UPDATE'; payload: number }
+    // NET: track network state for UI feedback
+    | { type: 'SET_NETWORK_STATUS'; payload: AppState['networkStatus'] }
     | { type: 'RESET_GAME_STATE' };
 
 // ─── Reducer ───────────────────────────────────────────────────────────────────
@@ -66,9 +77,10 @@ export type AppAction =
 const initialState: AppState = {
     user: null,
     currentView: 'landing',
-    activeTable: null,
+    offlineTable: null,
     matchmakingConfig: null,
     authLoading: true,
+    networkStatus: 'online',
     gameResult: null,
     rematchStatus: 'idle',
     opponentDisconnected: false,
@@ -84,10 +96,14 @@ function appReducer(state: AppState, action: AppAction): AppState {
             return { ...state, user: action.payload };
         case 'UPDATE_USER':
             return { ...state, user: state.user ? { ...state.user, ...action.payload } : null };
+        case 'OPTIMISTIC_BALANCE_UPDATE':
+            // Apply expected winnings immediately; Firestore will reconcile the real value
+            if (!state.user) return state;
+            return { ...state, user: { ...state.user, balance: Math.max(0, state.user.balance + action.payload) } };
         case 'SET_VIEW':
             return { ...state, currentView: action.payload };
-        case 'SET_ACTIVE_TABLE':
-            return { ...state, activeTable: action.payload };
+        case 'SET_OFFLINE_TABLE':
+            return { ...state, offlineTable: action.payload };
         case 'SET_MATCHMAKING_CONFIG':
             return { ...state, matchmakingConfig: action.payload };
         case 'SET_AUTH_LOADING':
@@ -108,14 +124,18 @@ function appReducer(state: AppState, action: AppAction): AppState {
             return { ...state, incomingChallenge: action.payload };
         case 'SET_UNREAD_FORUM':
             return { ...state, unreadForum: action.payload };
+        case 'SET_NETWORK_STATUS':
+            return { ...state, networkStatus: action.payload };
         case 'RESET_GAME_STATE':
+            // BUG-S2 NOTE: socketGame is cleared by SocketContext via setSocketGame(null).
+            // This action only clears AppContext-owned fields.
             return {
                 ...state,
                 currentView: 'lobby',
                 gameResult: null,
                 rematchStatus: 'idle',
                 opponentDisconnected: false,
-                activeTable: null,
+                offlineTable: null,
                 matchmakingConfig: null,
             };
         default:

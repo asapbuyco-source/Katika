@@ -2279,8 +2279,8 @@ io.on('connection', (socket) => {
         });
     });
 
-    // 2. REJOIN EXPLICIT
-    socket.on('rejoin_game', ({ userProfile }) => {
+    // 2. REJOIN EXPLICIT (NET-6: use acknowledgement callback for explicit response)
+    socket.on('rejoin_game', ({ userProfile }, callback) => {
         const userId = (socket.user && socket.user.uid) || userProfile.id;
 
         if (disconnectTimers.has(userId)) {
@@ -2291,6 +2291,7 @@ io.on('connection', (socket) => {
         userSockets.set(userId, socket.id);
         socketUsers.set(socket.id, userId);
 
+        let roomFound = false;
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(userId) && room.status === 'active') {
                 socket.join(roomId);
@@ -2306,8 +2307,13 @@ io.on('connection', (socket) => {
                     profiles: room.profiles,
                     chat: room.chat
                 });
+                roomFound = true;
                 break;
             }
+        }
+
+        if (callback) {
+            callback({ success: roomFound, reason: roomFound ? null : 'room_not_found' });
         }
     });
 
@@ -3143,6 +3149,14 @@ io.on('connection', (socket) => {
             // Echo back to acknowledge heartbeat — helps client gauge RTT and stability
             socket.emit('pool_pong', { roomId: data.roomId, timestamp: Date.now() });
         }
+    });
+
+    // ── Network latency ping (used by the client signal-strength indicator) ──
+    // The client sends { t: performance.now() } and we echo it back verbatim.
+    // RTT = performance.now() - data.t  (calculated entirely on the client).
+    // Zero processing cost on the server — just reflect the payload.
+    socket.on('client_ping', (data) => {
+        socket.emit('client_pong', data);
     });
 
     // 4. DISCONNECT
