@@ -32,6 +32,8 @@ export const LiveWinFeed: React.FC = () => {
             const newEvents: WinEvent[] = snap.docs.map(d => ({ id: d.id, ...d.data() } as WinEvent));
             queueRef.current = newEvents;
             if (!timerRef.current) showNext();
+        }, (error) => {
+            console.error('[LiveWinFeed] Firestore snapshot failed:', error);
         });
         return () => { unsub(); clearTimeout(timerRef.current); };
     }, []);

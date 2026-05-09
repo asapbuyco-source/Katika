@@ -64,7 +64,7 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
         turn: user.id,
         gameState: { difficulty: difficulty || 'medium' }
     };
-    const docRef = await addDoc(collection(db, "games"), newGame);
+    const docRef = await addDoc(collection(db, "bot_games"), newGame);
     return docRef.id;
 };
 
@@ -73,6 +73,8 @@ export const subscribeToGame = (gameId: string, callback: (data: any) => void) =
         if (docSnap.exists()) {
             callback({ id: docSnap.id, ...docSnap.data() });
         }
+    }, (error) => {
+        console.error('[subscribeToGame] Firestore snapshot failed for game', gameId, error);
     });
 };
 
@@ -113,6 +115,8 @@ export const subscribeToGameConfigs = (callback: (configs: Record<string, string
             configs[doc.id] = doc.data().status;
         });
         callback(configs);
+    }, (error) => {
+        console.error('[subscribeToGameConfigs] Firestore snapshot failed:', error);
     });
 };
 
@@ -131,6 +135,8 @@ export const subscribeToIncomingChallenges = (userId: string, callback: (challen
         } else {
             callback(null);
         }
+    }, (error) => {
+        console.error('[subscribeToIncomingChallenges] Firestore snapshot failed:', error);
     });
 };
 
@@ -139,29 +145,35 @@ export const subscribeToChallengeStatus = (challengeId: string, callback: (data:
         if (docSnap.exists()) {
             callback({ id: docSnap.id, ...docSnap.data() } as Challenge);
         }
+    }, (error) => {
+        console.error('[subscribeToChallengeStatus] Firestore snapshot failed for challenge', challengeId, error);
     });
 };
 
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
-    const sAvailable = (sender.balance || 0) + (sender.promoBalance || 0);
-    if (sAvailable < stake) {
-        throw new Error("Insufficient total funds (Real + Promo) to send this challenge.");
+    const response = await fetch('/api/challenges/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetId, gameType, stake })
+    });
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to send challenge.');
     }
-    const challengeData = {
-        sender: { id: sender.id, name: sender.name, avatar: sender.avatar, elo: sender.elo, rankTier: sender.rankTier },
-        targetId: targetId,
-        gameType: gameType,
-        stake: stake,
-        status: 'pending',
-        timestamp: serverTimestamp(),
-        createdAt: Date.now()
-    };
-    const docRef = await addDoc(collection(db, "challenges"), challengeData);
-    return docRef.id;
+    const data = await response.json();
+    return data.challengeId;
 };
 
 export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined', gameId?: string) => {
-    await updateDoc(doc(db, "challenges", challengeId), { status: status, gameId: gameId || null });
+    const response = await fetch('/api/challenges/respond', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ challengeId, action: status, gameId })
+    });
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to respond to challenge.');
+    }
 };
 
 export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {

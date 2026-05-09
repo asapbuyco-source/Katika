@@ -29,6 +29,9 @@ export interface SocketGameState {
   tournamentMatchId?: string;
   /** Legacy alias — may be populated instead of tournamentMatchId */
   privateRoomId?: string;
+  /** Monotonically increasing sequence number per room for gap detection.
+   * If received sequence > lastSequence + 1, a game_update was dropped. */
+  sequence?: number;
 }
 
 /** Union type for all game action payloads sent from client to server */

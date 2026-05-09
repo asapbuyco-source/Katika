@@ -56,9 +56,20 @@ service cloud.firestore {
     match /games/{gameId} {
       allow read: if isAuth();
       allow create: if isFullAccount();
-      // Only players in the game can update it (socket/server sync)
-      allow update: if isAuth() && request.auth.uid in resource.data.players;
+      // [Phase 1.2] Restrict client updates to only gameState and turn fields.
+      // Players can update their own game's state during active play.
+      // status and winner changes go through the authoritative server socket path,
+      // not client Firestore writes.
+      allow update: if isAuth() && request.auth.uid in resource.data.players
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['gameState', 'turn', 'updatedAt']);
       allow delete: if false;
+    }
+
+    // ─── BOT GAMES ─────────────────────────────────────────────────────────────
+    // Bot/solo games written by server only (client cannot create directly)
+    match /bot_games/{gameId} {
+      allow read: if isAuth() && request.auth.uid in resource.data.players;
+      allow create, update, delete: if false;
     }
 
     // ─── CHALLENGES ──────────────────────────────────────────────────────────

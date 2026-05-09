@@ -12,7 +12,7 @@ export interface PaymentResponse {
     transId: string;
 }
 
-export const initiateFapshiPayment = async (amount: number, user: User): Promise<PaymentResponse | null> => {
+export const initiateFapshiPayment = async (amount: number, user: User, depositAmount?: number): Promise<PaymentResponse | null> => {
     try {
         const token = await auth.currentUser?.getIdToken();
         const response = await fetch(`${PROXY_BASE}/api/pay/initiate`, {
@@ -23,6 +23,7 @@ export const initiateFapshiPayment = async (amount: number, user: User): Promise
             },
             body: JSON.stringify({
                 amount,
+                depositAmount: depositAmount ?? amount,
                 userId: user.id,
                 redirectUrl: window.location.href
             })
