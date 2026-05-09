@@ -83,7 +83,7 @@ export const GameChat: React.FC<GameChatProps> = ({ messages, onSendMessage, cur
                                 const profile = profiles[msg.senderId];
                                 return (
                                     <div key={msg.id} className={`flex gap-2 ${isMe ? 'flex-row-reverse' : ''}`}>
-                                        <img src={profile?.avatar || 'https://i.pravatar.cc/150'} className="w-6 h-6 rounded-full border border-white/10 flex-shrink-0" />
+                                        <img src={profile?.avatar || 'https://i.pravatar.cc/150'} className="w-6 h-6 rounded-full border border-white/10 flex-shrink-0" alt={profile?.name || 'Chat user avatar'} />
                                         <div className={`max-w-[80%] p-2 rounded-xl text-xs ${isMe ? 'bg-gold-500 text-royal-950 rounded-tr-none' : 'bg-white/10 text-white rounded-tl-none'}`}>
                                             {!isMe && <div className="font-bold opacity-50 text-[10px] mb-0.5">{profile?.name || 'Opponent'}</div>}
                                             {msg.message}

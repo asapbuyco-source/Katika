@@ -57,7 +57,7 @@ export const ChallengeRequestModal: React.FC<ChallengeRequestModalProps> = ({ ch
                     
                     <div className="mb-6 relative inline-block">
                         <div className="w-20 h-20 rounded-full border-4 border-gold-500 p-1 relative z-10 bg-royal-900">
-                            <img src={challenge.sender.avatar} className="w-full h-full rounded-full object-cover" />
+                            <img src={challenge.sender.avatar} className="w-full h-full rounded-full object-cover" alt={challenge.sender.name + '\'s avatar'} />
                         </div>
                         <div className="absolute -bottom-2 -right-2 bg-red-500 text-white p-1.5 rounded-full border-2 border-royal-900 z-20">
                             <Swords size={16} />

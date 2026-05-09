@@ -518,7 +518,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                     <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
                         <div className="flex items-center gap-3">
                             <div className={`relative ${!isMyTurn ? 'ring-4 ring-red-500/50 rounded-full' : ''}`}>
-                                <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
+                                <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" alt={opponentName} />
                                 {!isMyTurn && phase === 'rolling' && (
                                     <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
                                 )}
@@ -593,7 +593,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
                     <div className="flex items-center gap-3">
                         <div className={`relative ${isMyTurn ? 'ring-4 ring-gold-500/50 rounded-full' : ''}`}>
-                            <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
+                            <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" alt="Your avatar" />
                             {isMyTurn && phase === 'rolling' && (
                                 <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
                             )}

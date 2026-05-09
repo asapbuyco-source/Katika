@@ -289,7 +289,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 <div className={`flex flex-col items-center gap-2 transition-all duration-300 ${isXNext ? 'scale-110 opacity-100' : 'opacity-60 grayscale'}`}>
                     <div className="relative">
                         <div className="w-16 h-16 rounded-full border-4 border-gold-500 overflow-hidden shadow-[0_0_20px_gold]">
-                            <img src={user.avatar} className="w-full h-full object-cover" />
+                            <img src={user.avatar} className="w-full h-full object-cover" alt="Your avatar" />
                         </div>
                         <div className="absolute -bottom-2 -right-2 bg-royal-900 rounded-full border-2 border-gold-500 p-1">
                             {isHost ? <X size={14} className="text-gold-400" strokeWidth={4} /> : <Circle size={14} className="text-gold-400" strokeWidth={4} />}
@@ -315,7 +315,7 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
                 <div className={`flex flex-col items-center gap-2 transition-all duration-300 ${!isXNext ? 'scale-110 opacity-100' : 'opacity-60 grayscale'}`}>
                     <div className="relative">
                         <div className="w-16 h-16 rounded-full border-4 border-purple-500 overflow-hidden shadow-[0_0_20px_purple]">
-                            <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full object-cover" />
+                            <img src={table.host?.id === user.id ? table.guest?.avatar : table.host?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full object-cover" alt={table.host?.id === user.id ? table.guest?.name || 'Opponent avatar' : table.host?.name || 'Opponent avatar'} />
                         </div>
                         <div className="absolute -bottom-2 -left-2 bg-royal-900 rounded-full border-2 border-purple-500 p-1">
                             {!isHost ? <X size={14} className="text-purple-400" strokeWidth={4} /> : <Circle size={14} className="text-purple-400" strokeWidth={4} />}

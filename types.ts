@@ -1,5 +1,5 @@
 
-export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings' | 'tournaments';
+export type ViewState = 'landing' | 'auth' | 'dashboard' | 'lobby' | 'matchmaking' | 'game' | 'profile' | 'finance' | 'how-it-works' | 'admin' | 'help-center' | 'report-bug' | 'terms' | 'privacy' | 'forum' | 'settings' | 'tournaments' | 'collection';
 
 /** Map of userId -> PlayerProfile as sent by the server in socket payloads */
 export type PlayerProfileMap = Record<string, PlayerProfile>;

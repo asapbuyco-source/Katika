@@ -404,8 +404,8 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                           tempAvatar === avatar ? 'border-gold-500 scale-110 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'
                                       }`}
                                    >
-                                       <img src={avatar} className="w-full h-full object-cover" />
-                                       {tempAvatar === avatar && (
+                                        <img src={avatar} className="w-full h-full object-cover" alt={`Avatar option ${i + 1}`} />
+                                        {tempAvatar === avatar && (
                                            <div className="absolute inset-0 bg-gold-500/20 flex items-center justify-center">
                                                <Check size={16} className="text-white drop-shadow-md" />
                                            </div>

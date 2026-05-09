@@ -1,0 +1,257 @@
+# Claude Sonnet 4.6 Comprehensive Audit Prompt for Vantage Gaming (Katika)
+
+---
+
+## CONTEXT
+
+You are auditing a production-grade P2P real-money skill gaming platform called Vantage Gaming (also known as Katika) for the Cameroonian market. The platform supports Chess, Checkers, Dice, Ludo, TicTacToe, Pool, and Cards (Whot) with real-money stakes via mobile money (MTN/Orange).
+
+**Tech Stack:**
+- Frontend: React 18 + TypeScript (strict) + Vite + Tailwind CSS + Framer Motion + PWA
+- Backend: Node.js + Express + Socket.IO (monolithic server.js ~3300 lines)
+- Database: Firebase Firestore (NoSQL)
+- Auth: Firebase Auth (email/password, Google, anonymous)
+- Payments: Fapshi API (MTN Mobile Money, Orange Money - XAF/FCFA)
+- Testing: Vitest (10+ test suites)
+
+---
+
+## AUDIT INSTRUCTIONS
+
+Perform a comprehensive audit across ALL of the following areas. For each area, identify:
+1. **Strengths** - What's working well
+2. **Issues** - Bugs, vulnerabilities, anti-patterns
+3. **Recommendations** - Concrete fixes with priority (Critical/High/Medium/Low)
+
+---
+
+## AREA 1: CODE QUALITY & ARCHITECTURE
+
+Review:
+- [ ] Overall architecture decisions (monolithic server.js)
+- [ ] TypeScript usage and strict mode compliance
+- [ ] Component structure and organization
+- [ ] State management patterns (Context + useReducer)
+- [ ] View-based routing implementation
+- [ ] Code duplication and DRY violations
+- [ ] Error handling and edge cases
+- [ ] Memory leaks and cleanup (useEffect dependencies, event listeners, subscriptions)
+
+**Files to check:** components/*.tsx, services/AppContext.tsx, services/SocketContext.tsx, types.ts
+
+---
+
+## AREA 2: SECURITY & VULNERABILITIES
+
+Review:
+- [ ] XSS vulnerabilities (DOMPurify usage, innerHTML usage)
+- [ ] SQL/NoSQL injection patterns
+- [ ] Authentication/authorization bypasses
+- [ ] Insecure direct object references (IDOR)
+- [ ] Sensitive data exposure in client bundle
+- [ ] CSRF protection
+- [ ] Rate limiting effectiveness
+- [ ] API key leakage (Firebase keys, Fapshi keys)
+- [ ] Firestore rules correctness and coverage
+- [ ] Input validation on all endpoints
+- [ ] WebSocket security (message validation, size limits)
+
+**Files to check:** server.js, firestore.rules, services/firebase/*.ts, components/*
+
+---
+
+## AREA 3: GAME LOGIC CORRECTNESS
+
+For each game (Chess, Checkers, Dice, Ludo, TicTacToe, Pool, Whot), verify:
+- [ ] Move validation is server-authoritative
+- [ ] All edge cases handled (e.g., castling in chess, multi-jump in checkers)
+- [ ] Win/loss/draw detection is accurate
+- [ ] Timer/expiry logic is correct
+- [ ] State transitions are atomic
+- [ ] Game state is persisted correctly for dispute replay
+
+**Files to check:** server/chessLogic.js, server/checkersLogic.js, server/diceLogic.js, server/ludoLogic.js, server/tictactoeLogic.js, game-graphics/*.ts, components/*Game.tsx
+
+---
+
+## AREA 4: ANTI-CHEAT & FAIR PLAY
+
+Review:
+- [ ] Server-side move validation coverage
+- [ ] Ghost-win prevention (especially Pool)
+- [ ] Shot replay detection (Pool)
+- [ ] Behavioral anomaly detection (>85% win rate at 20+ games)
+- [ ] Rate limiting per user/socket
+- [ ] Escrow manipulation prevention
+- [ ] Race condition handling in matchmaking
+- [ ] Tournament bracket integrity
+- [ ] AI referee effectiveness
+- [ ] Game log audit trail completeness
+
+**Files to check:** server.js (anti-cheat sections), server/tournamentLogic.js, services/firebase/games.ts
+
+---
+
+## AREA 5: PAYMENTS & FINANCIAL INTEGRITY
+
+Review:
+- [ ] Payment initiation flow (Fapshi API integration)
+- [ ] Webhook processing and IP validation
+- [ ] Idempotency (processed_payments sentinel)
+- [ ] Double-escrow logic correctness
+- [ ] Promo balance vs real balance separation
+- [ ] Withdrawal/disbursement flow
+- [ ] Refund handling (tournament cancel, dispute resolve)
+- [ ] Balance manipulation prevention
+- [ ] Transaction logging completeness
+
+**Files to check:** server.js (payment routes), services/fapshi.ts, firestore.rules
+
+---
+
+## AREA 6: DATABASE & DATA MODEL
+
+Review:
+- [ ] Firestore collection structure
+- [ ] Indexes for query performance
+- [ ] Security rules correctness and completeness
+- [ ] Subcollection usage合理性
+- [ ] Data consistency (transactions, balance updates)
+- [ ] Real-time subscriptions cleanup
+- [ ] Pagination for large collections
+
+**Files to check:** firestore.rules, firestore.indexes.json, services/firebase/*.ts
+
+---
+
+## AREA 7: REAL-TIME & SOCKET.IO
+
+Review:
+- [ ] Connection management (connect/disconnect/reconnect)
+- [ ] Room lifecycle management
+- [ ] Message validation and sanitization
+- [ ] Latency handling
+- [ ] Reconnection logic
+- [ ] Orphan room cleanup
+- [ ] Memory management (socket map cleanup)
+- [ ] Ping/pong mechanism
+
+**Files to check:** server.js (Socket.IO handlers), services/SocketContext.tsx
+
+---
+
+## AREA 8: FRONTEND UX/UI
+
+Review:
+- [ ] Accessibility (ARIA labels, keyboard navigation)
+- [ ] Mobile responsiveness
+- [ ] Loading states and skeleton screens
+- [ ] Error states and retry mechanisms
+- [ ] PWA offline functionality
+- [ ] Theme switching (dark/light)
+- [ ] Internationalization (EN/FR)
+- [ ] Animation performance (Framer Motion)
+- [ ] Navigation UX (back button, deep linking)
+
+**Files to check:** components/*.tsx, services/i18n.tsx, services/theme.tsx, index.html
+
+---
+
+## AREA 9: PERFORMANCE & OPTIMIZATION
+
+Review:
+- [ ] Bundle size and code splitting
+- [ ] Lazy loading effectiveness
+- [ ] React component re-renders (memoization)
+- [ ] Firebase query optimization
+- [ ] Socket.IO message batching
+- [ ] Pool physics performance
+- [ ] Image/asset optimization
+- [ ] Service worker caching strategy
+
+**Files to check:** vite.config.ts, components/*Game.tsx, game-graphics/*.ts
+
+---
+
+## AREA 10: TESTING & QUALITY ASSURANCE
+
+Review:
+- [ ] Test coverage for game logic
+- [ ] Unit tests for utilities
+- [ ] Integration tests for critical flows
+- [ ] E2E test coverage
+- [ ] Mock/Firebase usage in tests
+- [ ] Test data setup/teardown
+- [ ] Assertion completeness
+
+**Files to check:** tests/*.js, tests/*.ts, tests/*.mjs
+
+---
+
+## AREA 11: DEPLOYMENT & DevOps
+
+Review:
+- [ ] Netlify configuration correctness
+- [ ] Railway/Node.js configuration
+- [ ] Environment variable management
+- [ ] Health check endpoint
+- [ ] CSP header configuration
+- [ ] Build process (CSP hash generation)
+- [ ] Rollback capability
+
+**Files to check:** netlify.toml, railway.toml, railway.json, vite.config.ts, scripts/*.mjs
+
+---
+
+## AREA 12: COMPLIANCE & REGULATORY
+
+Review:
+- [ ] Age verification/gating
+- [ ] Responsible gambling features (deposit limits?)
+- [ ] Data privacy (GDPR/CCPA compliance)
+- [ ] Terms of Service completeness
+- [ ] Privacy Policy completeness
+- [ ] Financial disclosures
+- [ ] Cameroon regulatory compliance
+
+**Files to check:** components/TermsOfService.tsx, components/PrivacyPolicy.tsx
+
+---
+
+## OUTPUT FORMAT
+
+For each audit area, provide:
+
+```
+### AREA X: [Area Name]
+
+#### Strengths
+- [List what's working well]
+
+#### Issues Found
+| Priority | Issue | Location | Description |
+|----------|-------|-----------|-------------|
+| Critical | ... | file:line | ... |
+| High | ... | ... | ... |
+
+#### Recommendations
+1. **[Priority]** Description - File:line - Suggested fix
+2. ...
+```
+
+---
+
+## FINAL SUMMARY
+
+Provide:
+1. **Critical Issues Count** - List all critical items
+2. **High Priority Issues Count** - List all high items
+3. **Top 5 Action Items** - The most important fixes
+4. **Code Health Score** - Estimate 1-10 with justification
+5. **Additional Recommendations** - Any suggestions not covered above
+
+---
+
+## START AUDIT
+
+Begin your comprehensive audit now. Take your time to thoroughly examine all files, trace data flows, and identify issues. Be exhaustive.

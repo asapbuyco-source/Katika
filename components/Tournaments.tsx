@@ -783,7 +783,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                         return (
                                             <div key={m.id} className="flex flex-col items-center gap-2 min-w-[80px]">
                                                 <div className="w-10 h-10 rounded-full border-2 border-yellow-400 p-0.5">
-                                                    <img src={winner?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full object-cover" />
+                                                    <img src={winner?.avatar || "https://i.pravatar.cc/150"} className="w-full h-full rounded-full object-cover" alt={winner?.name || 'Winner avatar'} />
                                                 </div>
                                                 <span className="text-[10px] font-bold text-white truncate max-w-full">{winner?.name}</span>
                                             </div>
@@ -894,7 +894,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                                         <div className={`p-3 border-b border-white/5 flex items-center justify-between ${match.winnerId === match.player1?.id ? 'bg-green-500/10' : ''}`}>
                                                             <div className="flex items-center gap-2">
                                                                 <div className="w-6 h-6 rounded-full bg-slate-800 overflow-hidden">
-                                                                    {match.player1 ? <img src={match.player1.avatar} className="w-full h-full object-cover" /> : null}
+                                                                    {match.player1 ? <img src={match.player1.avatar} className="w-full h-full object-cover" alt={match.player1.name} /> : null}
                                                                 </div>
                                                                 <span className={`text-xs font-bold ${match.winnerId === match.player1?.id ? 'text-green-400' : 'text-slate-300'}`}>
                                                                     {match.player1?.name || (match.player2 ? "TBD" : "Bye")}
@@ -907,7 +907,7 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                                         <div className={`p-3 flex items-center justify-between ${match.winnerId === match.player2?.id ? 'bg-green-500/10' : ''}`}>
                                                             <div className="flex items-center gap-2">
                                                                 <div className="w-6 h-6 rounded-full bg-slate-800 overflow-hidden">
-                                                                    {match.player2 ? <img src={match.player2.avatar} className="w-full h-full object-cover" /> : null}
+                                                                    {match.player2 ? <img src={match.player2.avatar} className="w-full h-full object-cover" alt={match.player2.name} /> : null}
                                                                 </div>
                                                                 <span className={`text-xs font-bold ${match.winnerId === match.player2?.id ? 'text-green-400' : 'text-slate-300'}`}>
                                                                     {match.player2?.name || (match.player1 ? "TBD" : "Bye")}

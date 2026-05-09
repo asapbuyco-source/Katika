@@ -472,12 +472,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                         >
                                             <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/5">
                                                 <div className="flex flex-col items-center">
-                                                    <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" />
+                                                    <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" alt="Your avatar" />
                                                     <span className="text-xs font-bold text-white mt-1">You</span>
                                                 </div>
                                                 <div className="text-2xl font-black text-slate-600 italic">VS</div>
                                                 <div className="flex flex-col items-center">
-                                                    <img src={selectedFriend?.avatar} className="w-12 h-12 rounded-full border-2 border-red-500" />
+                                                    <img src={selectedFriend?.avatar} className="w-12 h-12 rounded-full border-2 border-red-500" alt={selectedFriend?.name || 'Friend avatar'} />
                                                     <span className="text-xs font-bold text-white mt-1">{selectedFriend?.name}</span>
                                                 </div>
                                             </div>
