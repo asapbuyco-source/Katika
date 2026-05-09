@@ -12,8 +12,8 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        display: ['Space Grotesk', 'sans-serif'],
+        sans: ['Comfortaa', 'sans-serif'],
+        display: ['Comfortaa', 'sans-serif'],
       },
       colors: {
         royal: {
