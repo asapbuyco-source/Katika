@@ -1,0 +1,328 @@
+Here is the comprehensive audit of Vantage Gaming (Katika).
+
+---
+
+### AREA 1: Code Quality & Architecture
+
+#### Strengths
+- Clean component organization with lazy loading for all routes
+- Centralized type definitions in `types.ts`
+- `useReducer` + Context pattern is appropriate for this scale
+- Good separation of Firebase services into sub-modules
+- Error boundary with chunk-reload guard is well thought out
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| Critical | `prevPieces` undefined reference | `server.js` Ludo MOVE_PIECE handler | `prevPieces` and `movedIllegally` are referenced but never declared. Every P2P Ludo move throws a `ReferenceError`, making the game unplayable. |
+| Critical | Dead code: `findOrCreateMatch` still exported | `services/firebase/games.ts:1-30` | Comments say this was removed in Phase 1.3, but the function still exists and is exported. Accidental usage would bypass server escrow. |
+| High | Tournament logic duplicated | `server.js` + `server/routes/tournaments.js` | Two complete, divergent implementations of `finaliseTournament` and `checkAndAdvanceTournamentLogic`. Risk of silent divergence. |
+| High | 3300-line monolithic server | `server.js` | The entire backend in one file makes audits, debugging, and testing very difficult. The `server/routes/` directory exists but isn't used by the main server. |
+| Medium | No ESLint or Prettier | `package.json` | JavaScript server code has no linting. TypeScript strict mode helps the frontend, but the backend is unguarded. |
+| Medium | `const motion = originalMotion as any` | Multiple game files | This pattern casts away all type safety on the animation library and appears in 8+ files. |
+| Low | `App.tsx` stub at root | `App.tsx` | Deprecated root file still exports a component. Can cause confusion. |
+
+#### Recommendations
+1. **Critical** — Fix Ludo `MOVE_PIECE` handler — add `const prevPieces = room.gameState.pieces;` before the validation block.
+2. **High** — Remove `findOrCreateMatch` and `setGameResult` from `services/firebase/games.ts` entirely.
+3. **High** — Pick one tournament implementation. The `server/routes/tournaments.js` version appears more modular; remove the duplicate from `server.js`.
+
+---
+
+### AREA 2: Security & Vulnerabilities
+
+#### Strengths
+- Firebase API keys correctly distinguished (client-safe vs. server-only)
+- `DOMPurify` (isomorphic) used server-side for all user-controlled strings
+- Firestore rules block client-side financial writes
+- `verifyAuth` middleware uses Firebase Admin SDK properly
+- FAPSHI webhook performs API verification before crediting
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| Critical | `VITE_ADMIN_SECRET` baked into client bundle | `.env.example`, `AdminDashboard.tsx` | The `VITE_` prefix causes Vite to embed this in the JavaScript bundle. Any user can read it from DevTools. The server now uses Bearer token auth for admin routes, so this value is apparently unused — but its presence is a trap. |
+| Critical | `SOCKET_AUTH` defaults to `'off'` | `server.js:~90` | In development (the default), all socket connections are accepted without authentication. A misdeployed Railway app with `NODE_ENV=development` would accept unauthenticated sockets. |
+| High | Admin check falls back to email list in production | `server.js:ADMIN_EMAILS` | If `ADMIN_EMAILS` is not set, production exits (good). But the fallback `abrackly@gmail.com` for development leaks an internal email. |
+| High | Withdrawal `phone` regex too permissive | `server.js:/api/pay/disburse` | Regex `/^6\d{8}$/` passes before `.replace(/\s/g, '')` is called on `phone`. A phone number with spaces passes the check at the wrong value. Fix: validate the cleaned phone, not the raw input. |
+| High | `/api/pay/status` can double-credit | `server.js` | This endpoint tries to credit users if the webhook hasn't run. It has a Firestore transaction guard, but it only checks `pendingDeposits` in-memory — after a server restart these are gone. If the webhook then fires, the user is credited twice. The `processed_payments` sentinel should be checked first, before attempting any credit. |
+| Medium | Firestore `disputes` rule uses null-tolerant read | `firestore.rules:~98` | `resource.data.filedBy == null` allows anyone to read a dispute document where `filedBy` was not set — e.g., a race-condition document. |
+| Medium | `sendChallenge` in `services/firebase/games.ts` calls `/api/challenges/send` without auth token | `services/firebase/games.ts:~103` | The fetch call omits the `Authorization` header, so `verifyAuth` will reject it. This is a silent bug — challenge sending will fail for all users. |
+| Low | CSP `connect-src` uses `wss://*` wildcard | `server.js:buildCSPHeader()` | Allows WebSocket connections to any host. Should be restricted to `FRONTEND_URL`. |
+
+#### Recommendations
+1. **Critical** — Remove `VITE_ADMIN_SECRET` from `.env.example` and all frontend code.
+2. **Critical** — Set `SOCKET_AUTH=log` as the default; require explicit `SOCKET_AUTH=off` to disable in dev.
+3. **High** — In `/api/pay/status`, check `processed_payments` sentinel first and return early if it exists.
+4. **High** — Fix `sendChallenge` to include `Authorization: Bearer ${token}` header.
+
+---
+
+### AREA 3: Game Logic Correctness
+
+#### Strengths
+- Chess uses `chess.js` with server-side PGN diff validation — strong
+- TicTacToe draw streak detection (3 consecutive = end) is correct
+- Dice uses `crypto.randomInt` server-side — provably fair
+- Checkers server-side engine mirrors the client logic exactly
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| Critical | Ludo MOVE_PIECE crashes on every move | `server.js:~2150` | `prevPieces` is never defined. `movedIllegally` is also referenced but never populated. The entire Ludo validation block is dead/broken. |
+| Critical | Ludo capture validation checks `opponent pieces block path` | `server.js:~2200` | The `isPathBlocked` validation uses `prevPieces` (undefined), but even if fixed, it incorrectly blocks moves through safe squares and doesn't account for the color-specific track offset. |
+| High | Chess timer sync trusts client-sent increments | `server.js:~1850` | The server validates that no timer *increases*, but it doesn't validate that the timer didn't decrease by more than the elapsed wall-clock time. A fast-moving client could make its opponent's clock drain faster. |
+| High | Checkers FEN from Lidraughts — board parsed for 8×8, game is 10×10 | `CheckersGame.tsx:parseFen()` | `toCoords(sq)` and `toNotation(r,c)` in `lidraughts.ts` use 8×8 math (`sq/5`, `sq%5`) but the local board is 10×10. Pieces are placed in the wrong squares. |
+| Medium | Pool `turnsPlayed` is always 0 | `server.js:~1760` | `const maxPocketable = (room.gameState.turnsPlayed || 0) === 0 ? 4 : 2` — `turnsPlayed` is never incremented anywhere. After the first shot, the limit stays at 4 forever. |
+| Medium | Dice `evaluateRoundLocal` called after bot plays, but `myDice` state may not reflect the latest roll | `DiceGame.tsx:botPlay()` | `evaluateRoundLocal(myDiceRef.current, [d1, d2])` uses the ref, which is correct. But the timer cleanup in the `useEffect` can trigger `handleTimeout` while `isProcessing` is set, causing duplicate rolls. |
+
+#### Recommendations
+1. **Critical** — Rewrite the Ludo MOVE_PIECE validation from scratch. Define `prevPieces = room.gameState.pieces` and fully test the anti-teleport check.
+2. **High** — Validate chess timers using `Date.now()` delta on the server, not client-sent values.
+
+---
+
+### AREA 4: Anti-Cheat & Fair Play
+
+#### Strengths
+- Behavioral anomaly detection (>85% win rate at 20+ games) with Firestore flag
+- Pool ghost-win prevention with server-state cross-check
+- Ball position teleportation detection in Pool
+- Rate limiting: 10 actions/second per user
+- Shot count ledger prevents replay attacks
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | Pool group assignment (`GROUP_ASSIGN`) is fully client-trusted | `server.js:~1620` | `room.gameState.myGroupP1/P2` are set from `action.myGroupP1/myGroupP2` with zero validation. A player can assign themselves any group at any time, enabling them to claim the 8-ball win with any ball. |
+| High | `TIMEOUT_CLAIM` for Chess/Checkers has a 10-minute minimum | `server.js:~1540` | `requiredDuration = 599500` for Checkers. This means an opponent who genuinely disconnects for 10 minutes still can't be time-claimed — the forfeit timer in `disconnect` handler fires first, but if that races with a reconnect, no claim can be made. |
+| Medium | Bot game Ludo uses `Math.random()` not `crypto.randomInt` | `GameRoom.tsx:handleRoll()` | Local bot games use `crypto.getRandomValues` (correct), but the bot roll `useEffect` also calls the same logic. This is fine, but the "provably fair" claim doesn't extend to bot games. |
+| Medium | Win-rate history resets on server restart | `server.js:gameOutcomeHistory` | `gameOutcomeHistory` is in-memory only. An anomalous player with 40 flagged games restarts the 20-game window after every deploy. |
+
+#### Recommendations
+1. **High** — Remove `GROUP_ASSIGN` as a client action. Assign groups server-side on first legal pot, using the server's authoritative ball state.
+2. **Medium** — Persist `gameOutcomeHistory` to Firestore (or at least the `wins`/`total` counters on the user document) so anomaly detection survives restarts.
+
+---
+
+### AREA 5: Payments & Financial Integrity
+
+#### Strengths
+- Webhook verifies with Fapshi API before crediting — correct defense-in-depth
+- `withRetry` with 3 attempts + `failed_settlements` fallback is excellent
+- Upfront escrow deduction in `join_game` before match creation
+- Refund on room creation failure is handled
+- Promo vs. real balance split is tracked per user and per tournament
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| Critical | Double-credit race: webhook path vs. `/api/pay/status` | `server.js` | Both paths write to `processed_payments` with a transaction guard, but `/api/pay/status` only checks the in-memory `pendingDeposits` map. After a server restart that map is empty, so the status endpoint will credit even if the webhook already did. The fix: always check the Firestore sentinel first in the status endpoint. |
+| High | Withdrawal validation uses raw `phone` before sanitization | `server.js:/api/pay/disburse` | `phone` is validated with regex before `phone.replace(/\s/g, '')` runs. A phone number `"693 00 00 00"` (9 chars with spaces) passes `/^6\d{8}$/` because the regex matches `693` as `6` then 8 digits... actually wait — regex is applied to `phone` before `.replace()` at the `cleanPhone` step further down. The regex `/^6\d{8}$/` requires exactly 9 chars so spaces would fail. Re-examining: the regex IS applied to `phone` (with spaces) but `^6\d{8}$` requires exactly 9 chars — a phone with spaces has more than 9 chars, so it fails. This is actually not exploitable but the validation order is still confusing. |
+| High | `reconcileOrphanedEscrows` uses `collectionGroup` on `transactions` | `server.js:~2960` | This requires a Firestore Collection Group index. If not deployed, the reconciliation silently fails with `"Check skipped"` on every startup. Orphaned funds are never refunded. |
+| Medium | `cancelPayment` in `Finance.tsx` only clears local state | `Finance.tsx:cancelPayment()` | It clears the polling interval and local state but doesn't cancel the Fapshi transaction on their server. A user who "cancels" can still approve the payment on their phone and get credited — which is actually correct behavior, but the UI implies cancellation is final. |
+| Medium | Fee calculation exposed to clients | `Finance.tsx:handleDeposit()` | The 3% fee is computed client-side and the `depositAmount` is sent to the server. A modified client could send `depositAmount = totalToPay` to get a fee-free deposit. The server should recompute the net amount. |
+
+#### Recommendations
+1. **Critical** — In `/api/pay/status`, check `processed_payments` Firestore sentinel before attempting credit. Return 200 without crediting if it exists.
+2. **High** — Move fee computation to the server. Accept only `amount` (total) from the client; server computes `depositAmount = floor(amount / 1.03)`.
+3. **High** — Add the `collectionGroup` index for `transactions` type to `firestore.indexes.json`.
+
+---
+
+### AREA 6: Database & Data Model
+
+#### Strengths
+- Financial collections (`processed_payments`, `processed_settlements`) are server-write-only
+- `noFinancialEscalation()` rule in Firestore prevents client balance manipulation
+- Composite indexes defined in `firestore.indexes.json`
+- `persistentLocalCache` with multi-tab manager configured for Firestore
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | Missing `collectionGroup` index for `transactions` by `type` | `firestore.indexes.json` | `reconcileOrphanedEscrows` queries `collectionGroup('transactions').where('type','==','escrow_lock')` — this needs a collection group index that isn't defined. |
+| High | `active_rooms` collection written but never read correctly | `server.js:hydrateRoomsFromFirestore()` | Room hydration on startup reads `active_rooms` but the `rooms.set(doc.id, roomData)` call won't properly rehydrate the `rematchVotes` Set (it's serialized as an object). Any rehydrated room using rematch logic will crash. |
+| Medium | `bot_games` collection: client can't write but server writes without quota consideration | `server.js:createBotMatch()` | Bot games are written to Firestore on every bot match start. At scale, this creates unnecessary Firestore write load for non-real-money games. |
+| Medium | Forum post deletion rule uses `userId` but old posts may have `authorId` | `firestore.rules:~84` | The rule comment notes this was fixed from `authorId` to `userId`, but any posts created before this fix retain `authorId` and can never be deleted by their author. |
+| Low | `getAllUsers` loads 100 users per call, unbounded iteration possible | `services/firebase/users.ts:getAllUsers()` | Admin panel calls this once and renders all users in memory. At 1000+ users this becomes slow. Pagination exists but isn't used in `AdminDashboard.tsx`. |
+
+#### Recommendations
+1. **High** — Add `collectionGroup` index: `{ collectionGroup: "transactions", fields: [{ fieldPath: "type" }, { fieldPath: "date" }] }`.
+2. **High** — Replace `Set` in room state with a plain array before persisting; re-hydrate as `new Set(data.rematchVotes || [])`.
+
+---
+
+### AREA 7: Real-Time & Socket.IO
+
+#### Strengths
+- Gap detection with sequence numbers and auto-resync is well-designed
+- `client_ping`/`client_pong` RTT measurement is clean
+- Page visibility API reconnect after 30s is thoughtful
+- `onIdTokenChanged` for automatic token refresh works correctly
+- Emission queue for critical game actions during brief disconnections
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | `rejoin_game` emitted on every `isConnected` change | `SocketContext.tsx:~160` | `useEffect(() => { socket.emit('rejoin_game', ...) }, [socket, isConnected, !!state.user])` fires on every reconnect, even when there's no active game. This spams the server with rejoin requests on normal connects/reconnects. |
+| High | `sanitizeRoomForClient` increments a global `gameUpdateSeq` counter on every call | `server.js:~40` | `++gameUpdateSeq` is a server-wide global, not per-room. Two simultaneous games share the same sequence space, causing clients to detect false gaps and trigger unnecessary resyncs constantly. |
+| Medium | `perMessageDeflate.threshold: 1024` — may cause issues with small messages | `server.js` | The `threshold` option in Socket.IO's `perMessageDeflate` controls client-to-server compression, not server-to-client. The configuration may not behave as intended. |
+| Medium | Socket token expiry timer `tokenExpiryTimer` not cleared on explicit disconnect | `server.js:~connection handler` | The 55-minute disconnect timer is set in `io.on('connection')` but the `clearTimeout` is only called on `refresh_token`. If a user disconnects normally, the timer leaks until it fires on a dead socket. |
+| Low | `aim_sync` room membership check uses `socket.rooms.has(roomId)` | `server.js` | This is correct, but `aim_sync` is emitted at high frequency during pool aiming. No rate limiting is applied to this event specifically. |
+
+#### Recommendations
+1. **High** — Move `gameUpdateSeq` into each room object: `room.sequence = (room.sequence || 0) + 1`.
+2. **High** — Guard the `rejoin_game` useEffect with `if (!sessionStorage.getItem('vantage_active_room')) return`.
+3. **Medium** — Clear `tokenExpiryTimer` on the `disconnect` event handler.
+
+---
+
+### AREA 8: Frontend UX/UI
+
+#### Strengths
+- Skeleton loaders implemented (`SkeletonLoader.tsx`) for loading states
+- `GameErrorBoundary` with chunk-reload loop guard is production-quality
+- `WeakNetworkModal` with auto-retry every 10 seconds
+- Bilingual EN/FR with auto-detection from browser language
+- `BalanceCounter` animated number counter is a nice UX touch
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | No age verification gate | `AuthScreen.tsx` | The platform handles real money and Terms state "18+", but there is no age confirmation checkbox or date-of-birth collection. |
+| High | `Forum.tsx` has hardcoded fake online count | `Forum.tsx:~57` | `Math.floor(Math.random() * 50) + 120` — the online count is randomized on every render. This is misleading in a real-money platform. |
+| Medium | `ChessGame.tsx` renders `undefined` when `myColor` is null | `ChessGame.tsx:~490` | `timeRemaining[myColor]` where `myColor` is `null` (before server confirms color) would render `timeRemaining[null]` = `undefined`. The skeleton guards against full render, but the issue remains during the narrow window. |
+| Medium | `handleDeleteAccount` uses `window.confirm` | `Profile.tsx:~290` | Native browser dialogs are blocked in some WebViews and PWA contexts. Should be replaced with a custom confirmation modal. |
+| Medium | `Forum.tsx` `Top Contributors` section is hardcoded fake data | `Forum.tsx:~167` | "Blaise", "Amara" with fake message counts are hardcoded. In a platform with financial transactions, fake social proof is a dark pattern. |
+| Low | Missing `aria-label` on icon-only buttons in game UIs | Multiple game components | `<button onClick={() => setShowForfeitModal(true)}>` with only `<ArrowLeft>` has no accessible label. |
+
+#### Recommendations
+1. **High** — Add an age confirmation checkbox to `AuthScreen` before account creation.
+2. **High** — Remove fake online counts and fake contributor data. Replace with real Firestore counts or remove entirely.
+3. **Medium** — Replace `window.confirm` with a custom modal component throughout.
+
+---
+
+### AREA 9: Performance & Optimization
+
+#### Strengths
+- Manual chunk splitting in `vite.config.ts` (vendor, firebase, lucide, ui)
+- `React.memo` with custom comparators on `CheckersCell` and `ChessSquare` prevents needless redraws
+- `useCallback` used extensively in game handlers to stabilize function references
+- Lazy loading on all route-level components
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | Pool `render()` called on every state change including non-visual ones | `PoolGame.tsx:~690` | `useEffect(() => { render() }, [render, phase, aimAngle, pullback, showAim, turn, message, isMyTurnState])` — `message` state changes (chat) trigger a canvas redraw. |
+| Medium | `LiveWinFeed.tsx` uses `setInterval` inside `showNext` that can overlap | `LiveWinFeed.tsx:showNext()` | `showNext` is called from the Firestore snapshot and sets a recursive timeout. If Firestore fires rapidly, multiple chains can run simultaneously. |
+| Medium | `AdminDashboard` fetches all users on every mount | `AdminDashboard.tsx:fetchData()` | `getAllUsers()` fetches up to 100 users on every admin page mount. No caching or incremental loading. |
+| Low | `Dashboard.tsx` subscribes to global winners but re-subscribes on every `user.id` change | `Dashboard.tsx:~30` | The subscription dependency `[user.id]` means it re-subscribes on token refreshes that don't change the user ID. |
+
+---
+
+### AREA 10: Testing & Quality Assurance
+
+#### Strengths
+- 10+ test suites covering all game logic modules
+- `lidraughts.test.ts` tests round-trip notation conversion
+- `vitest.config.ts` properly excludes the E2E test from the unit test suite
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | No tests for payment flows | `tests/` | The most financially critical code (escrow, webhook, settlement) has zero test coverage. |
+| High | No tests for the Ludo server-side validation (which is broken) | `tests/` | `ludoLogic.js` is tested, but the actual server MOVE_PIECE handler with its custom validation is not. |
+| Medium | `poolgame.integration.test.ts` listed in tsconfig but file not shown | `tsconfig.tsbuildinfo` | Integration tests for Pool exist in the build info but weren't included in the shared files — unknown coverage quality. |
+| Medium | No tests for Firestore security rules | — | The `firestore.rules` file has complex logic (`noFinancialEscalation`, `noAdminEscalation`) with no automated tests using the Firebase emulator. |
+
+#### Recommendations
+1. **High** — Add unit tests for `settleGame`, `deductEscrow`, `refundEscrow`, and the webhook handler.
+2. **High** — Fix the Ludo server handler, then add tests specifically for the `MOVE_PIECE` validation cases (entering without 6, overshoot, teleport, opponent mutation).
+
+---
+
+### AREA 11: Deployment & DevOps
+
+#### Strengths
+- Railway health check endpoint at `/health` with dependency status
+- Graceful shutdown handler persists active rooms before exit
+- Startup orphan escrow reconciliation
+- Nixpacks build with `npm run build` included
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| High | `FIREBASE_SERVICE_ACCOUNT` not set → silent degradation | `server.js:~60` | Without it, `db = null`. The health endpoint reports `firestore: unavailable` but the server still starts and accepts connections. Users can join matchmaking but all financial operations silently fail. Should exit with error in production. |
+| Medium | CSP hashes file path hardcoded to `public/csp-hashes.json` | `server.js:~109` | On Railway, the working directory may differ. The `readFileSync` call should use `new URL('./public/csp-hashes.json', import.meta.url).pathname` or an absolute path relative to `__dirname`. |
+| Medium | `nixpacks.toml` runs `npm run build` | `nixpacks.toml` | Building the frontend on the Railway (backend) server is wasteful. Frontend should build on Netlify only. Railway should install production dependencies only. |
+| Low | No rollback strategy documented | — | No `railway rollback` command, no documented rollback procedure for bad deploys that affect financial state. |
+
+---
+
+### AREA 12: Compliance & Regulatory
+
+#### Strengths
+- Terms of Service and Privacy Policy are present
+- 18+ age requirement stated in ToS
+- OHADA/Cameroon law governing jurisdiction specified
+- "No data sold to third parties" stated in Privacy Policy
+
+#### Issues Found
+
+| Priority | Issue | Location | Description |
+|----------|-------|----------|-------------|
+| Critical | No actual age gate | `AuthScreen.tsx` | Regulatory compliance for real-money gaming in most jurisdictions requires affirmative age verification, not just a ToS mention. |
+| High | No responsible gambling features | — | No deposit limits, no self-exclusion, no cooling-off periods, no problem gambling resources. These are standard requirements for gambling-adjacent platforms. |
+| High | Privacy Policy claims AES-256 encryption "at rest" | `PrivacyPolicy.tsx` | Firestore uses Google's encryption (AES-256) but the application doesn't control this. The claim is technically true but the wording implies direct control, which could be misleading to regulators. |
+| Medium | No data deletion mechanism | `Profile.tsx` | `deleteAccount()` deletes the Firebase Auth user but doesn't delete Firestore documents (transactions, game logs, dispute records). The Privacy Policy says deletion is available but it's not implemented. |
+| Low | `Effective Date: March 15, 2024` is hardcoded | `TermsOfService.tsx`, `PrivacyPolicy.tsx` | Legal documents should be version-controlled with accurate dates, not hardcoded strings. |
+
+---
+
+## Final Summary
+
+### Critical Issues (6)
+
+1. Ludo `MOVE_PIECE` crashes with `ReferenceError: prevPieces is not defined` — P2P Ludo is completely broken
+2. `findOrCreateMatch` still exported — bypasses server escrow if called
+3. `VITE_ADMIN_SECRET` embedded in client bundle — admin secret publicly readable
+4. `SOCKET_AUTH` defaults to `'off'` — unauthenticated sockets accepted if misconfigured
+5. Double-credit race condition between `/api/pay/status` and webhook
+6. No age verification gate for a real-money platform
+
+### High Priority Issues (16 additional)
+
+Tournament logic duplication, Pool GROUP_ASSIGN client-trusted, missing collectionGroup index, `sendChallenge` missing auth header, withdrawal phone validation order, server starts without Firestore (silent failure), `gameUpdateSeq` is server-global (not per-room), `rejoin_game` emitted on every connect, no payment flow tests, `FIREBASE_SERVICE_ACCOUNT` allows silent startup failure, Lidraughts FEN parsed for 8×8 on 10×10 board, fake online counts and social proof, no responsible gambling features, fee calculation done client-side, `active_rooms` rematch Set lost on hydration, chess timer trusts client increments.
+
+### Top 5 Action Items
+
+1. **Fix Ludo server handler immediately** — add `const prevPieces = room.gameState.pieces;` and remove/rewrite the broken validation block. Test all validation paths.
+2. **Fix the double-credit race** — in `/api/pay/status`, check `processed_payments` as the first operation in the function and return early if it exists.
+3. **Remove `VITE_ADMIN_SECRET` from all frontend code** — the server now uses Bearer token auth; this variable is unused and dangerous.
+4. **Assign Pool ball groups server-side** — remove `GROUP_ASSIGN` socket action; compute `myGroupP1`/`myGroupP2` in `handleTurnEnd()` when the first legal pot occurs.
+5. **Add age verification and responsible gambling disclosures** — even a simple checkbox + link to resources significantly reduces regulatory risk.
+
+### Code Health Score: 5.5/10
+
+**Justification**: The frontend quality is solid (7/10) — good TypeScript usage, thoughtful UX patterns, proper lazy loading. The backend drags the score down significantly (4/10) — the Ludo runtime crash is a production-breaking bug, the double-credit race is a financial integrity risk, the monolithic structure makes all of these hard to test and fix, and critical code paths (payments, tournament advancement) have essentially zero test coverage. The security posture is mixed: some areas (Firestore rules, webhook verification) are well-done, while others (SOCKET_AUTH default, VITE_ADMIN_SECRET) are significant gaps.
+
+### Additional Recommendations Not Covered Above
+
+- **Add Firebase Emulator tests** for Firestore rules using `@firebase/rules-unit-testing`. The `noFinancialEscalation` and `noAdminEscalation` guards are critical and deserve automated verification.
+- **Move tournament bracket logic to a separate service** — it's the most complex stateful logic in the backend and deserves its own module with dedicated tests.
+- **Add a `Content-Disposition: attachment` header to transaction export** — the current `handleExportCSV` in Profile creates a download link but relies on browser behavior.
+- **Consider a read replica for admin queries** — `getAllUsers()` runs on the same Firestore instance as live games. Heavy admin queries can impact game latency.
+- **Implement Firestore TTL policies** for `live_winners`, `active_rooms`, and `processed_payments` older than 90 days to control database growth costs.

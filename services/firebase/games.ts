@@ -7,44 +7,10 @@ import {
 import { db } from './init';
 import { User, PlayerProfile, Challenge } from '../../types';
 
-export const findOrCreateMatch = async (user: User, gameType: string, stake: number): Promise<string> => {
-    const gamesRef = collection(db, "games");
-    const q = query(
-        gamesRef,
-        where("gameType", "==", gameType),
-        where("stake", "==", stake),
-        where("status", "==", "waiting"),
-        limit(1)
-    );
-    const snapshot = await getDocs(q);
-
-    if (!snapshot.empty) {
-        const gameDoc = snapshot.docs[0];
-        const gameData = gameDoc.data();
-        if (gameData.host.id !== user.id) {
-            await updateDoc(doc(db, "games", gameDoc.id), {
-                status: "active",
-                guest: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
-                players: [gameData.host.id, user.id],
-                updatedAt: serverTimestamp()
-            });
-            return gameDoc.id;
-        }
-    }
-
-    const newGame = {
-        gameType,
-        stake,
-        status: "waiting",
-        host: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
-        players: [user.id],
-        createdAt: serverTimestamp(),
-        turn: user.id,
-        gameState: {}
-    };
-    const docRef = await addDoc(collection(db, "games"), newGame);
-    return docRef.id;
-};
+// NOTE: findOrCreateMatch was removed in Phase 1.3.
+// Matchmaking now goes exclusively through the Socket.IO server to ensure
+// server-side escrow deduction. Do NOT re-add client-side match creation here.
+// (Audit: the old export was a live trap — any accidental import would bypass escrow.)
 
 export const createBotMatch = async (user: User, gameType: string, difficulty?: string): Promise<string> => {
     const botProfile: PlayerProfile = {
@@ -99,10 +65,9 @@ export const updateTurn = async (gameId: string, nextPlayerId: string) => {
     await updateDoc(gameRef, { turn: nextPlayerId });
 };
 
-export const setGameResult = async (gameId: string, winnerId: string | null) => {
-    const gameRef = doc(db, "games", gameId);
-    await updateDoc(gameRef, { status: "completed", winner: winnerId });
-};
+// NOTE: setGameResult was removed — clients must never write game results to Firestore
+// directly. Game outcomes are written exclusively by the server Admin SDK.
+// (Audit: client-side game result writing violates Firestore security rules.)
 
 export const updateGameStatus = async (gameId: string, status: 'active' | 'coming_soon') => {
     await setDoc(doc(db, "game_configs", gameId), { status }, { merge: true });
@@ -151,9 +116,19 @@ export const subscribeToChallengeStatus = (challengeId: string, callback: (data:
 };
 
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
+    // AUDIT FIX: Include Authorization header so server verifyAuth middleware accepts this request.
+    // Without it, all challenge sends were silently rejected with 401.
+    const { auth } = await import('./init');
+    const currentUser = auth.currentUser;
+    const token = currentUser ? await currentUser.getIdToken() : null;
+    if (!token) throw new Error('Not authenticated.');
+
     const response = await fetch('/api/challenges/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ targetId, gameType, stake })
     });
     if (!response.ok) {

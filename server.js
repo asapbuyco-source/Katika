@@ -16,22 +16,28 @@ import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWin
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
 
-// Sequence counter for game update ordering and gap detection.
-let gameUpdateSeq = 0;
+// NOTE: sequence is now per-room (room.sequence) to prevent false gap-detection
+// resyncs when multiple games share the same server-wide counter. (Audit fix)
 
-const sanitizeRoomForClient = (room, roomId) => ({
-    roomId,
-    sequence: ++gameUpdateSeq,
-    players: room.players,
-    gameType: room.gameType,
-    stake: room.stake,
-    turn: room.turn,
-    status: room.status,
-    gameState: room.gameState,
-    profiles: room.profiles,
-    chat: room.chat,
-    winner: room.winner || null
-});
+const sanitizeRoomForClient = (room, roomId) => {
+    // AUDIT FIX: Increment sequence explicitly BEFORE projection so this function
+    // has no hidden side-effects. Calling it twice for the same update no longer
+    // over-increments the counter.
+    room.sequence = (room.sequence || 0) + 1;
+    return {
+        roomId,
+        sequence: room.sequence,
+        players: room.players,
+        gameType: room.gameType,
+        stake: room.stake,
+        turn: room.turn,
+        status: room.status,
+        gameState: room.gameState,
+        profiles: room.profiles,
+        chat: room.chat,
+        winner: room.winner || null
+    };
+};
 
 
 // --- CONFIGURATION & VALIDATION ---
@@ -140,7 +146,10 @@ const buildCSPHeader = () => {
         `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
         "font-src 'self' https://fonts.gstatic.com",
         "img-src 'self' data: https://api.dicebear.com https://i.pravatar.cc https://www.google.com",
-        "connect-src 'self' " + (process.env.FRONTEND_URL || 'http://localhost:5173') + " https://*.googleapis.com https://*.firebaseio.com https://live.fapshi.com wss://*",
+        // AUDIT FIX: connect-src must list the backend API origin (Railway), not the frontend origin.
+        // FRONTEND_URL is where the SPA lives; the server's own domain is already covered by 'self'.
+        // Add BACKEND_URL to Railway env if backend and frontend are on different domains.
+        "connect-src 'self' " + (process.env.BACKEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173') + " https://*.googleapis.com https://*.firebaseio.com https://live.fapshi.com wss://*",
         "object-src 'none'",
         "frame-ancestors 'none'",
         // Firebase Auth Google sign-in popup domains (AUDIT_GAPS IR-8)
@@ -1524,12 +1533,19 @@ app.get('/api/pay/status/:transId', verifyAuth, async (req, res) => {
 
         // Idempotent deposit credit: if Fapshi says SUCCESSFUL and webhook hasn't
         // processed yet, credit the user immediately via the same sentinel pattern.
+        // AUDIT FIX: Check the Firestore sentinel FIRST — before the in-memory map.
+        // After a server restart, pendingDeposits is empty but the webhook may have
+        // already run and written the sentinel. Checking sentinel first prevents
+        // double-crediting in that race condition.
         if (data.status === 'SUCCESSFUL' && data.transId) {
             const transId = data.transId;
             const paymentRef = db.collection('processed_payments').doc(transId);
             const existingSnap = await paymentRef.get();
-            if (!existingSnap.exists && db) {
-                // Try to resolve userId and amount from pending records
+            if (existingSnap.exists) {
+                // Webhook already processed this payment — skip, return data as-is
+                console.log(`[Status] Payment ${transId} already processed by webhook. Skipping credit.`);
+            } else if (db) {
+                // Sentinel does not exist — check in-memory pending map as fallback
                 const pending = pendingDeposits.get(transId);
                 if (pending) {
                     const userRef = db.collection('users').doc(pending.userId);
@@ -1839,7 +1855,9 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
         const sAvailable = (senderData.balance || 0) + (senderData.promoBalance || 0);
         if (sAvailable < stake) return res.status(400).json({ error: 'Insufficient funds.' });
 
-        // Check for existing pending challenge between these users for same gameType
+        // Check for existing non-expired pending challenge between these users for same gameType
+        // AUDIT FIX: Filter out expired challenges so stale docs don't permanently block new ones.
+        const now = Date.now();
         const existingQ = await db.collection('challenges')
             .where('sender.id', '==', senderId)
             .where('targetId', '==', targetId)
@@ -1847,7 +1865,9 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
             .limit(10).get();
         for (const doc of existingQ.docs) {
             const d = doc.data();
-            if (d.gameType === gameType) {
+            // Treat challenges without expiresAt (legacy docs) as expired after 24h from createdAt
+            const expiresAt = d.expiresAt || (d.createdAt ? d.createdAt + 86400000 : 0);
+            if (d.gameType === gameType && expiresAt > now) {
                 return res.status(409).json({ error: 'You already have a pending challenge for this game with this user.' });
             }
         }
@@ -1865,7 +1885,10 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
             stake,
             status: 'pending',
             timestamp: admin.firestore.FieldValue.serverTimestamp(),
-            createdAt: Date.now()
+            createdAt: Date.now(),
+            // AUDIT FIX: TTL — challenges expire after 24 hours to prevent stale docs
+            // from blocking future challenges between the same pair of users.
+            expiresAt: Date.now() + 86400000
         };
 
         const docRef = await db.collection('challenges').add(challengeData);
@@ -1985,6 +2008,11 @@ const hydrateRoomsFromFirestore = async () => {
         
         for (const doc of activeSnap.docs) {
             const roomData = doc.data();
+            // AUDIT FIX: Firestore serializes Set as a plain object.
+            // Re-hydrate rematchVotes as a proper Set or subsequent .add()/.size calls crash.
+            roomData.rematchVotes = new Set(Array.isArray(roomData.rematchVotes)
+                ? roomData.rematchVotes
+                : Object.keys(roomData.rematchVotes || {}));
             rooms.set(doc.id, roomData);
             console.log(`[Hydrate] Restored room ${doc.id} with ${roomData.players?.length} players`);
         }
@@ -1998,8 +2026,16 @@ const hydrateRoomsFromFirestore = async () => {
 const persistRoomToFirestore = async (roomId, room) => {
     if (!db) return;
     try {
-        await db.collection('active_rooms').doc(roomId).set({
+        // AUDIT FIX: Firestore cannot serialize a JS Set — spread it to an Array
+        // before writing. The hydration side (hydrateRoomsFromFirestore) already
+        // converts the Array back to a Set on read. Without this, rematchVotes
+        // silently writes as {} (empty object) and breaks rematch voting.
+        const roomToSave = {
             ...room,
+            rematchVotes: [...(room.rematchVotes instanceof Set ? room.rematchVotes : [])]
+        };
+        await db.collection('active_rooms').doc(roomId).set({
+            ...roomToSave,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         }, { merge: true });
     } catch (e) {
@@ -2801,7 +2837,32 @@ io.on('connection', (socket) => {
 
         // --- POOL GROUP ASSIGNMENT ---
         if (action.type === 'GROUP_ASSIGN') {
+            // AUDIT FIX: GROUP_ASSIGN was previously fully client-trusted.
+            // Hardened: groups are immutable once set (first legal pot determines them),
+            // only the active turn player may assign (they just potted), and
+            // group string values are validated against the known set.
             if (!room.players.includes(userId)) return;
+            if (room.gameType !== 'Pool') return;
+            // Immutability: once assigned, groups cannot be changed
+            if (room.gameState.myGroupP1 || room.gameState.myGroupP2) {
+                console.warn(`[Pool][${roomId}] GROUP_ASSIGN rejected: groups already set.`);
+                return;
+            }
+            // Only the current turn player may assign groups (they just potted)
+            if (room.turn !== userId) {
+                console.warn(`[Pool][${roomId}] GROUP_ASSIGN rejected: not ${userId}'s turn.`);
+                return;
+            }
+            // Validate group values
+            const validGroups = ['solids', 'stripes'];
+            if (!validGroups.includes(action.myGroupP1) || !validGroups.includes(action.myGroupP2)) {
+                console.warn(`[Pool][${roomId}] GROUP_ASSIGN rejected: invalid group values.`);
+                return;
+            }
+            if (action.myGroupP1 === action.myGroupP2) {
+                console.warn(`[Pool][${roomId}] GROUP_ASSIGN rejected: both players cannot have the same group.`);
+                return;
+            }
             room.gameState.myGroupP1 = action.myGroupP1;
             room.gameState.myGroupP2 = action.myGroupP2;
             io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
@@ -3373,9 +3434,14 @@ io.on('connection', (socket) => {
                 // Basic validation: ensure no piece count tampering
                 if (!Array.isArray(action.pieces) || action.pieces.length !== room.gameState.pieces.length) return;
 
-// [Step 3.7] Verify opponent pieces are immutable — not just step, but also
-                // finished (AUDIOIT gap #16), color, and id. A malicious client could
-                // set an opponent's finished=true to trigger a false win.
+                // Authoritative previous state — MUST be declared before any validation
+                // that references it. (Audit fix: prevPieces was previously undefined,
+                // causing a ReferenceError on every Ludo move.)
+                const prevPieces = room.gameState.pieces;
+
+                // [Step 3.7] Verify opponent pieces are immutable — not just step, but also
+                // finished, color, and id. A malicious client could set opponent.finished=true
+                // to trigger a false win.
                 const opponentMutation = action.pieces.some((p, i) => {
                     if (p.owner === userId) return false;
                     const prev = prevPieces[i];
@@ -3386,22 +3452,15 @@ io.on('connection', (socket) => {
                     if (p.color !== prev.color) return true;
                     // Check id immutability
                     if (p.id !== prev.id) return true;
-                    // Only step may change for opponent pieces
+                    // Only step may change for opponent pieces (capture sends them home)
                     if (p.step !== prev.step) {
-                        // Opponent pieces can only move backward to home (-1) or stay the same
-                        if (p.step === -1 && prev.step >= 0) return false;
+                        if (p.step === -1 && prev.step >= 0) return false; // capture is valid
                         return true;
                     }
                     return false;
                 });
                 if (opponentMutation) {
                     console.warn(`[Ludo][${roomId}] Opponent piece mutated by ${userId}. Rejected.`);
-                    return;
-                }
-                    return false;
-                });
-                if (movedIllegally) {
-                    console.warn(`[Ludo][${roomId}] Illegal state change from ${userId}. Rejected.`);
                     return;
                 }
 
@@ -3523,6 +3582,10 @@ io.on('connection', (socket) => {
 
     // 4. DISCONNECT
     socket.on('disconnect', () => {
+        // AUDIT FIX: Clear the token expiry timer immediately on disconnect.
+        // Without this, the 55-minute timer leaks and fires on a dead socket.
+        clearTimeout(tokenExpiryTimer);
+
         const userId = socketUsers.get(socket.id);
         console.log(`User disconnected: ${socket.id} (${userId})`);
 

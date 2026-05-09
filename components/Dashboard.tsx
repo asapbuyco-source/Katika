@@ -127,7 +127,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                             exit={{ y: -20, opacity: 0 }}
                             className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
                         >
-                            <img src={currentWinner.avatar || "https://i.pravatar.cc/150"} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt="" />
+                            <img src={currentWinner.avatar || "https://i.pravatar.cc/150"} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt={currentWinner.name} />
                             <span className="text-white font-bold truncate max-w-[100px]">{currentWinner.name}</span>
                             <span className="shrink-0">{t('won')}</span>
                             <span className="text-gold-400 font-mono font-bold shrink-0">{currentWinner.amount} FCFA</span>

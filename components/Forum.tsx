@@ -3,7 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { User, ForumPost } from '../types';
 import { subscribeToForum, sendForumMessage, deleteForumMessage } from '../services/firebase';
 import { playSFX } from '../services/sound';
-import { MessageSquare, Send, Trash2, Shield, Info, Users } from 'lucide-react';
+import { MessageSquare, Send, Trash2, Shield, Info } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface ForumProps {
@@ -81,7 +81,7 @@ export const Forum: React.FC<ForumProps> = ({ user }) => {
                <p className="text-slate-400 text-sm">Chat with other players in the Vantage network.</p>
            </div>
            <div className="hidden md:flex items-center gap-2 text-xs font-bold bg-royal-900 px-3 py-1.5 rounded-full border border-white/5">
-               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" /> {Math.floor(Math.random() * 50) + 120} Online
+               <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" /> Community Chat
            </div>
        </header>
 
@@ -186,33 +186,12 @@ export const Forum: React.FC<ForumProps> = ({ user }) => {
                        <li>No spamming or self-promotion.</li>
                        <li>Do not share personal financial info.</li>
                        <li>Report suspicious behavior immediately.</li>
-                   </ul>
-               </div>
+                    </ul>
+                </div>
 
-               <div className="glass-panel p-5 rounded-2xl border border-white/5 flex-1 bg-gradient-to-b from-royal-900/50 to-transparent">
-                   <h3 className="font-bold text-white mb-4 flex items-center gap-2">
-                       <Shield size={16} className="text-gold-400" /> Top Contributors
-                   </h3>
-                   <div className="space-y-4">
-                       {[
-                           { name: 'Admin', rank: 'Diamond', msgs: '999+' },
-                           { name: 'Blaise', rank: 'Gold', msgs: '452' },
-                           { name: 'Amara', rank: 'Silver', msgs: '312' },
-                       ].map((u, i) => (
-                           <div key={i} className="flex items-center justify-between">
-                               <div className="flex items-center gap-2">
-                                   <div className={`w-2 h-2 rounded-full ${u.rank === 'Diamond' ? 'bg-cyan-400' : u.rank === 'Gold' ? 'bg-gold-400' : 'bg-slate-300'}`} />
-                                   <span className="text-sm text-slate-300">{u.name}</span>
-                               </div>
-                               <span className="text-xs font-mono text-slate-500">{u.msgs}</span>
-                           </div>
-                       ))}
-                   </div>
-               </div>
+            </div>
 
-           </div>
-
-       </div>
+        </div>
     </div>
   );
 };

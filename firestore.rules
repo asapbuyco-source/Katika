@@ -168,6 +168,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // ─── SERVER-ONLY COLLECTIONS (Admin SDK writes, no client access) ────────
+    // AUDIT FIX: These collections were previously only protected by the catch-all
+    // deny rule. Explicit rules document intent and survive future rule refactors.
+    match /active_rooms/{roomId} {
+      allow read, write: if false; // Room persistence — server Admin SDK only
+    }
+    match /failed_settlements/{settlementId} {
+      allow read, write: if false; // Failed payout log — manual admin reconciliation only
+    }
+    match /game_outcomes/{outcomeId} {
+      allow read, write: if false; // Outcome history — server Admin SDK only
+    }
+
     // ─── DENY EVERYTHING ELSE ────────────────────────────────────────────────
     match /{document=**} {
       allow read, write: if false;

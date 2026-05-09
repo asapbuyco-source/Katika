@@ -574,7 +574,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                             <tr key={player.id} className="hover:bg-white/5 transition-colors">
                                                 <td className="p-4">
                                                     <div className="flex items-center gap-3">
-                                                        <img src={player.avatar} className="w-8 h-8 rounded-full" alt="" />
+                                                        <img src={player.avatar} className="w-8 h-8 rounded-full" alt={player.name} />
                                                         <div>
                                                             <div className="font-bold text-sm text-white">{player.name}</div>
                                                             <div className="text-xs text-slate-500">{player.id.substring(0, 8)}...</div>
