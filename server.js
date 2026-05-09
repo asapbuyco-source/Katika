@@ -864,21 +864,6 @@ app.post('/api/tournaments/match-activate', verifyAuth, blockGuests, async (req,
     }
 });
 
-// Server endpoint: tournament status update (admin only, replaces client Firestore write)
-app.post('/api/tournaments/update-status', verifyAdmin, async (req, res) => {
-    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
-    const { tournamentId, status } = req.body;
-    if (!tournamentId || !status) return res.status(400).json({ error: 'tournamentId and status required' });
-    const validStatuses = ['registration', 'active', 'completed', 'cancelled'];
-    if (!validStatuses.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
-    try {
-        await db.collection('tournaments').doc(tournamentId).update({ status });
-        res.json({ success: true, tournamentId, status });
-    } catch (e) {
-        console.error('[TournamentStatus]', e);
-        res.status(500).json({ error: 'Failed to update tournament status' });
-    }
-});
 
 /**
  * Finalise a tournament once the last match is done.
@@ -1284,6 +1269,25 @@ const verifyAdmin = async (req, res, next) => {
 };
 
 // --- ADMIN: BAN / UNBAN USER ---
+// TDZ FIX: All routes using verifyAdmin MUST appear after its definition above.
+
+// Server endpoint: tournament status update (admin only, replaces client Firestore write)
+// MOVED HERE from line 868 where it caused a TDZ crash (used before initialization).
+app.post('/api/tournaments/update-status', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const { tournamentId, status } = req.body;
+    if (!tournamentId || !status) return res.status(400).json({ error: 'tournamentId and status required' });
+    const validStatuses = ['registration', 'active', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
+    try {
+        await db.collection('tournaments').doc(tournamentId).update({ status });
+        res.json({ success: true, tournamentId, status });
+    } catch (e) {
+        console.error('[TournamentStatus]', e);
+        res.status(500).json({ error: 'Failed to update tournament status' });
+    }
+});
+
 app.post('/api/admin/ban-user', verifyAdmin, async (req, res) => {
     const { userId, ban } = req.body;
     if (!userId || typeof ban !== 'boolean') {
