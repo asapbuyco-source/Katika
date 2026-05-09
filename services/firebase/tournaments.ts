@@ -57,6 +57,8 @@ export const subscribeToTournament = (tournamentId: string, callback: (t: Tourna
         if (docSnap.exists()) {
             callback({ id: docSnap.id, ...docSnap.data() } as Tournament);
         }
+    }, (error) => {
+        console.error('[subscribeToTournament] Firestore snapshot failed:', error);
     });
 };
 
@@ -69,6 +71,8 @@ export const subscribeToTournamentMatches = (tournamentId: string, callback: (ma
             return a.round - b.round;
         });
         callback(matches);
+    }, (error) => {
+        console.error('[subscribeToTournamentMatches] Firestore snapshot failed:', error);
     });
 };
 

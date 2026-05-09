@@ -253,6 +253,19 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         const handleGameUpdate = (gameState: SocketGameState) => {
             const currentView = viewRef.current;
             if (currentView !== 'game' && currentView !== 'matchmaking') return;
+
+            // [Step 2.8] Gap detection: if sequence jumps by more than 1, a update was dropped.
+            // Request a full state resync from the server.
+            const prevSeq = socketGameRef.current?.sequence ?? 0;
+            if (gameState.sequence !== undefined && prevSeq > 0 && gameState.sequence > prevSeq + 1) {
+                console.warn(`[Socket] Gap detected: lastSeq=${prevSeq} recvSeq=${gameState.sequence} — requesting resync for room ${gameState.roomId}`);
+                socket?.emit('rejoin_game', { userProfile: state.user }, (ack: any) => {
+                    if (!ack || !ack.success) {
+                        sessionStorage.removeItem('vantage_active_room');
+                    }
+                });
+            }
+
             setSocketGame(prev => prev ? ({
                 ...prev,
                 ...gameState,

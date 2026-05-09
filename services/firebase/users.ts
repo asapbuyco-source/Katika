@@ -42,6 +42,8 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
         if (docSnap.exists()) {
             callback(docSnap.data() as User);
         }
+    }, (error) => {
+        console.error('[subscribeToUser] Firestore snapshot failed:', error);
     });
 };
 

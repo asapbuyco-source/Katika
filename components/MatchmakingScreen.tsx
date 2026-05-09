@@ -3,7 +3,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { User, Table, PlayerProfile } from '../types';
 import { Search, Lock, AlertTriangle, Wifi, ShieldAlert } from 'lucide-react';
-import { findOrCreateMatch, subscribeToGame } from '../services/firebase';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -37,47 +36,13 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
 
     const initMatch = async () => {
         try {
-            const id = await findOrCreateMatch(user, gameType, stake);
-            if (!mounted) return;
-            setGameId(id);
+            // [Phase 1] findOrCreateMatch removed — the authoritative matchmaking path
+            // is the socket join_game event, not Firestore. The MatchmakingScreen
+            // still receives match data via the socket layer from the parent App.tsx.
+            // For non-socket (legacy) path, the parent handles transition.
             setStatus('waiting');
-
-            // Listen for opponent
-            unsubscribeRef.current = subscribeToGame(id, (gameData) => {
-                if (!mounted) return;
-
-                // Check if game is active (opponent joined)
-                if (gameData.status === 'active' && gameData.guest && gameData.host) {
-                    const isHost = gameData.host.id === user.id;
-                    const opp = isHost ? gameData.guest : gameData.host;
-                    
-                    setOpponent({
-                        name: opp.name,
-                        avatar: opp.avatar,
-                        elo: opp.elo,
-                        rankTier: opp.rankTier
-                    });
-                    setStatus('found');
-
-                    // Delay slightly to show "Match Found" UI before switching views
-                    setTimeout(() => {
-                        const table: Table = {
-                            id: gameData.id,
-                            gameType: gameData.gameType,
-                            stake: gameData.stake,
-                            players: 2,
-                            maxPlayers: 2,
-                            status: 'active',
-                            host: opp // For the game view, 'host' visually usually means opponent in top bar
-                        };
-                        onMatchFound(table);
-                    }, 2000);
-                }
-            });
-
         } catch (error) {
             console.error("Matchmaking failed:", error);
-            // Handle error (maybe retry or show alert)
         }
     };
 

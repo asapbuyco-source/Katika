@@ -37,6 +37,8 @@ export const setMaintenanceMode = async (enabled: boolean): Promise<void> => {
 export const subscribeToMaintenanceMode = (callback: (enabled: boolean) => void) => {
     return onSnapshot(doc(db, 'settings', 'maintenance'), (snap: any) => {
         callback(snap.exists() ? (snap.data().enabled ?? false) : false);
+    }, (error) => {
+        console.error('[subscribeToMaintenanceMode] Firestore snapshot failed:', error);
     });
 };
 
