@@ -163,7 +163,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         isLidraughtsLoading,
         forwardDir,
         timeRemaining,
-        lidraughtsId
+        lidraughtsId,
+        socket,
+        socketGame
     });
 
     useEffect(() => {
@@ -177,9 +179,11 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             isLidraughtsLoading,
             forwardDir,
             timeRemaining,
-            lidraughtsId
+            lidraughtsId,
+            socket,
+            socketGame
         };
-    }, [pieces, turn, selectedPieceId, validMoves, mustJumpFrom, isGameOver, isLidraughtsLoading, forwardDir, timeRemaining, lidraughtsId]);
+    }, [pieces, turn, selectedPieceId, validMoves, mustJumpFrom, isGameOver, isLidraughtsLoading, forwardDir, timeRemaining, lidraughtsId, socket, socketGame]);
 
     // --- INITIALIZATION ---
     useEffect(() => {
@@ -191,9 +195,14 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 }));
                 setPieces(mappedPieces);
             }
-            if (socketGame.gameState && socketGame.gameState.turn) {
-                setTurn(socketGame.gameState.turn === user.id ? 'me' : 'opponent');
+
+            // The server sends `turn` at the ROOM level (socketGame.turn),
+            // NOT inside gameState. Read from the right place.
+            const serverTurn = socketGame.turn ?? socketGame.gameState?.turn;
+            if (serverTurn) {
+                setTurn(serverTurn === user.id ? 'me' : 'opponent');
             }
+
             if (socketGame.winner) {
                 setIsGameOver(true);
                 if (!isP2P) {
@@ -237,19 +246,23 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         }
     }, [socketGame, user.id, isP2P, isBotGame]);
 
-    // B4 Fix: P2P State Reconciliation — sync board from server on every gameState change
+    // B4 Fix: P2P State Reconciliation — sync board + turn from server on every gameState change.
+    // CRITICAL: `turn` is at socketGame.turn (room level), NOT socketGame.gameState.turn.
+    // The server's sanitizeRoomForClient puts it at the top level of the payload.
     useEffect(() => {
-        if (!isP2P || !socketGame?.gameState) return;
+        if (!isP2P || !socketGame) return;
         const gs = socketGame.gameState;
-        if (gs.pieces) {
+        if (gs?.pieces) {
             const mapped = gs.pieces.map((p: any) => ({
                 ...p, player: p.owner === user.id ? 'me' : 'opponent'
             }));
             setPieces(mapped);
         }
-        if (gs.turn) setTurn(gs.turn === user.id ? 'me' : 'opponent');
-        if (gs.mustJumpFrom !== undefined) setMustJumpFrom(gs.mustJumpFrom);
-    }, [socketGame?.gameState?.pieces, socketGame?.gameState?.turn, socketGame?.gameState?.mustJumpFrom]);
+        // Read turn from room level first, fall back to gameState.turn
+        const serverTurn = socketGame.turn ?? gs?.turn;
+        if (serverTurn) setTurn(serverTurn === user.id ? 'me' : 'opponent');
+        if (gs?.mustJumpFrom !== undefined) setMustJumpFrom(gs.mustJumpFrom);
+    }, [socketGame?.gameState?.pieces, socketGame?.turn, socketGame?.gameState?.mustJumpFrom, user.id, isP2P]);
 
     // --- SOCKET GAME_OVER LISTENER ---
     useEffect(() => {
@@ -357,27 +370,39 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         return { me: 20 - oppCount, opponent: 20 - meCount };
     }, [pieces]);
 
+    // Ref to ensure TIMEOUT_CLAIM is sent at most once per game
+    const timeoutClaimSentRef = useRef(false);
+
     // Task 5 Fix: Use stateRef for turn to avoid stale closure
     useEffect(() => {
         if (isGameOver) return;
+        timeoutClaimSentRef.current = false; // reset when game/isGameOver changes
         const interval = setInterval(() => {
             if (state.opponentDisconnected) return;
-            const currentTurn = stateRef.current.turn;
+            const { turn: currentTurn, socket: liveSock, socketGame: liveSG, isP2P: liveIsP2P } = stateRef.current as any;
             setTimeRemaining(prev => {
                 if (currentTurn === 'me') {
+                    // MY clock — count down; forfeit on expiry
                     if (prev.me <= 1) {
                         clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'FORFEIT' } });
+                        if (isP2P && liveSock) liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'FORFEIT' } });
                         if (!isP2P) onGameEnd('loss');
                         return { ...prev, me: 0 };
                     }
                     return { ...prev, me: Math.max(0, prev.me - 1) };
                 } else {
-                    if (prev.opponent <= 1) {
-                        clearInterval(interval);
-                        if (isP2P && socket) socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        if (!isP2P) onGameEnd('win');
-                        return { ...prev, opponent: 0 };
+                    // OPPONENT clock — count down for display; claim once on expiry
+                    if (prev.opponent <= 0) {
+                        // Already hit 0 — send claim exactly once
+                        if (!timeoutClaimSentRef.current) {
+                            timeoutClaimSentRef.current = true;
+                            if (isP2P && liveSock && liveSG) {
+                                liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'TIMEOUT_CLAIM' } });
+                            } else if (!isP2P) {
+                                onGameEnd('win');
+                            }
+                        }
+                        return prev; // don't go below 0
                     }
                     return { ...prev, opponent: Math.max(0, prev.opponent - 1) };
                 }

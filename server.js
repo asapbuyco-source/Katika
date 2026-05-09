@@ -2277,25 +2277,31 @@ const endGame = (roomId, winnerId, reason) => {
     if (winnerId && db) {
         const today = new Date().toISOString().split('T')[0];
         const bonusRef = db.collection('daily_bonuses').doc(`${winnerId}_${today}`);
-        bonusRef.get().then(snap => {
+        bonusRef.get().then(async (snap) => {
+            // Guard: already awarded today → do nothing (and DON'T emit the socket event)
             if (snap.exists) return;
-            return db.runTransaction(async (tx) => {
+
+            // Award the bonus atomically
+            await db.runTransaction(async (tx) => {
                 const userRef = db.collection('users').doc(winnerId);
                 const userSnap = await tx.get(userRef);
                 if (!userSnap.exists) return;
                 tx.update(userRef, { promoBalance: (userSnap.data().promoBalance || 0) + 50 });
                 tx.set(bonusRef, { awardedAt: admin.firestore.FieldValue.serverTimestamp() });
                 tx.set(userRef.collection('transactions').doc(), {
-                    type: 'streak_bonus', amount: 50, status: 'completed',
+                    type: 'daily_bonus', amount: 50, status: 'completed',
                     date: new Date().toISOString(),
                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
                     note: 'First win of the day bonus'
                 });
             });
-        }).then(() => {
-            // Notify the winner's socket of the bonus
+
+            // Only notify AFTER the transaction committed successfully
             const sid = userSockets.get(winnerId);
-            if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('daily_bonus', { amount: 50, reason: 'first_win' }); }
+            if (sid) {
+                const sock = io.sockets.sockets.get(sid);
+                if (sock) sock.emit('daily_bonus', { amount: 50, reason: 'first_win' });
+            }
         }).catch(e => console.error('[endGame] Daily bonus error:', e));
     }
 
@@ -2795,52 +2801,81 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // TIMEOUT_CLAIM (the caller claiming the timeout — they must NOT be the current turn holder)
+        // TIMEOUT_CLAIM (the caller is claiming their OPPONENT ran out of time)
         if (action.type === 'TIMEOUT_CLAIM') {
-            // Validate: only the player waiting (not the current turn holder) can claim a timeout
+            // Only the waiting player (not the one whose turn it is) can claim
             if (room.turn === userId) {
-                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim timeout on their own turn.`);
+                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim on their own turn.`);
+                return;
+            }
+            if (room.gameType === 'Dice') {
+                console.warn(`[TIMEOUT_CLAIM] Rejected: Dice games don't use timeout claims.`);
                 return;
             }
 
-            // DICE EXCEPTION: Dice games auto-roll, so timeouts shouldn't lead to forfeits via claims
-            if (room.gameType === 'Dice') {
-                console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} tried to claim on a Dice game.`);
+            // --- Chess: use server-authoritative per-player timers ---
+            if (room.gameType === 'Chess') {
+                const opponentId = room.players.find(id => id !== userId);
+                const opponentTime = room.gameState?.timers?.[opponentId] ?? 600;
+
+                // Extra server-side check: also deduct any time that's elapsed since
+                // the last move (opponent is mid-turn but hasn't submitted yet).
+                const elapsedSec = Math.round((Date.now() - (room.gameState.lastMoveTime || Date.now())) / 1000);
+                const effectiveTime = Math.max(0, opponentTime - elapsedSec);
+
+                if (effectiveTime > 2) {
+                    // More than 2 seconds remain — client clock drift, reject the claim
+                    console.warn(`[TIMEOUT_CLAIM][Chess] Rejected: opponent has ~${effectiveTime}s left.`);
+                    return;
+                }
+
+                // Update the stored timer so the game_over payload is accurate
+                room.gameState.timers[opponentId] = 0;
+                console.log(`[Chess][${roomId}] ${opponentId} timed out. ${userId} wins.`);
+                endGame(roomId, userId, 'Timeout');
                 return;
             }
-            
-            // Server-enforced forfeit logic (Anti-cheat timer check)
+
+            // --- All other games: wall-clock elapsed check ---
             const elapsed = Date.now() - (room.gameState.lastMoveTime || 0);
-            
-            // Game-specific durations (matching client-side TURN_DURATION constants)
             let requiredDuration = 59500; // Default 60s
-            if (room.gameType === 'TicTacToe') requiredDuration = 14500; // 15s
-            if (room.gameType === 'Cards') requiredDuration = 29500; // 30s
-            if (room.gameType === 'Checkers') requiredDuration = 599500; // 600s (10 min)
-            
-            if (elapsed < requiredDuration) { 
+            if (room.gameType === 'TicTacToe') requiredDuration = 14500;
+            if (room.gameType === 'Cards') requiredDuration = 29500;
+            if (room.gameType === 'Checkers') requiredDuration = 599500; // 10 min
+
+            if (elapsed < requiredDuration) {
                 console.warn(`[TIMEOUT_CLAIM] Rejected: ${userId} claimed early. Only ${elapsed}ms elapsed.`);
                 return;
             }
 
-            endGame(roomId, userId, 'Time Expired (Claimed)');
+            endGame(roomId, userId, 'Time Expired');
             return;
         }
 
         // --- REMATCH LOGIC ---
         if (action.type === 'REMATCH_REQUEST') {
             if (!room.rematchVotes) room.rematchVotes = new Set();
+
+            // Ignore duplicate votes from the same player
+            if (room.rematchVotes.has(userId)) return;
+
             room.rematchVotes.add(userId);
 
-            // Notify other player
-            socket.to(roomId).emit('rematch_status', { requestorId: userId, status: 'requested' });
+            // Only notify the other player when it's the FIRST vote.
+            // When the second player votes (completing the match), skip this broadcast —
+            // the incoming 'match_found' event will reset both UIs cleanly.
+            // Sending 'requested' to the first player when the second accepts was
+            // causing A's rematch state to flip to 'opponent_requested', re-showing
+            // the accept dialog and creating an infinite request loop.
+            if (room.rematchVotes.size === 1) {
+                socket.to(roomId).emit('rematch_status', { requestorId: userId, status: 'requested' });
+            }
 
-            // If both players accepted
+            // If both players have voted, start the rematch
             if (room.rematchVotes.size === room.players.length) {
                 console.log(`Rematch accepted in room ${roomId}`);
 
                 // B11 Fix: Re-escrow both players for rematch atomically.
-                // If either deduction fails, neither player is charged — preventing a split-state.
                 if (room.stake > 0 && db) {
                     try {
                         await db.runTransaction(async (tx) => {
@@ -2882,11 +2917,10 @@ io.on('connection', (socket) => {
                 room.status = 'active';
                 room.winner = null;
                 room.rematchVotes.clear();
-                room.turn = room.players[0]; // Always reset to P1 for fairness
+                room.turn = room.players[0];
                 room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
-                // Keep chat history
 
-                // Emit Match Found (this resets the client UI)
+                // match_found resets both clients' rematch UI state cleanly
                 io.to(roomId).emit('match_found', {
                     roomId,
                     players: room.players,
@@ -3156,7 +3190,11 @@ io.on('connection', (socket) => {
 
                 room.gameState.pieces = updatedPieces;
                 room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
-                room.turn = hasMoreJumps ? userId : opponentId;
+                // Write turn to BOTH room.turn (top-level) AND gameState.turn so clients
+                // reading either location receive the correct value.
+                const nextTurn = hasMoreJumps ? userId : opponentId;
+                room.turn = nextTurn;
+                room.gameState.turn = nextTurn;
                 io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                 // [Step 2.1] Persist Checkers state after every move for crash-restart resilience
                 persistRoomToFirestore(roomId, room);
@@ -3211,20 +3249,33 @@ io.on('connection', (socket) => {
                         console.warn(`[Chess][${roomId}] PGN validation error from ${userId}:`, e.message);
                         return;
                     }
-                    if (action.newState.timers) {
-                        const maxTime = 1800;
-                        for (const [pid, t] of Object.entries(action.newState.timers)) {
-                            if (!room.players.includes(pid)) continue;
-                            if (typeof t !== 'number' || t < 0 || t > maxTime) {
-                                console.warn(`[Chess][${roomId}] Invalid timer from ${userId}: ${pid}=${t}. Rejected.`);
-                                return;
-                            }
-                            const prevTime = room.gameState.timers?.[pid];
-                            if (prevTime !== undefined && t > prevTime + 3) {
-                                console.warn(`[Chess][${roomId}] Timer increased suspiciously: ${pid} ${prevTime}->${t}. Rejected.`);
-                                return;
-                            }
-                        }
+                    // --- Server-authoritative chess timer ---
+                    // NEVER trust client-submitted timer values. Instead, measure actual
+                    // wall-clock time since the last move and deduct it from the mover's clock.
+                    // This makes the timer cheat-proof and fixes the "completely wrong" timer.
+                    const now = Date.now();
+                    const lastMove = room.gameState.lastMoveTime || now;
+                    const elapsedSec = Math.round((now - lastMove) / 1000);
+
+                    if (!room.gameState.timers) {
+                        room.gameState.timers = {
+                            [room.players[0]]: 600,
+                            [room.players[1]]: 600
+                        };
+                    }
+
+                    // Deduct elapsed time from the player who just moved (they held the clock)
+                    const prevTime = room.gameState.timers[userId] ?? 600;
+                    const newTime = Math.max(0, prevTime - elapsedSec);
+                    room.gameState.timers[userId] = newTime;
+                    room.gameState.lastMoveTime = now;
+
+                    // Forfeit on timeout
+                    if (newTime <= 0) {
+                        const opponent = room.players.find(id => id !== userId);
+                        console.log(`[Chess][${roomId}] ${userId} ran out of time. Forfeit.`);
+                        endGame(roomId, opponent, 'Timeout');
+                        return;
                     }
                 }
                 // --- End chess validation ---

@@ -359,22 +359,27 @@ const AppContent = () => {
     }, [currentView, dispatch]);
 
     // ── Global socket listeners (bonuses, etc.) ──────────────────────────────
+    // Use a ref so handlers always see the latest user without re-registering
+    // the socket event every time user.balance changes (which caused double-shows).
+    const userRef = useRef(user);
+    useEffect(() => { userRef.current = user; }, [user]);
+
     useEffect(() => {
         if (!socket) return;
         
         const handleDailyBonus = (data: { amount: number; message?: string }) => {
             playSFX('win');
             toast.success(`🎁 Daily First Win Bonus: +${data.amount} FCFA!`);
-            if (user) {
-                dispatch({ type: 'UPDATE_USER', payload: { balance: user.balance + data.amount } });
+            if (userRef.current) {
+                dispatch({ type: 'UPDATE_USER', payload: { promoBalance: (userRef.current as any).promoBalance + data.amount } });
             }
         };
 
         const handleStreakBonus = (data: { streak: number; amount: number }) => {
             playSFX('notification');
             toast.success(`🔥 Login Streak x${data.streak}! +${data.amount} FCFA unlocked!`);
-            if (user) {
-                dispatch({ type: 'UPDATE_USER', payload: { balance: user.balance + data.amount } });
+            if (userRef.current) {
+                dispatch({ type: 'UPDATE_USER', payload: { promoBalance: (userRef.current as any).promoBalance + data.amount } });
             }
         };
 
@@ -385,7 +390,7 @@ const AppContent = () => {
             socket.off('daily_bonus', handleDailyBonus);
             socket.off('streak_bonus', handleStreakBonus);
         };
-    }, [socket, user, dispatch, toast]);
+    }, [socket, dispatch, toast]); // ← no 'user': avoids re-registering on every balance change
 
     // ─── EFFECTS ────────────────────────────────────────────────────────────────
     // Escape key handler removed (Bug M1 fix): it was clearing

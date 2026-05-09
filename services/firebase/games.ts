@@ -21,7 +21,12 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
     const token = currentUser ? await currentUser.getIdToken() : null;
     if (!token) throw new Error('Not authenticated.');
 
-    const socketUrl = import.meta.env.VITE_SOCKET_URL?.replace(/\/$/, '') || '';
+    let socketUrl = import.meta.env.VITE_SOCKET_URL?.trim().replace(/\/$/, '') || '';
+    // Ensure absolute URL — without 'https://', the browser treats it as a relative
+    // path (e.g. netlify.app/railway.app/...) causing a 404.
+    if (socketUrl && !socketUrl.startsWith('http')) {
+        socketUrl = 'https://' + socketUrl;
+    }
     const response = await fetch(`${socketUrl}/api/games/bot`, {
         method: 'POST',
         headers: {
@@ -30,6 +35,7 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
         },
         body: JSON.stringify({ gameType, difficulty: difficulty || 'medium' })
     });
+
     if (!response.ok) {
         const err = await response.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to create bot match.');

@@ -418,10 +418,13 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         };
     }, [isP2P, socket, user.id, onGameEnd]);
 
+    // Ref to ensure we only send TIMEOUT_CLAIM once per game session
+    const timeoutClaimSentRef = useRef(false);
+
     useEffect(() => {
         // BUG 5a FIX: Don't run the timer until myColor is resolved.
         if (isGameOver || viewIndex !== -1 || myColor === null) return;
-        
+        timeoutClaimSentRef.current = false; // reset on new game/color
         const interval = setInterval(() => {
             if (stateRef.current.opponentDisconnected) return;
             setTimeRemaining(prev => {
@@ -429,30 +432,44 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 const turnColor = liveGame.turn();
                 const liveMyColor = stateRef.current.myColor;
                 if (liveMyColor === null) return prev;
-                
+
                 if (turnColor === liveMyColor) {
+                    // MY clock is running — count down and forfeit if expired
                     if (prev[liveMyColor] <= 1) {
                         clearInterval(interval);
                         const { isP2P: liveP2P, socket: liveSock, socketGame: liveSG } = stateRef.current;
+                        // Send FORFEIT — server will call endGame and settle finances
                         if (liveP2P && liveSock) liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'FORFEIT' } });
                         if (!liveP2P) onGameEnd('loss');
                         return { ...prev, [liveMyColor]: 0 };
                     }
                     return { ...prev, [liveMyColor]: Math.max(0, prev[liveMyColor] - 1) };
                 } else {
+                    // OPPONENT clock running — count down for display.
+                    // When it hits 0 send TIMEOUT_CLAIM once; the server verifies
+                    // and ends the game. If opponent moves first, the server's move
+                    // handler catches the timeout instead.
                     const oppColor = turnColor as 'w' | 'b';
-                    if (prev[oppColor] <= 1) {
-                        clearInterval(interval);
-                        const { isP2P: liveP2P, socket: liveSock, socketGame: liveSG } = stateRef.current;
-                        if (liveP2P && liveSock) liveSock.emit('game_action', { roomId: liveSG.roomId, action: { type: 'TIMEOUT_CLAIM' } });
-                        if (!liveP2P) onGameEnd('win');
-                        return { ...prev, [oppColor]: 0 };
+                    if (prev[oppColor] <= 0) {
+                        // Already at 0 — send claim if P2P and not already sent
+                        if (!timeoutClaimSentRef.current) {
+                            const { isP2P: liveP2P, socket: liveSock, socketGame: liveSG } = stateRef.current;
+                            if (liveP2P && liveSock && liveSG) {
+                                timeoutClaimSentRef.current = true;
+                                liveSock.emit('game_action', {
+                                    roomId: liveSG.roomId,
+                                    action: { type: 'TIMEOUT_CLAIM' }
+                                });
+                            }
+                        }
+                        return prev; // don't go below 0
                     }
-                    return { ...prev, [oppColor]: Math.max(0, prev[oppColor] - 1) };
+                    const newOppTime = Math.max(0, prev[oppColor] - 1);
+                    return { ...prev, [oppColor]: newOppTime };
                 }
             });
         }, 1000);
-        
+
         return () => clearInterval(interval);
     }, [isGameOver, viewIndex, myColor]); // added myColor dep — timer must not start until color is resolved
 
@@ -500,22 +517,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 if (move.captured) playSFX('capture'); else playSFX('move');
                 checkGameOver(newGame);
 
-                // Add time increment after each move (chess.com style)
-                setTimeRemaining(prev => {
-                    const moverColor = move.color;
-                    const newTime = { ...prev };
-                    newTime[moverColor] = Math.min(prev[moverColor] + TIMER_INCREMENT, 1800); // cap at 30 mins
-                    return newTime;
-                });
-
                 if (isP2P && socket && socketGame) {
-                    const moverColor = move.color;
-                    const incrementedTime = Math.min(timeRemaining[moverColor] + TIMER_INCREMENT, 1800);
                     const nextUserId = socketGame.players[newGame.turn() === 'w' ? 0 : 1];
-                    const updatedTimers = {
-                        [socketGame.players[0]]: moverColor === 'w' ? incrementedTime : timeRemaining.w,
-                        [socketGame.players[1]]: moverColor === 'b' ? incrementedTime : timeRemaining.b
-                    };
+                    // Send move to server — server is authoritative for timers,
+                    // do NOT include client-computed timers in this payload.
                     socket.emit('game_action', {
                         roomId: socketGame.roomId,
                         action: {
@@ -523,8 +528,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                             newState: {
                                 fen: newGame.fen(),
                                 pgn: newGame.pgn(),
-                                turn: nextUserId,
-                                timers: updatedTimers
+                                turn: nextUserId
                             }
                         }
                     });
