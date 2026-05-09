@@ -154,24 +154,28 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             return () => clearInterval(timerInterval);
         }
 
+        // WAKE-UP: Fire an immediate HTTP ping to the Railway backend so the dyno
+        // cold-start begins in parallel with the Socket.IO handshake. This shaves
+        // 5-15s off the first connection delay for users loading after idle periods.
+        try {
+            const wakeUrl = SOCKET_URL.replace(/\/$/, '') + '/health';
+            fetch(wakeUrl, { method: 'GET', mode: 'cors' }).catch(() => {});
+            // Persist URL so index.html can ping on the NEXT page load (even earlier)
+            localStorage.setItem('vantage_socket_url', SOCKET_URL.replace(/\/$/, ''));
+        } catch { /* ignore */ }
+
         const newSocket = io(SOCKET_URL, {
             reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
-            reconnectionDelayMax: 15000,
-            randomizationFactor: 0.4,
-            timeout: 25000,
+            reconnectionDelayMax: 20000,   // cap at 20s — server should be awake by then
+            randomizationFactor: 0.5,
+            timeout: 30000,               // 30s — enough for Railway cold-start (15-20s)
             transports: ['websocket', 'polling'],
             autoConnect: true,
-            auth: async () => {
-                const user = auth.currentUser;
-                if (!user) return {};
-                try {
-                    const token = await getIdTokenWithRetry(user);
-                    return { token };
-                } catch {
-                    return {};
-                }
-            }
+            // Connect immediately without waiting for a Firebase token.
+            // The server allows unauthenticated connections; we authenticate via
+            // the 'refresh_token' event that fires after onIdTokenChanged.
+            auth: {}
         });
 
         newSocket.on('connect', () => {
@@ -184,6 +188,18 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             clearInterval(timerInterval);
             isReconnectingRef.current = false;
             dispatch({ type: 'SET_NETWORK_STATUS', payload: 'online' });
+
+            // CRITICAL: If a Firebase user is already logged in when the socket connects
+            // (e.g. page refresh), send the token immediately so socket.user is set on
+            // the server BEFORE any join_game or rejoin_game events fire.
+            // onIdTokenChanged alone won't re-fire for an already-valid token.
+            const currentUser = auth.currentUser;
+            if (currentUser) {
+                currentUser.getIdToken().then(token => {
+                    newSocket.emit('refresh_token', { token });
+                }).catch(() => {});
+            }
+
             flushEmissionQueue();
         });
 
@@ -195,6 +211,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
 
         newSocket.on('connect_error', (err) => {
+            // Log the full error so devs can diagnose CORS / auth / URL problems
+            console.error('[Socket] connect_error:', err.message, '| type:', (err as any).type, '| description:', (err as any).description);
             setConnectionError(err.message);
             dispatch({ type: 'SET_NETWORK_STATUS', payload: 'degraded' });
         });
@@ -351,21 +369,46 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         }
     }, [socket, isConnected, state.user, viewRef]);
 
-    // Token refresh: keep socket auth valid for long-lived connections
+    // Token refresh: keep socket auth valid for long-lived connections,
+    // and authenticate the socket when the user first logs in on a guest connection.
     useEffect(() => {
         if (!socket) return;
         const unsubscribe = onIdTokenChanged(auth, async (user) => {
-            if (user && isConnected) {
+            if (user) {
+                // Send token whenever user state changes AND socket is connected.
+                // This covers: login after cold-start, token refresh (hourly), re-login.
                 try {
                     const token = await getIdTokenWithRetry(user);
-                    socket.emit('refresh_token', { token });
+                    if (socket.connected) {
+                        socket.emit('refresh_token', { token });
+                    }
                 } catch (e) {
                     console.warn('[Socket] Token refresh failed:', e);
                 }
             }
         });
         return unsubscribe;
-    }, [socket, isConnected, getIdTokenWithRetry]);
+    }, [socket, getIdTokenWithRetry]);
+
+    // Handle auth_required: server rejected an action because socket.user is null.
+    // Re-send the current token to elevate the guest socket to authenticated.
+    useEffect(() => {
+        if (!socket) return;
+        const handleAuthRequired = async () => {
+            const user = auth.currentUser;
+            if (!user) return;
+            try {
+                const token = await getIdTokenWithRetry(user);
+                socket.emit('refresh_token', { token });
+                console.log('[Socket] Re-sent token after auth_required');
+            } catch (e) {
+                console.warn('[Socket] Could not re-send token after auth_required:', e);
+            }
+        };
+        socket.on('auth_required', handleAuthRequired);
+        return () => { socket.off('auth_required', handleAuthRequired); };
+    }, [socket, getIdTokenWithRetry]);
+
 
     // Auto-bypass if connection takes too long
     useEffect(() => {
@@ -393,17 +436,11 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
     }, [socket, isConnected]);
 
-    // Auto-reconnect on brief network blips
-    useEffect(() => {
-        if (!socket || isConnected) return;
-        const interval = setInterval(() => {
-            if (!socket.connected) {
-                console.log('[Socket] Auto-reconnect ping...');
-                socket.connect();
-            }
-        }, 8000);
-        return () => clearInterval(interval);
-    }, [socket, isConnected]);
+    // NOTE: No custom auto-reconnect interval here.
+    // Socket.IO's built-in reconnection (reconnectionAttempts: Infinity,
+    // reconnectionDelay: 1000, reconnectionDelayMax: 20000) handles this correctly.
+    // Adding a manual setInterval that also calls socket.connect() causes duplicate
+    // connection attempts and log spam — the engine already retries on its own.
 
     // NET-2: Wrapper around socket.emit that queues when disconnected
     const emit = useCallback((event: string, data: any, callback?: any) => {

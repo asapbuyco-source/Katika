@@ -232,32 +232,42 @@ const io = new Server(httpServer, {
 io.use(async (socket, next) => {
     if (SOCKET_AUTH_MODE === 'off') return next();
 
+    // Already authenticated on a previous middleware pass
     if (socket.user) return next();
 
     const token = socket.handshake.auth?.token || socket.handshake.query?.token;
+
+    // NO TOKEN — allow the connection as an unauthenticated guest socket.
+    // The client will send a 'refresh_token' event after login to elevate to an
+    // authenticated session. Unauthenticated sockets cannot join game queues.
     if (!token) {
-        if (SOCKET_AUTH_MODE === 'log') {
-            console.warn(`[Auth] Socket ${socket.id} connected without token (log mode)`);
-            return next();
+        socket.user = null; // explicitly mark as unauthenticated
+        if (SOCKET_AUTH_MODE !== 'off') {
+            console.log(`[Auth] Socket ${socket.id} connected as guest (no token)`);
         }
-        return next(new Error('Authentication required'));
+        return next(); // ← ALLOW: do not block the connection
     }
 
+    // TOKEN PROVIDED — verify it. Reject only on actual invalid/expired tokens.
     try {
         const decoded = await admin.auth().verifyIdToken(token);
         socket.user = decoded;
         if (SOCKET_AUTH_MODE === 'log') {
-            console.log(`[Auth] Socket ${socket.id} authenticated as ${decoded.uid} (log mode)`);
+            console.log(`[Auth] Socket ${socket.id} authenticated as ${decoded.uid}`);
         }
         next();
     } catch (err) {
+        // Invalid token provided — this is a genuine auth failure, reject it.
+        // (A missing token is NOT the same as an invalid one.)
         if (SOCKET_AUTH_MODE === 'log') {
-            console.warn(`[Auth] Socket ${socket.id} failed token verification (log mode): ${err.message}`);
-            return next();
+            console.warn(`[Auth] Socket ${socket.id} has invalid token (log mode): ${err.message}`);
+            socket.user = null;
+            return next(); // log mode: allow anyway
         }
-        next(new Error('Invalid token'));
+        next(new Error('Invalid or expired token. Please refresh and log in again.'));
     }
 });
+
 
 // Socket.IO connection rate limiting
 const connectionsByIP = new Map();
@@ -1994,6 +2004,52 @@ app.get('/api/admin/server-status', verifyAdmin, (req, res) => {
 });
 
 
+// --- BOT GAME CREATION (Server-side, uses Admin SDK to bypass Firestore rules) ---
+// The client SDK cannot write to bot_games (rules: allow create: if false).
+// This endpoint uses the Admin SDK to create the game document securely.
+app.post('/api/games/bot', verifyAuth, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+    try {
+        const { gameType, difficulty } = req.body;
+        const userId = req.user.uid;
+        const validGameTypes = ['Chess', 'Checkers', 'Dice', 'TicTacToe', 'Ludo', 'Pool'];
+        if (!validGameTypes.includes(gameType)) {
+            return res.status(400).json({ error: 'Invalid game type.' });
+        }
+        const validDifficulties = ['easy', 'medium', 'hard'];
+        const safeDifficulty = validDifficulties.includes(difficulty) ? difficulty : 'medium';
+
+        // Fetch user profile to build the host object
+        const userSnap = await db.collection('users').doc(userId).get();
+        if (!userSnap.exists) return res.status(404).json({ error: 'User not found.' });
+        const userData = userSnap.data();
+
+        const botProfile = {
+            id: 'bot',
+            name: 'Vantage AI',
+            avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000',
+            elo: 1200,
+            rankTier: 'Silver'
+        };
+        const newGame = {
+            gameType,
+            stake: 0,
+            status: 'active',
+            host: { id: userId, name: userData.name || 'Player', avatar: userData.avatar || '', elo: userData.elo || 1000, rankTier: userData.rankTier || 'Bronze' },
+            guest: botProfile,
+            players: [userId, 'bot'],
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+            turn: userId,
+            gameState: { difficulty: safeDifficulty }
+        };
+        const docRef = await db.collection('bot_games').add(newGame);
+        res.json({ gameId: docRef.id });
+    } catch (err) {
+        console.error('[Bot Match] Failed to create bot game:', err);
+        res.status(500).json({ error: 'Failed to create bot match.' });
+    }
+});
+
 // --- IN-MEMORY STATE ---
 const rooms = new Map(); // roomId -> { players: [], gameState: {}, ... }
 const queues = new Map(); // gameType_stake -> [ { socketId, userProfile } ]
@@ -2392,17 +2448,24 @@ io.on('connection', (socket) => {
 
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', async ({ stake, userProfile, gameType, privateRoomId }) => {
+        // SECURITY: Require authenticated socket. Guest sockets (no token) cannot
+        // join game queues. The client sends 'refresh_token' after login, which sets
+        // socket.user. If that hasn't happened yet, tell the client to re-authenticate.
+        if (!socket.user || !socket.user.uid) {
+            socket.emit('auth_required', { message: 'Please log in to join a game.' });
+            return;
+        }
         if (!userProfile?.id || !gameType || typeof stake !== 'number') {
             console.error('Invalid join_game payload');
             return;
         }
-        const userId = (socket.user && socket.user.uid) || userProfile.id;
-        if (socket.user && socket.user.uid && socket.user.uid !== userProfile.id) {
-            console.warn(`[Auth] Socket userId mismatch: socket=${socket.user.uid} profile=${userProfile.id}`);
+        const userId = socket.user.uid; // ALWAYS use server-verified uid, never client-supplied
+        if (userId !== userProfile.id) {
+            console.warn(`[Auth] Socket userId mismatch: socket=${userId} profile=${userProfile.id}`);
             socket.emit('error', { message: 'Authentication mismatch' });
             return;
         }
-        if (socket.user && socket.user.email && ADMIN_EMAILS.includes(socket.user.email)) {
+        if (socket.user.email && ADMIN_EMAILS.includes(socket.user.email)) {
             socket.join('admins');
         }
 
@@ -2648,7 +2711,12 @@ io.on('connection', (socket) => {
 
     // 2. REJOIN EXPLICIT (NET-6: use acknowledgement callback for explicit response)
     socket.on('rejoin_game', ({ userProfile }, callback) => {
-        const userId = (socket.user && socket.user.uid) || userProfile.id;
+        // SECURITY: require authenticated socket — same as join_game.
+        if (!socket.user || !socket.user.uid) {
+            if (callback) callback({ success: false, reason: 'auth_required' });
+            return;
+        }
+        const userId = socket.user.uid; // server-verified uid only
 
         if (disconnectTimers.has(userId)) {
             clearTimeout(disconnectTimers.get(userId));

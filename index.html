@@ -47,6 +47,26 @@
     href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&display=swap"
     rel="stylesheet">
 
+  <!-- Server Wake-Up Ping: fires immediately on page load, before React mounts.
+       Railway servers sleep after inactivity. This wakes the dyno as early as
+       possible to minimize the "Connecting..." delay for the user.
+       The URL is stored in localStorage by the app after first successful connect. -->
+  <script>
+    (function () {
+      try {
+        // SocketContext saves the URL to localStorage after first successful connect.
+        // On subsequent loads, we immediately fire a wake-up HTTP GET to the backend.
+        var serverUrl = localStorage.getItem('vantage_socket_url');
+        if (serverUrl) {
+          var xhr = new XMLHttpRequest();
+          xhr.open('GET', serverUrl + '/health', true);
+          xhr.timeout = 20000;
+          xhr.send(); // fire-and-forget; errors silently ignored
+        }
+      } catch (e) { /* ignore any storage/CORS errors */ }
+    })();
+  </script>
+
   <!-- Theme Initialization -->
   <script>
     (function () {

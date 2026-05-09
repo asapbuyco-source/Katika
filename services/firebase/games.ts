@@ -5,7 +5,7 @@ import {
     getDocs, addDoc, updateDoc, onSnapshot, serverTimestamp
 } from "firebase/firestore";
 import { db } from './init';
-import { User, PlayerProfile, Challenge } from '../../types';
+import { User, Challenge } from '../../types';
 
 // NOTE: findOrCreateMatch was removed in Phase 1.3.
 // Matchmaking now goes exclusively through the Socket.IO server to ensure
@@ -13,26 +13,31 @@ import { User, PlayerProfile, Challenge } from '../../types';
 // (Audit: the old export was a live trap — any accidental import would bypass escrow.)
 
 export const createBotMatch = async (user: User, gameType: string, difficulty?: string): Promise<string> => {
-    const botProfile: PlayerProfile = {
-        name: "Vantage AI",
-        avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000",
-        elo: 1200,
-        rankTier: 'Silver'
-    };
-    const newGame = {
-        gameType,
-        stake: 0,
-        status: "active",
-        host: { id: user.id, name: user.name, avatar: user.avatar, elo: user.elo, rankTier: user.rankTier },
-        guest: { id: 'bot', ...botProfile },
-        players: [user.id, 'bot'],
-        createdAt: serverTimestamp(),
-        turn: user.id,
-        gameState: { difficulty: difficulty || 'medium' }
-    };
-    const docRef = await addDoc(collection(db, "bot_games"), newGame);
-    return docRef.id;
+    // Bot games must be created server-side (Admin SDK) because the client SDK
+    // is blocked from writing to bot_games by Firestore security rules.
+    // See: firestore.rules — match /bot_games/{gameId} { allow create: if false; }
+    const { auth } = await import('./init');
+    const currentUser = auth.currentUser;
+    const token = currentUser ? await currentUser.getIdToken() : null;
+    if (!token) throw new Error('Not authenticated.');
+
+    const socketUrl = import.meta.env.VITE_SOCKET_URL?.replace(/\/$/, '') || '';
+    const response = await fetch(`${socketUrl}/api/games/bot`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ gameType, difficulty: difficulty || 'medium' })
+    });
+    if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || 'Failed to create bot match.');
+    }
+    const data = await response.json();
+    return data.gameId;
 };
+
 
 export const subscribeToGame = (gameId: string, callback: (data: any) => void) => {
     return onSnapshot(doc(db, "games", gameId), (docSnap) => {

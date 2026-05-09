@@ -203,51 +203,64 @@ const ReconnectionModal = ({ timeout, opponent }: { timeout: number; opponent?: 
     );
 };
 
-// ─── Weak Network Modal ────────────────────────────────────────────────────────
-const WeakNetworkModal = ({ onReconnect }: { onReconnect: () => void }) => {
-    // Auto-ping the socket every 10s so brief blips recover without user action
+// ─── Weak Network Banner (non-blocking) ────────────────────────────────────────
+// Replaces the old full-screen modal — shows a small fixed banner so the user
+// can still use the app while the connection is being re-established.
+const WeakNetworkBanner = ({ onReconnect }: { onReconnect: () => void }) => {
+    const [dotCount, setDotCount] = React.useState(1);
     useEffect(() => {
-        onReconnect(); // immediate attempt
-        const interval = setInterval(onReconnect, 10_000);
-        return () => clearInterval(interval);
-    }, [onReconnect]);
+        const d = setInterval(() => setDotCount(p => (p % 3) + 1), 600);
+        return () => clearInterval(d);
+    }, []);
 
     return (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-black/95 backdrop-blur-xl">
-            <motion.div
-                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-                className="bg-royal-900 border border-yellow-500 rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl shadow-yellow-900/50"
-            >
-                <div className="w-20 h-20 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-6 border-2 border-yellow-500/30">
-                    <WifiOff size={40} className="text-yellow-500" />
-                </div>
-                <h2 className="text-xl font-display font-bold text-white mb-2">Connection Lost</h2>
-                <p className="text-slate-300 text-sm mb-4 leading-relaxed">
-                    Your device lost connection to the server.<br />
-                    <span className="text-yellow-400 font-bold">Reconnecting automatically…</span>
-                </p>
-                <div className="flex items-center justify-center gap-2 text-xs text-slate-500 mb-6">
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Attempting to reconnect every 10s</span>
-                </div>
-                <div className="space-y-3">
-                    <button
-                        onClick={() => window.location.reload()}
-                        className="w-full py-3.5 bg-yellow-500 hover:bg-yellow-400 text-royal-950 font-bold rounded-xl flex items-center justify-center gap-2 transition-colors"
-                    >
-                        <RefreshCw size={18} /> Refresh Page
-                    </button>
-                    <button
-                        onClick={onReconnect}
-                        className="w-full py-3.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl transition-colors"
-                    >
-                        Try Now
-                    </button>
-                </div>
-            </motion.div>
-        </div>
+        <motion.div
+            initial={{ y: 60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 60, opacity: 0 }}
+            className="fixed bottom-0 left-0 right-0 z-[200] bg-yellow-900/95 backdrop-blur-sm border-t border-yellow-600/50 px-4 py-3 flex items-center justify-between gap-3"
+        >
+            <div className="flex items-center gap-2 min-w-0">
+                <WifiOff size={16} className="text-yellow-400 shrink-0" />
+                <span className="text-yellow-200 text-sm font-medium truncate">
+                    Reconnecting{'.'.repeat(dotCount)}
+                </span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+                <button
+                    onClick={onReconnect}
+                    className="px-3 py-1.5 bg-yellow-500 hover:bg-yellow-400 text-royal-950 text-xs font-bold rounded-lg transition-colors"
+                >
+                    Retry
+                </button>
+                <button
+                    onClick={() => window.location.reload()}
+                    className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition-colors flex items-center gap-1"
+                >
+                    <RefreshCw size={12} /> Reload
+                </button>
+            </div>
+        </motion.div>
     );
 };
+
+// ─── Connection status badge (shown during initial cold-start wait) ────────────
+const ConnectingBadge = ({ onBypass }: { onBypass: () => void }) => (
+    <motion.div
+        initial={{ opacity: 0, y: -8 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="fixed top-4 left-1/2 -translate-x-1/2 z-[150] flex items-center gap-2 bg-royal-900/95 backdrop-blur-sm border border-white/10 rounded-full px-4 py-2 shadow-lg"
+    >
+        <Loader2 size={13} className="text-gold-500 animate-spin" />
+        <span className="text-xs text-slate-300 font-medium">Connecting to server…</span>
+        <button
+            onClick={onBypass}
+            className="text-xs text-slate-500 hover:text-white underline ml-1 transition-colors"
+        >
+            skip
+        </button>
+    </motion.div>
+);
 
 // ─── Motion helper ─────────────────────────────────────────────────────────────
 const MV = ({ children, k }: { children: ReactNode; k: string }) => (
@@ -285,20 +298,21 @@ const AppContent = () => {
     const [isRejoining, setIsRejoining] = React.useState(false);
     const [rejoinFailed, setRejoinFailed] = React.useState(false);
 
-    // Grace delay before showing "Connecting to Vantage Network..." blocker.
-    // A brief blip (< 4s) will NOT interrupt the user — the blocker only
-    // appears if we are *still* disconnected after this grace period.
-    const [showConnectionBlocker, setShowConnectionBlocker] = React.useState(false);
-    const blockerTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    // Grace delay before showing "Connecting…" badge.
+    // Only shown when a logged-in user hasn't connected yet after 5s.
+    // Does NOT block navigation — it's a non-intrusive top badge.
+    const [showConnectingBadge, setShowConnectingBadge] = React.useState(false);
+    const badgeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     useEffect(() => {
         if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
-            blockerTimerRef.current = setTimeout(() => setShowConnectionBlocker(true), 4000);
+            badgeTimerRef.current = setTimeout(() => setShowConnectingBadge(true), 5000);
         } else {
-            if (blockerTimerRef.current) clearTimeout(blockerTimerRef.current);
-            setShowConnectionBlocker(false);
+            if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current);
+            setShowConnectingBadge(false);
         }
-        return () => { if (blockerTimerRef.current) clearTimeout(blockerTimerRef.current); };
+        return () => { if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current); };
     }, [isConnected, hasConnectedOnce, user, bypassConnection]);
+
 
     useEffect(() => {
         const storedRoom = sessionStorage.getItem('vantage_active_room');
@@ -524,31 +538,6 @@ const AppContent = () => {
         );
     }
 
-    // Only block the UI after the 4s grace period has elapsed
-    if (showConnectionBlocker && !isConnected && !hasConnectedOnce && user && !bypassConnection) {
-        return (
-            <div className="min-h-screen bg-royal-950 flex flex-col items-center justify-center p-6 text-center gap-4">
-                <Loader2 size={48} className="text-gold-500 animate-spin" />
-                <h2 className="text-xl font-bold text-white">Connecting to Vantage Network...</h2>
-                <p className="text-slate-500 text-xs">This usually resolves on its own. Please wait…</p>
-                <div className="flex flex-col gap-3">
-                    <button
-                        onClick={() => { socket?.connect(); }}
-                        className="px-6 py-2 bg-royal-800 border border-white/10 rounded-lg text-white font-bold hover:bg-royal-700 transition-colors flex items-center justify-center gap-2"
-                        aria-label="Retry connection"
-                    >
-                        <RefreshCw size={16} /> Retry Connection
-                    </button>
-                    <button
-                        onClick={() => setBypassConnection(true)}
-                        className="text-white/50 hover:text-white text-sm underline mt-2"
-                    >
-                        Play Offline
-                    </button>
-                </div>
-            </div>
-        );
-    }
 
     return (
         <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
@@ -668,8 +657,15 @@ const AppContent = () => {
                         onComplete={() => dispatch({ type: 'UPDATE_USER', payload: { hasSeenOnboarding: true } })} 
                     />
                 )}
+                {/* Non-blocking connection status indicators */}
+                {showConnectingBadge && !isConnected && !hasConnectedOnce && user && !bypassConnection && (
+                    <ConnectingBadge onBypass={() => setBypassConnection(true)} />
+                )}
+                {!isConnected && hasConnectedOnce && currentView !== 'game' && (
+                    <WeakNetworkBanner onReconnect={() => socket?.connect()} />
+                )}
+
                 {opponentDisconnected && <ReconnectionModal timeout={opponentTimeout} opponent={opponentProfile} />}
-                {!isConnected && hasConnectedOnce && <WeakNetworkModal onReconnect={() => { socket?.connect(); }} />}
                 {gameResult && (
                     <GameResultOverlay
                         result={gameResult.result}
