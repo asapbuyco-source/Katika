@@ -12,6 +12,8 @@ export const subscribeToForum = (callback: (posts: ForumPost[]) => void) => {
     return onSnapshot(q, (snapshot) => {
         const posts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ForumPost)).reverse();
         callback(posts);
+    }, (error) => {
+        console.error('[subscribeToForum] Firestore snapshot failed:', error);
     });
 };
 

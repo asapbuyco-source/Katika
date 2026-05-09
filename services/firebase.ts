@@ -6,9 +6,16 @@
 // Module map:
 //   auth.ts       — signInWithGoogle, loginWithEmail, registerWithEmail, logout, loginAsGuest, getIdToken
 //   users.ts      — syncUserProfile, subscribeToUser, searchUsers, getAllUsers
-//   games.ts      — findOrCreateMatch, createBotMatch, subscribeToGame, getGame, updateGameState, sendChallenge, createChallengeGame, ...
+//   games.ts      — createBotMatch, subscribeToGame, getGame, updateGameState,
+    //                   updateTurn, updateGameStatus, subscribeToGameConfigs,
+    //                   subscribeToIncomingChallenges, subscribeToChallengeStatus,
+    //                   sendChallenge, respondToChallenge, createChallengeGame,
+    //                   getActiveGamesCount, getGameActivityStats
+    //                   NOTE: findOrCreateMatch and setGameResult REMOVED (Phase 1.3).
+    //                   matchmaking uses socket join_game; game completion uses server
+    //                   socket endGame path — never call these from client code.
 //   tournaments.ts — getTournaments, subscribeToTournament, registerForTournament, ...
-//   finance.ts    — getUserTransactions, addUserTransaction, creditDepositIdempotent
+//   finance.ts    — getUserTransactions
 //   social.ts     — subscribeToForum, sendForumMessage, submitBugReport, subscribeToGlobalWinners, ...
 //   admin.ts      — banUser, setMaintenanceMode, getSystemLogs
 //   init.ts       — auth, db, getApiUrl (DO NOT import directly from here)
@@ -25,8 +32,8 @@ export {
 } from './firebase/users';
 
 export {
-    findOrCreateMatch, createBotMatch, subscribeToGame, getGame,
-    updateGameState, updateTurn, setGameResult, updateGameStatus,
+    createBotMatch, subscribeToGame, getGame,
+    updateGameState, updateTurn, updateGameStatus,
     subscribeToGameConfigs, subscribeToIncomingChallenges, subscribeToChallengeStatus,
     sendChallenge, respondToChallenge, createChallengeGame,
     getActiveGamesCount, getGameActivityStats
@@ -41,7 +48,7 @@ export {
 } from './firebase/tournaments';
 
 export {
-    getUserTransactions, addUserTransaction, creditDepositIdempotent
+    getUserTransactions
 } from './firebase/finance';
 
 export {
