@@ -87,6 +87,12 @@ export const useGameController = () => {
     }, [incomingChallenge, user, startMatchmaking, dispatch, toast]);
 
     const handleMatchFound = useCallback((table: Table) => {
+        // FIX: Reset the transitioning guard so that the new game (or rematch)
+        // can end normally. Without this reset, isTransitioningRef stays `true`
+        // from the previous game's handleGameEnd, causing the new game's end
+        // to silently return early and freeze the UI.
+        isTransitioningRef.current = false;
+
         if (table.tournamentMatchId) {
             setTournamentMatchActive(table.tournamentMatchId);
             activeTournamentMatchIdRef.current = table.tournamentMatchId;
@@ -118,11 +124,16 @@ export const useGameController = () => {
                 } catch (e) { console.error('[App] Error fetching tournament pot:', e); }
             }
         }
-        dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
 
+        // FIX: For bot/offline games, clear the offline table BEFORE setting
+        // the result so the game view renders the result overlay instead of
+        // keeping the game board visible. Without this, the UI freezes showing
+        // the game with no interactive elements after the final bot move.
         if (offlineTable) {
             dispatch({ type: 'SET_OFFLINE_TABLE', payload: null });
         }
+
+        dispatch({ type: 'SET_GAME_RESULT', payload: { result, amount: 0, tournamentPot } });
     }, [activeGameTable, user, offlineTable, dispatch]);
 
     // BUG-S3: Reset isTransitioningRef when view transitions away from 'game'
@@ -134,13 +145,40 @@ export const useGameController = () => {
         }
     }, [state.currentView]);
 
+    // REMATCH FIX: Reset isTransitioningRef whenever a new socketGame appears.
+    // handleMatchFound (which also resets the ref) is only called via the
+    // MatchmakingScreen onMatchFound prop — but during a rematch the user is on
+    // the result overlay so MatchmakingScreen is unmounted and onMatchFound never
+    // fires. Watching socketGame directly covers match_found, rematch, and rejoin.
+    const prevSocketGameIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        const newId = socketGame?.roomId ?? socketGame?.id ?? null;
+        if (newId && newId !== prevSocketGameIdRef.current) {
+            isTransitioningRef.current = false;
+        }
+        prevSocketGameIdRef.current = newId;
+    }, [socketGame]);
+
     const finalizeGameEnd = useCallback(() => {
+        // Prevent the App.tsx safety-guard effect (currentView='game', no table,
+        // no result → lobby after 3s) from racing with our navigation below.
         isTransitioningRef.current = true;
+
         if (socket && socketGame) {
             socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
         }
 
-        const tournamentMatchId = activeTournamentMatchIdRef.current;
+        // FIX: Derive tournament ID from socketGame FIRST (still available before
+        // setSocketGame(null) is called below), then fall back to the ref.
+        // Background: activeTournamentMatchIdRef is set inside handleGameEnd, but
+        // handleGameEnd is never called for P2P games other than Checkers (the
+        // server emits game_over → SocketContext dispatches SET_GAME_RESULT
+        // directly, bypassing handleGameEnd entirely). This caused ALL tournament
+        // losers to be redirected to 'lobby' instead of 'tournaments' because
+        // the ref was null. Reading socketGame.tournamentMatchId directly here
+        // ensures the correct destination for every game type.
+        const socketTournamentMatchId = socketGame?.tournamentMatchId || socketGame?.privateRoomId || null;
+        const tournamentMatchId = socketTournamentMatchId || activeTournamentMatchIdRef.current;
         const isTournament = !!tournamentMatchId;
 
         let pendingTournamentId: string | null = null;
@@ -173,9 +211,15 @@ export const useGameController = () => {
             toast.error(`Insufficient funds for rematch. You need ${socketGame.stake} FCFA.`);
             return;
         }
+        // FIX: Guard against duplicate REMATCH_REQUEST emissions. If the player
+        // already sent a request (status === 'requested'), do nothing — the server
+        // deduplicates via rematchVotes.has(userId) but this stops a second
+        // dispatch from resetting the UI back to 'requested' and re-showing
+        // the waiting state unnecessarily, which appeared as a loop.
+        if (state.rematchStatus === 'requested') return;
         dispatch({ type: 'SET_REMATCH_STATUS', payload: 'requested' });
         socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_REQUEST' } });
-    }, [user, socket, socketGame, toast, dispatch]);
+    }, [user, socket, socketGame, toast, dispatch, state.rematchStatus]);
 
     // ── Globals ───────────────────────────────────────────────────────────────
     const handleLogout = useCallback(async () => {

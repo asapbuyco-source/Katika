@@ -265,19 +265,40 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     }, [socketGame?.gameState?.pieces, socketGame?.turn, socketGame?.gameState?.mustJumpFrom, user.id, isP2P]);
 
     // --- SOCKET GAME_OVER LISTENER ---
+    // FIX: Must call onGameEnd here so that handleGameEnd in useGameController
+    // fires — this sets isTransitioningRef, clears activeGameTable, and
+    // dispatches SET_GAME_RESULT so the result overlay can appear over the
+    // correct view. Without this call, the game freezes at the final move.
+    const onGameEndRef = useRef(onGameEnd);
+    useEffect(() => { onGameEndRef.current = onGameEnd; }, [onGameEnd]);
+
     useEffect(() => {
         if (!isP2P || !socket) return;
         
-        const handleGameOver = (data: any) => {
-            setIsGameOver(true);
-            // SocketContext handles global SET_GAME_RESULT for P2P
+        const handleGameOver = (data: { winner?: string; roomId?: string }) => {
+            // Guard to ensure we only process this once
+            setIsGameOver(prev => {
+                if (prev) return true;
+                
+                // Determine result from winner field and call the parent callback
+                // so that useGameController.handleGameEnd runs and tears down the
+                // active game table, enabling the result overlay.
+                const result = !data.winner
+                    ? 'draw'
+                    : data.winner === user.id
+                        ? 'win'
+                        : 'loss';
+                
+                onGameEndRef.current(result);
+                return true;
+            });
         };
 
         socket.on('game_over', handleGameOver);
         return () => {
             socket.off('game_over', handleGameOver);
         };
-    }, [isP2P, socket, user.id, onGameEnd]);
+    }, [isP2P, socket, user.id]);
 
     // --- Task 8 Fix: Lidraughts Polling — Stop on Game Over ---
     const lidraughtsActiveRef = useRef(true);
