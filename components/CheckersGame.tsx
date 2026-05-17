@@ -1,4 +1,5 @@
 
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ArrowLeft, Crown, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink, List, Undo2 } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
@@ -7,7 +8,6 @@ import { playSFX } from '../services/sound';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { Socket } from 'socket.io-client';
 import { GameChat } from './GameChat';
-import { createLidraughtsGame, fetchLidraughtsState, makeLidraughtsMove, toCoords, toNotation } from '../services/lidraughts';
 import { useAppState } from '../services/AppContext';
 
 // Fix for Framer Motion type mismatches in current environment
@@ -274,12 +274,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
     useEffect(() => {
         if (!isP2P || !socket) return;
-        
+
         const handleGameOver = (data: { winner?: string; roomId?: string }) => {
             // Guard to ensure we only process this once
             setIsGameOver(prev => {
                 if (prev) return true;
-                
+
                 // Determine result from winner field and call the parent callback
                 // so that useGameController.handleGameEnd runs and tears down the
                 // active game table, enabling the result overlay.
@@ -288,7 +288,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     : data.winner === user.id
                         ? 'win'
                         : 'loss';
-                
+
                 onGameEndRef.current(result);
                 return true;
             });
@@ -306,7 +306,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (lidraughtsId) lidraughtsActiveRef.current = true;
         if (isGameOver) lidraughtsActiveRef.current = false;
         if (!lidraughtsId || isGameOver) return;
-        
+
         const interval = setInterval(async () => {
             if (!lidraughtsActiveRef.current) { clearInterval(interval); return; }
             const data = await fetchLidraughtsState(lidraughtsId);
@@ -457,12 +457,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             for (const [dr, dc] of dirs) {
                 let step = 1;
                 let foundEnemy: Piece | null = null;
-                
+
                 while (true) {
                     const mr = startPiece.r + dr * step;
                     const mc = startPiece.c + dc * step;
                     if (!isValidPos(mr, mc)) break;
-                    
+
                     const mid = pieceMap.get(`${mr},${mc}`);
                     if (mid) {
                         if (mid.player === player) break; // Blocked by own piece
@@ -476,13 +476,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             r: mr, c: mc,
                             isJump: true, jumpId: foundEnemy.id
                         };
-                        
+
                         const newVisited = new Set(visitedIds);
                         newVisited.add(foundEnemy.id);
-                        
+
                         const tempPiece: Piece = { ...startPiece, r: mr, c: mc };
                         const nextSequences = getJumpSequences(tempPiece, newVisited);
-                        
+
                         if (nextSequences.length === 0) {
                             sequences.push([jumpMove]);
                         } else {
@@ -491,7 +491,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                             }
                         }
                     }
-                    
+
                     if (!isKing && step >= 2) break; // Men can only check step=1 (enemy) and step=2 (land)
                     step++;
                 }
@@ -507,7 +507,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (allSequences.length > 0) {
             const maxCaptures = Math.max(...allSequences.map(seq => seq.length));
             const bestSequences = allSequences.filter(seq => seq.length === maxCaptures);
-            
+
             const uniqueFirstMoves = new Map<string, Move>();
             bestSequences.forEach(seq => {
                 const firstMove = seq[0];
@@ -516,7 +516,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     uniqueFirstMoves.set(key, firstMove);
                 }
             });
-            
+
             return { moves: Array.from(uniqueFirstMoves.values()), hasJump: true };
         }
 
@@ -533,9 +533,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     const tc = p.c + dc * step;
                     if (!isValidPos(tr, tc)) break;
                     if (pieceMap.has(`${tr},${tc}`)) break; // Blocked
-                    
+
                     allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
-                    
+
                     if (!p.isKing) break; // Men only move 1 square
                     step++;
                 }
@@ -648,7 +648,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     // Undo last move - for practice/bot games only
     const undoLastMove = useCallback(() => {
         if (isP2P || isGameOver || boardHistory.length === 0) return;
-        
+
         const previousBoard = boardHistory[boardHistory.length - 1];
         setPieces(previousBoard);
         setBoardHistory(prev => prev.slice(0, -1));
@@ -715,7 +715,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (isBotGame && !lidraughtsId && !isGameOver && turn === 'opponent' && !isLidraughtsLoading) {
             const timer = setTimeout(() => {
                 // Task 3 Fix: Rewrite bot logic to directly apply state, bypassing fragile executeMove call
-                let currentPieces = stateRef.current.pieces.map(p => ({...p}));
+                let currentPieces = stateRef.current.pieces.map(p => ({ ...p }));
                 let lastMoveData: { fromR: number; fromC: number; r: number; c: number; isJump: boolean } = { fromR: 0, fromC: 0, r: 0, c: 0, isJump: false };
                 let moveFound = false;
                 let safety = 0;
@@ -885,8 +885,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     <button onClick={() => setShowMovesPanel(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                         <List size={18} />
                     </button>
-                    <button 
-                        onClick={undoLastMove} 
+                    <button
+                        onClick={undoLastMove}
                         disabled={boardHistory.length === 0 || isP2P || isGameOver}
                         className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-gold-400 disabled:opacity-30 disabled:cursor-not-allowed"
                         title="Undo last move"
@@ -898,7 +898,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                     <div className="text-xl font-display font-bold text-white">{Math.max(0, table.stake) > 0 ? (table.stake * 2).toLocaleString() + ' FCFA' : 'Practice'}</div>
                 </div>
-                <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+                <div className="flex items-center gap-4"><NetworkSignalIndicator /><div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div></div>
             </div>
 
             {/* Turn Indicator */}

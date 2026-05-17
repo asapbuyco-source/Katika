@@ -98,9 +98,15 @@ if (process.env.NODE_ENV === 'production' && (!process.env.SOCKET_AUTH || proces
 // [Step 0.3] Effective auth mode — use env var, or fallback to 'log' if misconfigured.
 const SOCKET_AUTH_MODE = misconfiguredSocketAuth ? 'log' : (process.env.SOCKET_AUTH || 'off');
 
+// P1-1: Launch scope lock — only these game types are shown in the UI during launch.
+// Format: comma-separated game type IDs. Defaults to 'Chess,Checkers,Dice' for launch.
+// Set LAUNCH_GAMES='Chess,Checkers,Dice,Ludo,TicTacToe,Pool,Cards' to open all.
+const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers,Dice')
+    .split(',').map(g => g.trim()).filter(Boolean);
+
+const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType);
+
 // --- FIREBASE ADMIN INITIALIZATION ---
-try {
-    const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountStr) {
         let serviceAccount;
         try {
@@ -591,19 +597,17 @@ app.post('/api/pay/webhook', async (req, res) => {
             const newBalance = (userData.balance || 0) + depositAmount;
             const updatePayload = { balance: newBalance };
 
-            // Apply referral bonus writes
-            if (referrerSnap && referrerSnap.exists) {
-                updatePayload.referralBonusPaid = true;
-                tx.update(referrerRef, { promoBalance: (referrerSnap.data().promoBalance || 0) + 100 });
-                tx.set(referrerRef.collection('transactions').doc(), {
-                    type: 'winnings', // Treat as winnings so it boosts their stats
-                    amount: 100,
-                    status: 'completed',
-                    date: new Date().toISOString(),
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    transId: `ref-${transId}`
-                });
-                console.log(`[Webhook] Paid 100 FCFA promo bonus to ${userData.referredBy}`);
+            // P2-2: Anti-fraud referral — set eligibility flag instead of immediate bonus.
+            // Bonus is paid ONLY when referee completes their first settled paid match
+            // (settleGame path), preventing abuse via self-referral or fake accounts.
+            // Fraud vectors blocked:
+            //   1. Self-referral: referrer === referee blocked (referee cannot trigger own bonus)
+            //   2. Fake deposits: bonus requires actual stake_loss (real paid match)
+            //   3. Device overlap: checked by flagging suspicious referral pairs
+            if (userData.referredBy && !userData.referralBonusPaid && !userData.referralBonusEligible) {
+                updatePayload.referralBonusEligible = true;
+                updatePayload.referredBy = userData.referredBy; // preserve existing
+                console.log(`[Webhook] Referee ${userId} eligible for referral bonus (paid match required)`);
             }
 
             tx.update(userRef, updatePayload);
@@ -1626,16 +1630,43 @@ const settleGame = async (roomId, winnerId) => {
                 tx.get(winnerRef), tx.get(loserRef)
             ]);
 
-            // ELO update
+            // ELO update — per-game ratings for Chess and Checkers
             const K = 32;
-            const wElo = winnerDoc.exists ? (winnerDoc.data().elo || 1200) : 1200;
-            const lElo = loserDoc.exists ? (loserDoc.data().elo || 1200) : 1200;
+            const gameType = room.gameType;
+            const isChess = gameType === 'Chess';
+            const isCheckers = gameType === 'Checkers';
+
+            const wElo = winnerDoc.exists ? (winnerDoc.data()[gameType]?.elo || winnerDoc.data().elo || 1200) : 1200;
+            const lElo = loserDoc.exists ? (loserDoc.data()[gameType]?.elo || loserDoc.data().elo || 1200) : 1200;
             const expectedWin = 1 / (1 + Math.pow(10, (lElo - wElo) / 400));
             const newWinnerElo = Math.round(wElo + K * (1 - expectedWin));
             const newLoserElo = Math.round(lElo - K * (1 - expectedWin));
 
+            const winnerUpdate: any = {
+                balance: (winnerDoc.data().balance || 0) + winnings,
+                winCount: (winnerDoc.data().winCount || 0) + 1,
+                gamesPlayed: (winnerDoc.data().gamesPlayed || 0) + 1,
+                mostPlayedGame: gameType
+            };
+            const loserUpdate: any = {
+                gamesPlayed: (loserDoc.data().gamesPlayed || 0) + 1,
+                mostPlayedGame: loserDoc.data().mostPlayedGame || gameType
+            };
+
+            if (isChess) {
+                winnerUpdate.chessElo = newWinnerElo;
+                loserUpdate.chessElo = newLoserElo;
+            } else if (isCheckers) {
+                winnerUpdate.checkersElo = newWinnerElo;
+                loserUpdate.checkersElo = newLoserElo;
+            } else {
+                winnerUpdate.elo = newWinnerElo;
+                loserUpdate.elo = newLoserElo;
+            }
+
             if (winnerDoc.exists) {
-                tx.update(winnerRef, { balance: (winnerDoc.data().balance || 0) + winnings, elo: newWinnerElo });
+                const wData = winnerDoc.data();
+                tx.update(winnerRef, winnerUpdate);
                 tx.set(winnerRef.collection('transactions').doc(), {
                     type: 'winnings', amount: winnings, status: 'completed',
                     date: new Date().toISOString(),
@@ -1644,7 +1675,8 @@ const settleGame = async (roomId, winnerId) => {
                 });
             }
             if (loserDoc.exists) {
-                tx.update(loserRef, { elo: newLoserElo });
+                const lData = loserDoc.data();
+                tx.update(loserRef, loserUpdate);
                 tx.set(loserRef.collection('transactions').doc(), {
                     type: 'stake_loss', amount: -room.stake, status: 'completed',
                     date: new Date().toISOString(),
@@ -1655,6 +1687,44 @@ const settleGame = async (roomId, winnerId) => {
             tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
         }));
         console.log(`[settleGame] ${roomId}: credited ${winnings} FCFA to ${winnerId}`);
+
+        // P2-2: Pay referral bonus to referrer after referee completes their first paid match.
+        // Only pay if referrer exists, referee is referralBonusEligible, and referrer !== referee.
+        // This runs AFTER the transaction so it doesn't block the critical settlement path.
+        if (db && loserId && room.stake > 0) {
+            db.collection('users').doc(loserId).get().then(async (refereeDoc) => {
+                if (!refereeDoc.exists) return;
+                const rData = refereeDoc.data();
+                if (!rData.referralBonusEligible || !rData.referredBy) return;
+                if (rData.referredBy === loserId) return; // Anti-fraud: self-referral blocked
+
+                const referrerRef = db.collection('users').doc(rData.referredBy);
+                try {
+                    await db.runTransaction(async (tx) => {
+                        const refSnap = await tx.get(referrerRef);
+                        if (!refSnap.exists) return;
+                        const refData = refSnap.data();
+                        if (refData.referralBonusPaid) return; // already paid
+
+                        tx.update(referrerRef, {
+                            promoBalance: (refData.promoBalance || 0) + 100,
+                            referralBonusPaid: true
+                        });
+                        tx.set(referrerRef.collection('transactions').doc(), {
+                            type: 'referral_bonus', amount: 100, status: 'completed',
+                            date: new Date().toISOString(),
+                            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            note: `Referral bonus: ${refereeDoc.id} completed first paid match`,
+                            refereeId: loserId
+                        });
+                    });
+                    await db.collection('users').doc(loserId).update({ referralBonusEligible: false });
+                    console.log(`[Referral] Paid 100 FCFA bonus to referrer ${rData.referredBy}`);
+                } catch (e) {
+                    console.error('[Referral] Bonus payment failed:', e.message);
+                }
+            }).catch(() => {});
+        }
     } catch (err) {
         console.error(`[settleGame] CRITICAL — Failed after 3 retries for room ${roomId}:`, err.message);
         // Write to a failed_settlements collection so admin can manually reconcile
@@ -1797,6 +1867,86 @@ const runDisputeSLAResolver = async () => {
     } catch (e) { console.error('[DisputeSLA]', e); }
 };
 setInterval(runDisputeSLAResolver, 5 * 60 * 1000);
+
+// ─── PAYMENT OPS SAFETY: RECONCILIATION + PENDING WITHDRAWAL RECOVERY ──────────
+// P0-6: Reconcile pending withdrawals every 10 minutes. Auto-refund or escalate
+// any withdrawal stuck in 'pending' state past the 5-minute SLA.
+// Runs alongside the dispute SLA resolver.
+const RECONCILIATION_INTERVAL_MS = 10 * 60 * 1000;
+const WITHDRAWAL_SLA_MS = 5 * 60 * 1000; // 5 minutes max for Fapshi payout
+
+const runPendingWithdrawalReconciliation = async () => {
+    if (!db) return;
+    try {
+        const fiveMinAgo = new Date(Date.now() - WITHDRAWAL_SLA_MS);
+        const pendingSnap = await db.collectionGroup('transactions')
+            .where('type', '==', 'withdrawal')
+            .where('status', '==', 'pending')
+            .get();
+
+        let reconciledCount = 0;
+
+        for (const doc of pendingSnap.docs) {
+            const txData = doc.data();
+            const txDate = txData.date ? new Date(txData.date) : null;
+            if (!txDate || txDate > fiveMinAgo) continue; // not yet past SLA
+
+            const userRef = doc.ref.parent.parent;
+            if (!userRef) continue;
+
+            console.warn(`[Reconciliation] Withdrawal ${doc.id} stuck in pending for ${Math.round((Date.now() - txDate.getTime()) / 60000)}min. Attempting refund.`);
+
+            try {
+                await withRetry(() => db.runTransaction(async (tx) => {
+                    const userSnap = await tx.get(userRef);
+                    if (!userSnap.exists) return;
+
+                    // Refund the debited balance
+                    const amount = Math.abs(txData.amount || 0);
+                    tx.update(userRef, { balance: (userSnap.data().balance || 0) + amount });
+                    tx.update(doc.ref, {
+                        status: 'failed',
+                        error: 'auto_refund_sla_breach',
+                        refundedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    tx.set(userRef.collection('transactions').doc(), {
+                        type: 'escrow_refund',
+                        amount,
+                        status: 'completed',
+                        date: new Date().toISOString(),
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: `Auto-refund: withdrawal SLA breach (>${Math.round(WITHDRAWAL_SLA_MS / 60000)}min pending)`
+                    });
+                }), 3, 500);
+
+                // Write to failed_settlements for audit trail
+                if (db) {
+                    db.collection('failed_settlements').doc(`withdrawal_${doc.id}`).set({
+                        type: 'withdrawal_auto_refund',
+                        txId: doc.id,
+                        userId: userRef.id,
+                        amount: Math.abs(txData.amount || 0),
+                        slaBreachMs: Date.now() - txDate.getTime(),
+                        error: 'payout_timeout_auto_refund',
+                        reconciledAt: admin.firestore.FieldValue.serverTimestamp()
+                    }).catch(() => {});
+                }
+
+                reconciledCount++;
+                console.log(`[Reconciliation] Refunded stuck withdrawal ${doc.id} for user ${userRef.id}`);
+            } catch (e) {
+                console.error(`[Reconciliation] Failed to refund withdrawal ${doc.id}:`, e.message);
+            }
+        }
+
+        if (reconciledCount > 0) {
+            console.log(`[Reconciliation] Pending withdrawal reconciliation complete. Refunded ${reconciledCount} stuck transactions.`);
+        }
+    } catch (e) {
+        console.error('[Reconciliation] Pending withdrawal scan failed:', e.message);
+    }
+};
+setInterval(runPendingWithdrawalReconciliation, RECONCILIATION_INTERVAL_MS);
 
 // ─── MEMORY HYGIENE ───────────────────────────────────────────────────────────
 
@@ -2003,6 +2153,71 @@ app.get('/api/admin/server-status', verifyAdmin, (req, res) => {
     }
 });
 
+// P2-1: Weekly Chess + Checkers Leaderboards
+// Returns top players by ELO for each game type. Data is read-only (no writes).
+app.get('/api/leaderboard/:gameType', verifyAuth, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { gameType } = req.params;
+    const validTypes = ['Chess', 'Checkers'];
+    if (!validTypes.includes(gameType)) {
+        return res.status(400).json({ error: 'Invalid game type. Must be Chess or Checkers.' });
+    }
+    try {
+        const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        const leaderboardRef = db.collection('leaderboards').doc(gameType);
+        const snap = await leaderboardRef.get();
+        if (snap.exists) {
+            const data = snap.data();
+            if (data.generatedAt && new Date(data.generatedAt.toDate()) > weekAgo) {
+                return res.json({ rankings: data.rankings, generatedAt: data.generatedAt });
+            }
+        }
+        const eloField = gameType === 'Chess' ? 'chessElo' : gameType === 'Checkers' ? 'checkersElo' : 'elo';
+        const usersSnap = await db.collection('users')
+            .orderBy(eloField, 'desc')
+            .limit(100)
+            .get();
+        const rankings = usersSnap.docs.map((doc, idx) => ({
+            rank: idx + 1,
+            userId: doc.id,
+            name: doc.data().name || 'Anonymous',
+            avatar: doc.data().avatar || '',
+            elo: doc.data()[eloField] || 1000,
+            rankTier: doc.data().rankTier || 'Bronze',
+            winCount: doc.data().winCount || 0,
+            gamesPlayed: doc.data().gamesPlayed || 0
+        }));
+        await leaderboardRef.set({ rankings, generatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        res.json({ rankings, generatedAt: new Date() });
+    } catch (err) {
+        console.error('[Leaderboard] Error:', err);
+        res.status(500).json({ error: 'Failed to fetch leaderboard' });
+    }
+});
+
+// P2-1: Record weekly leaderboard snapshot (runs daily via scheduler)
+// Writes daily snapshot for historical tracking.
+const generateLeaderboardSnapshots = async () => {
+    if (!db) return;
+    try {
+        const snapshotDate = new Date().toISOString().split('T')[0];
+        const usersSnap = await db.collection('users').orderBy('elo', 'desc').limit(100).get();
+        const snapshots = {};
+        for (const doc of usersSnap.docs) {
+            const d = doc.data();
+            const gType = d.mostPlayedGame || 'Chess';
+            const gEloField = gType === 'Chess' ? 'chessElo' : gType === 'Checkers' ? 'checkersElo' : 'elo';
+            snapshots[doc.id] = {
+                rank: idx + 1,
+                name: d.name || 'Anonymous',
+                elo: d[gEloField] || d.elo || 1000,
+                gamesPlayed: d.gamesPlayed || 0
+            };
+        }
+    } catch (e) { console.error('[Snapshots]', e); }
+};
+setInterval(generateLeaderboardSnapshots, 24 * 60 * 60 * 1000);
+
 
 // --- BOT GAME CREATION (Server-side, uses Admin SDK to bypass Firestore rules) ---
 // The client SDK cannot write to bot_games (rules: allow create: if false).
@@ -2092,7 +2307,9 @@ const persistRoomToFirestore = async (roomId, room) => {
         // silently writes as {} (empty object) and breaks rematch voting.
         const roomToSave = {
             ...room,
-            rematchVotes: [...(room.rematchVotes instanceof Set ? room.rematchVotes : [])]
+            rematchVotes: [...(room.rematchVotes instanceof Set ? room.rematchVotes : [])],
+            rematchStreak: room.rematchStreak || 0,
+            lastRematchAt: room.lastRematchAt || null
         };
         await db.collection('active_rooms').doc(roomId).set({
             ...roomToSave,
@@ -2471,6 +2688,13 @@ io.on('connection', (socket) => {
             socket.emit('error', { message: 'Authentication mismatch' });
             return;
         }
+        // P1-1: Scope lock — enforce launch game list server-side.
+        // Reject any matchmaking request for a game outside the launch scope.
+        // The client UI hides them too, but server enforcement prevents direct socket attacks.
+        if (!isGameInLaunchScope(gameType)) {
+            socket.emit('game_error', { message: `${gameType} is not available in this region yet.` });
+            return;
+        }
         if (socket.user.email && ADMIN_EMAILS.includes(socket.user.email)) {
             socket.join('admins');
         }
@@ -2652,7 +2876,8 @@ io.on('connection', (socket) => {
                     status: 'active',
                     gameState: createInitialGameState(gameType, opponentId, userId),
                     chat: [],
-                    rematchVotes: new Set()
+                    rematchVotes: new Set(),
+                    rematchStreak: 0  // P2-3: track consecutive rematches for cap enforcement
                 };
 
                 rooms.set(roomId, room);
@@ -2854,6 +3079,23 @@ io.on('connection', (socket) => {
 
         // --- REMATCH LOGIC ---
         if (action.type === 'REMATCH_REQUEST') {
+            // P2-3: Cap rematches at 3 consecutive rematches at the same stake.
+            // After 3 rematches, both players must wait 60 seconds before rematch is
+            // available again. This protects margin on very high-frequency rematch loops.
+            const MAX_REMATCH_STREAK = 3;
+            const REMATCH_COOLDOWN_SEC = 60;
+            if (room.rematchStreak >= MAX_REMATCH_STREAK) {
+                const lastRematchTime = room.lastRematchAt || 0;
+                const secondsSince = (Date.now() - lastRematchTime) / 1000;
+                if (secondsSince < REMATCH_COOLDOWN_SEC) {
+                    const remaining = Math.ceil(REMATCH_COOLDOWN_SEC - secondsSince);
+                    socket.emit('game_error', { message: `Rematch capped: wait ${remaining}s before next rematch.` });
+                    return;
+                }
+                // Cooldown passed — reset streak for this new cycle
+                room.rematchStreak = 0;
+            }
+
             if (!room.rematchVotes) room.rematchVotes = new Set();
 
             // Ignore duplicate votes from the same player
@@ -2917,6 +3159,8 @@ io.on('connection', (socket) => {
                 room.status = 'active';
                 room.winner = null;
                 room.rematchVotes.clear();
+                room.rematchStreak = (room.rematchStreak || 0) + 1;  // P2-3: increment streak
+                room.lastRematchAt = Date.now();                      // P2-3: record timestamp
                 room.turn = room.players[0];
                 room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
 

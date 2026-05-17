@@ -19,6 +19,7 @@
 //   social.ts     — subscribeToForum, sendForumMessage, submitBugReport, subscribeToGlobalWinners, ...
 //   admin.ts      — banUser, setMaintenanceMode, getSystemLogs
 //   init.ts       — auth, db, getApiUrl (DO NOT import directly from here)
+//   leaderboard.ts — getLeaderboard
 
 export { auth, db, getApiUrl } from './firebase/init';
 
@@ -59,6 +60,10 @@ export {
 export {
     banUser, setMaintenanceMode, subscribeToMaintenanceMode, getSystemLogs
 } from './firebase/admin';
+
+export {
+    getLeaderboard
+} from './firebase/leaderboard';
 
 // ─── Re-export Timestamp for type annotations ─────────────────────────────────
 export { serverTimestamp } from 'firebase/firestore';

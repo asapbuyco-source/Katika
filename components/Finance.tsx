@@ -282,39 +282,41 @@ const handleWithdraw = async () => {
                 <div className="lg:col-span-2 space-y-6">
 
                     {/* Digital Card */}
-                    <div className="relative h-56 rounded-3xl overflow-hidden shadow-2xl transition-transform hover:scale-[1.01]">
-                        <div className="absolute inset-0 bg-gradient-to-br from-royal-800 to-black z-0"></div>
-                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-20 z-0"></div>
-                        {/* Gold sheen */}
-                        <div className="absolute -top-24 -right-24 w-64 h-64 bg-gold-500/20 rounded-full blur-3xl"></div>
+                    <div className="relative h-64 rounded-[2rem] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5),0_0_40px_rgba(251,191,36,0.15)] transition-all duration-500 hover:scale-[1.02] border border-white/10 group">
+                        <div className="absolute inset-0 bg-gradient-to-br from-royal-900 via-royal-950 to-black z-0"></div>
+                        <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 mix-blend-overlay z-0"></div>
+                        
+                        {/* Complex Mesh Gradient Orbs */}
+                        <div className="absolute -top-32 -right-32 w-80 h-80 bg-gold-500/20 rounded-full blur-[80px] group-hover:bg-gold-500/30 transition-colors duration-700"></div>
+                        <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-royal-700/40 rounded-full blur-[80px]"></div>
 
-                        <div className="relative z-10 p-8 flex flex-col justify-between h-full">
+                        <div className="relative z-10 p-8 flex flex-col justify-between h-full premium-glass rounded-[2rem]">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
-                                        <Wallet size={14} /> {t('vantage_vault')}
+                                        <Wallet size={16} /> {t('vantage_vault')}
                                     </div>
-                                    <div className="text-slate-400 text-sm font-mono tracking-wider">**** **** **** 8842</div>
+                                    <div className="text-slate-400 text-sm font-mono tracking-[0.2em] mt-2 opacity-60 group-hover:opacity-100 transition-opacity">**** **** **** 8842</div>
                                 </div>
                                 <div className="text-right">
-                                    <div className="font-display font-black text-xl text-white italic">VISA</div>
-                                    <div className="text-[10px] text-slate-500">Virtual Debit</div>
+                                    <div className="font-display font-black text-2xl text-white italic tracking-tighter">VISA</div>
+                                    <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1">Virtual Card</div>
                                 </div>
                             </div>
 
                             <div className="flex items-end justify-between">
                                 <div>
-                                    <div className="text-slate-400 text-xs mb-1">{t('balance_label')} (Withdrawable)</div>
-                                    <div className="text-4xl font-display font-bold text-white tracking-tight">
-                                        {user.balance.toLocaleString()} <span className="text-lg text-gold-500 font-sans">FCFA</span>
+                                    <div className="text-slate-400 text-xs mb-2 font-bold uppercase tracking-wider">{t('balance_label')}</div>
+                                    <div className="text-5xl font-mono font-bold text-white tracking-tighter flex items-end gap-2 text-glow">
+                                        {user.balance.toLocaleString()} <span className="text-xl text-gold-500 font-sans tracking-normal mb-1">FCFA</span>
                                     </div>
                                 </div>
                                 
                                 {user.promoBalance !== undefined && user.promoBalance > 0 && (
-                                    <div className="text-right">
-                                        <div className="text-purple-300 text-xs mb-1 font-bold tracking-wider uppercase">Promo Balance</div>
-                                        <div className="text-2xl font-display font-bold text-white tracking-tight">
-                                            {user.promoBalance.toLocaleString()} <span className="text-sm text-purple-400 font-sans">FCFA</span>
+                                    <div className="text-right bg-purple-900/40 border border-purple-500/30 p-3 rounded-2xl backdrop-blur-md">
+                                        <div className="text-purple-300 text-[10px] mb-1 font-bold tracking-widest uppercase flex items-center gap-1 justify-end"> Promo</div>
+                                        <div className="text-2xl font-mono font-bold text-white tracking-tighter">
+                                            {user.promoBalance.toLocaleString()} <span className="text-xs text-indigo-400 font-sans tracking-normal">FCFA</span>
                                         </div>
                                     </div>
                                 )}

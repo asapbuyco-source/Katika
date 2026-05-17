@@ -30,12 +30,19 @@ const GAME_TIERS: GameTier[] = [
 
 const STATIC_GAME_LIST = [
     { id: 'Dice', name: 'Dice Duel', players: 0, icon: Dice5, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20', defaultStatus: 'active' },
-    { id: 'Chess', name: 'Master Chess', players: 0, icon: Brain, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20', defaultStatus: 'active', desc: 'Powered by Lichess' },
+    { id: 'Chess', name: 'Master Chess', players: 0, icon: Brain, color: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20', defaultStatus: 'active', desc: 'Powered by Lichess' },
     { id: 'Checkers', name: 'Checkers Pro', players: 0, icon: Target, color: 'text-cam-red', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active', desc: 'Powered by Lidraughts' },
     { id: 'Ludo', name: 'Ludo King', players: 0, icon: Grid3x3, color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20', defaultStatus: 'active' },
     { id: 'TicTacToe', name: 'XO Clash', players: 0, icon: X, color: 'text-blue-400', bg: 'bg-blue-500/10', border: 'border-blue-500/20', defaultStatus: 'active' },
     { id: 'Pool', name: '8-Ball Pool', players: 0, icon: Disc, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20', defaultStatus: 'active' },
 ];
+
+// P1-1: Scope lock — build-time constant (Vite define). Cannot be overridden at runtime.
+// Games not in this list are hidden from the lobby even if their admin status is 'active'.
+const LAUNCH_GAME_SCOPE = new Set(
+    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers')
+        .split(',').map((g: string) => g.trim()).filter(Boolean)
+);
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
     const { t } = useLanguage();
@@ -270,10 +277,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     };
 
     // Merge Configs
-    const availableGames = STATIC_GAME_LIST.map(g => ({
-        ...g,
-        status: gameOverrides[g.id] || g.defaultStatus
-    }));
+    const availableGames = STATIC_GAME_LIST
+        .filter(g => LAUNCH_GAME_SCOPE.has(g.id)) // P1-1: scope lock — hide out-of-launch games
+        .map(g => ({
+            ...g,
+            status: gameOverrides[g.id] || g.defaultStatus
+        }));
 
     return (
         <div className="p-6 max-w-7xl mx-auto pb-24 md:pb-6 min-h-screen relative overflow-hidden">
@@ -289,7 +298,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                         <p className="text-slate-400 mb-6 leading-relaxed">
                             The Vantage Network is currently undergoing critical upgrades. All active stakes have been <span className="text-white font-bold">automatically refunded</span> to user wallets.
                         </p>
-                        <div className="bg-black/30 p-3 rounded-xl border border-white/5 text-xs font-mono text-slate-500">
+                        <div className="bg-black/30 p-3 rounded-xl border border-white/10 text-xs font-mono text-slate-400">
                             ESTIMATED DOWNTIME: 2 HOURS
                         </div>
                     </div>
@@ -307,7 +316,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                         />
                         <motion.div
                             initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, opacity: 0 }}
-                            className="relative bg-royal-900 border border-purple-500 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
+                            className="relative bg-royal-900 border border-indigo-500 rounded-3xl p-6 w-full max-w-sm shadow-2xl"
                         >
                             <div className="text-center mb-6">
                                 <h2 className="text-xl font-bold text-white mb-1">Select Difficulty</h2>
@@ -397,9 +406,9 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                         <motion.div
                             layout
                             initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-                            className="relative bg-royal-900 border border-white/10 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+                            className="relative glass-panel border-white/5 rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
                         >
-                            <div className="p-6 border-b border-white/5 bg-royal-950/50 flex justify-between items-center z-10">
+                            <div className="p-6 border-b border-white/10 bg-royal-950/50 flex justify-between items-center z-10">
                                 <h2 className="text-xl font-display font-bold text-white flex items-center gap-2">
                                     <Swords className="text-gold-400" size={20} />
                                     {challengeStep === 'search' ? 'Challenge a Friend' : 'Configure Match'}
@@ -431,7 +440,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             </div>
 
                                             <div className="space-y-2">
-                                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Results</p>
+                                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Results</p>
                                                 {isSearching ? (
                                                     <div className="flex items-center justify-center py-8 text-gold-400 gap-2">
                                                         <Loader2 className="animate-spin" size={20} /> Searching Database...
@@ -446,7 +455,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                                             key={idx}
                                                             whileHover={{ scale: 1.02, backgroundColor: 'rgba(255,255,255,0.05)' }}
                                                             onClick={() => { setSelectedFriend(friend); setChallengeStep('config'); playSFX('click'); }}
-                                                            className="w-full p-3 rounded-xl border border-white/5 flex items-center justify-between group transition-all"
+                                                            className="w-full p-3 rounded-xl border border-white/10 flex items-center justify-between group transition-all"
                                                         >
                                                             <div className="flex items-center gap-3">
                                                                 <img src={friend.avatar} alt={friend.name} className="w-10 h-10 rounded-full" />
@@ -470,7 +479,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             transition={{ duration: 0.2 }}
                                             className="space-y-6 absolute inset-0 p-6"
                                         >
-                                            <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/5">
+                                            <div className="flex items-center justify-between bg-black/20 p-4 rounded-2xl border border-white/10">
                                                 <div className="flex flex-col items-center">
                                                     <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" alt="Your avatar" />
                                                     <span className="text-xs font-bold text-white mt-1">You</span>
@@ -483,13 +492,13 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             </div>
 
                                             <div>
-                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">Select Game</label>
+                                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Select Game</label>
                                                 <div className="grid grid-cols-4 gap-2">
                                                     {availableGames.filter(g => g.status === 'active').map(g => (
                                                         <button
                                                             key={g.id}
                                                             onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
-                                                            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-500 hover:bg-white/5'
+                                                            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-400 hover:bg-white/5'
                                                                 }`}
                                                         >
                                                             <g.icon size={20} className={challengeGame === g.id ? 'text-gold-400' : ''} />
@@ -499,7 +508,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             </div>
 
                                             <div>
-                                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">{t('entry_stake')} (FCFA)</label>
+                                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">{t('entry_stake')} (FCFA)</label>
                                                 <input
                                                     type="number"
                                                     value={challengeStake}
@@ -564,7 +573,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                 </div>
                 <button
                     onClick={() => { setChallengeStep('search'); setShowChallengeModal(true); playSFX('click'); }}
-                    className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-[0_0_15px_rgba(251,191,36,0.1)] hover:shadow-[0_0_25px_rgba(251,191,36,0.2)]"
+                    className="flex items-center gap-2 px-5 py-3 bg-gold-500/10 border border-gold-500/30 hover:bg-gold-500/20 text-gold-400 rounded-xl font-bold transition-all shadow-sm hover:shadow-md"
                 >
                     <Swords size={18} /> {t('challenge_friend')}
                 </button>
@@ -596,38 +605,53 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                     initial={{ opacity: 0, y: 20 }}
                                     animate={{ opacity: 1, y: 0 }}
                                     transition={{ delay: idx * 0.1 }}
-                                    className={`glass-panel p-6 rounded-3xl border relative overflow-hidden transition-all duration-300 ${game.bg} ${game.border} 
-                            ${isActive ? 'cursor-pointer group' : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
+                                    className={`premium-glass p-6 rounded-3xl relative overflow-hidden transition-all duration-300 ${game.bg} ${game.border} 
+                            ${isActive ? 'cursor-pointer group hover:shadow-[0_20px_40px_-10px_rgba(251,191,36,0.15)]' : 'opacity-60 cursor-not-allowed bg-royal-900/20 grayscale'}
                           `}
                                 >
+                                    {/* Ambient card glow behind icon */}
+                                    {isActive && (
+                                        <div className="absolute -top-10 -right-10 w-40 h-40 bg-gold-500/10 rounded-full blur-3xl group-hover:bg-gold-500/20 transition-colors"></div>
+                                    )}
+
                                     {/* Coming Soon Overlay */}
                                     {!isActive && (
                                         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
-                                            <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5">
+                                            <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5 shadow-lg">
                                                 <Lock size={12} className="text-slate-400" />
                                                 <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Coming Soon</span>
                                             </div>
                                         </div>
                                     )}
 
-                                    <div className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-6 bg-royal-950 border border-white/10 ${isActive ? 'group-hover:scale-110 transition-transform' : ''} ${game.color}`}>
-                                        <game.icon size={32} />
+                                    <div className="flex justify-between items-start mb-6 relative z-10">
+                                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center bg-royal-950/80 border border-white/10 ${isActive ? 'group-hover:scale-110 group-hover:border-gold-500/30 transition-all shadow-lg' : ''} ${game.color}`}>
+                                            <game.icon size={28} />
+                                        </div>
+                                        
+                                        {/* Live Indicator */}
+                                        {isActive && (
+                                            <div className="flex items-center gap-2 px-2.5 py-1 bg-green-500/10 border border-green-500/20 rounded-full">
+                                                <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
+                                                <span className="text-[9px] font-bold text-green-400 uppercase tracking-wider">Live</span>
+                                            </div>
+                                        )}
                                     </div>
 
-                                    <h3 className="text-xl font-bold text-white mb-1 group-hover:translate-x-1 transition-transform">{game.name}</h3>
+                                    <h3 className="text-xl font-bold text-white mb-1 group-hover:translate-x-1 group-hover:text-glow transition-all relative z-10 tracking-tight">{game.name}</h3>
 
                                     {/* Description for active games like Chess */}
                                     {(game as any).desc && isActive && (
-                                        <p className="text-[10px] text-slate-400 font-mono mb-2 uppercase tracking-wide">{(game as any).desc}</p>
+                                        <p className="text-[10px] text-slate-400 font-mono mb-3 uppercase tracking-wide relative z-10">{(game as any).desc}</p>
                                     )}
 
-                                    <div className="flex items-center gap-2 text-sm text-slate-400 mb-6">
-                                        <Users size={14} /> {game.players} Active
+                                    <div className="flex items-center gap-2 text-xs text-slate-400 mb-6 font-medium relative z-10">
+                                        <Users size={14} className="text-slate-500 group-hover:text-gold-400 transition-colors" /> {game.players.toLocaleString()} in Arena
                                     </div>
 
-                                    <button className={`w-full py-3 rounded-xl bg-royal-950/50 border border-white/10 text-sm font-bold uppercase tracking-wider transition-colors ${isActive ? `group-hover:bg-white/10 ${game.color}` : 'text-slate-600'
+                                    <button className={`w-full py-3.5 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest transition-all relative z-10 ${isActive ? `group-hover:bg-gold-500/20 group-hover:border-gold-500/40 group-hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] ${game.color}` : 'text-slate-600'
                                         }`}>
-                                        {isActive ? 'Select Table' : 'Locked'}
+                                        {isActive ? 'Enter Arena' : 'Locked'}
                                     </button>
                                 </motion.div>
                             )
@@ -668,7 +692,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                             {/* BOT PRACTICE BUTTON */}
                             <button
                                 onClick={handleBotPlay}
-                                className="flex items-center gap-2 px-4 py-2 bg-purple-500/20 border border-purple-500/50 hover:bg-purple-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
+                                className="flex items-center gap-2 px-4 py-2 bg-indigo-500/20 border border-indigo-500/50 hover:bg-indigo-500/30 text-purple-300 rounded-xl font-bold text-xs uppercase tracking-wider transition-colors"
                             >
                                 <Bot size={16} /> {t('practice_ai')}
                             </button>
@@ -686,7 +710,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                         transition={{ delay: idx * 0.05 }}
                                         whileHover={isMaintenance ? {} : { y: -8, scale: 1.02 }}
                                         onClick={() => handleTierSelect(tier)}
-                                        className={`glass-panel p-6 rounded-3xl border cursor-pointer group relative overflow-visible transition-all duration-300 ${isPopular ? 'border-gold-500/50 bg-royal-800/80 shadow-[0_0_30px_rgba(251,191,36,0.1)] ring-1 ring-gold-500/20' : 'border-white/10 hover:border-gold-500/30'
+                                        className={`glass-panel p-6 rounded-3xl border cursor-pointer group relative overflow-visible transition-all duration-300 ${isPopular ? 'border-gold-500/50 bg-royal-800/80 shadow-md ring-1 ring-gold-500/20' : 'border-white/10 hover:border-gold-500/30'
                                             }`}
                                     >
                                         {isPopular && (
@@ -710,18 +734,18 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             </div>
                                             <div className={`p-2 rounded-xl border transition-colors ${isPopular ? 'bg-gold-500/10 border-gold-500/30' : 'bg-royal-950 border-white/10 group-hover:border-gold-500/30'
                                                 }`}>
-                                                <Lock size={18} className={isPopular ? 'text-gold-400' : 'text-slate-500 group-hover:text-gold-400'} />
+                                                <Lock size={18} className={isPopular ? 'text-gold-400' : 'text-slate-400 group-hover:text-gold-400'} />
                                             </div>
                                         </div>
 
                                         <div className="space-y-4 relative z-10">
                                             <div>
-                                                <p className="text-xs text-slate-500 mb-1">{t('entry_stake')}</p>
+                                                <p className="text-xs text-slate-400 mb-1">{t('entry_stake')}</p>
                                                 <h2 className="text-3xl font-display font-bold text-white">
                                                     {tier.stake} <span className="text-sm text-gold-500">FCFA</span>
                                                 </h2>
                                             </div>
-                                            <div className="p-3 bg-white/5 rounded-xl border border-white/5 flex items-center justify-between">
+                                            <div className="p-3 bg-white/5 rounded-xl border border-white/10 flex items-center justify-between">
                                                 <span className="text-xs text-slate-400">{t('potential_win')}</span>
                                                 <span className="font-mono font-bold text-green-400 text-lg">
                                                     {tier.potentialWin} <span className="text-xs">FCFA</span>
@@ -729,12 +753,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                             </div>
                                         </div>
 
-                                        <div className="mt-6 pt-4 border-t border-white/5 flex justify-between items-center relative z-10">
-                                            <div className="flex items-center gap-2 text-xs text-slate-500">
+                                        <div className="mt-6 pt-4 border-t border-white/10 flex justify-between items-center relative z-10">
+                                            <div className="flex items-center gap-2 text-xs text-slate-400">
                                                 <Users size={14} className={isPopular ? 'text-gold-400' : ''} />
                                                 <span className={isPopular ? 'text-slate-300 font-bold' : ''}>{tier.playersOnline} {t('online')}</span>
                                             </div>
-                                            <ChevronRight size={18} className="text-slate-500 group-hover:text-white group-hover:translate-x-1 transition-transform" />
+                                            <ChevronRight size={18} className="text-slate-400 group-hover:text-white group-hover:translate-x-1 transition-transform" />
                                         </div>
                                     </motion.div>
                                 )
@@ -745,7 +769,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
             </AnimatePresence>
 
-            <div className="mt-8 p-4 bg-royal-900/30 border border-white/5 rounded-2xl flex items-center justify-center gap-2 text-sm text-slate-400">
+            <div className="mt-8 p-4 bg-royal-900/30 border border-white/10 rounded-2xl flex items-center justify-center gap-2 text-sm text-slate-400">
                 <Lock size={14} /> Stakes are held in secure Escrow until game completion.
             </div>
         </div>

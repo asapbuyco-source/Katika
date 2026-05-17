@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, ViewState, Transaction } from '../types';
-import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount } from '../services/firebase';
+import { getUserTransactions, auth, triggerPasswordReset, updateUserEmail, deleteAccount, getLeaderboard } from '../services/firebase';
 import { setSoundEnabled, getSoundEnabled, playSFX } from '../services/sound';
-import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Sun, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle } from 'lucide-react';
+import { Settings, CreditCard, Trophy, TrendingUp, ChevronDown, LogOut, Edit2, Shield, Wallet, Bell, Lock, Globe, Volume2, HelpCircle, ChevronRight, Fingerprint, Smartphone, Moon, Sun, Languages, Camera, Check, X, Zap, CheckCircle, Mail, Key, Trash2, AlertTriangle, MessageSquare, ShieldAlert } from 'lucide-react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 import { useTheme } from '../services/theme';
@@ -19,7 +19,7 @@ interface ProfileProps {
 }
 
 // Explicitly define the allowed tab values
-type ProfileTab = 'overview' | 'history' | 'settings';
+type ProfileTab = 'overview' | 'history' | 'settings' | 'leaderboard';
 
 const PRESET_AVATARS = [
     'https://api.dicebear.com/7.x/avataaars/svg?seed=Felix',
@@ -51,6 +51,11 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   });
   const [chartData, setChartData] = useState<number[]>([0, 0, 0, 0, 0, 0, 0]);
 
+  // P2-1: Leaderboard state
+  const [leaderboard, setLeaderboard] = useState<Array<{rank: number; userId: string; name: string; avatar: string; elo: number; rankTier: string; winCount: number; gamesPlayed: number}>>([]);
+  const [leaderboardGame, setLeaderboardGame] = useState<'Chess' | 'Checkers'>('Chess');
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false);
+
   // Edit State
   const [tempName, setTempName] = useState(user.name);
   const [tempAvatar, setTempAvatar] = useState(user.avatar);
@@ -68,7 +73,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
   const [newEmailInput, setNewEmailInput] = useState('');
 
   // Tabs Configuration - strictly typed
-  const tabs: ProfileTab[] = ['overview', 'history', 'settings'];
+  const tabs: ProfileTab[] = ['overview', 'history', 'leaderboard', 'settings'];
 
   // Task 21 Fix: Removed page reload on settings tab change
   // Theme/language changes now propagate via React context (useTheme/useLanguage) automatically
@@ -156,6 +161,20 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
       };
       fetchData();
   }, [user.id]);
+
+  // P2-1: Load leaderboard when tab is selected
+  useEffect(() => {
+    if (activeTab !== 'leaderboard') return;
+    const load = async () => {
+      setLeaderboardLoading(true);
+      try {
+        const entries = await getLeaderboard(leaderboardGame);
+        setLeaderboard(entries);
+      } catch (e) { console.error('[Leaderboard] Load failed:', e); }
+      setLeaderboardLoading(false);
+    };
+    load();
+  }, [activeTab, leaderboardGame]);
 
   const showToast = (msg: string) => {
       setToastMessage(msg);
@@ -315,6 +334,24 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
        {/* Profile Header */}
        <header className="relative mb-8 pt-10">
+           {/* Quick Actions (Top Right) */}
+           <div className="absolute top-2 right-2 md:top-4 md:right-4 flex items-center gap-2 z-20">
+               <button 
+                   onClick={() => { onNavigate('finance'); playSFX('click'); }}
+                   className="p-2.5 bg-royal-950/50 backdrop-blur-md border border-white/10 hover:border-gold-500/50 hover:bg-gold-500/10 rounded-full transition-all text-gold-400 group shadow-lg"
+                   aria-label="Go to Finance"
+               >
+                   <Wallet size={18} className="group-hover:scale-110 transition-transform" />
+               </button>
+               <button 
+                   onClick={() => { setActiveTab('settings'); playSFX('click'); }}
+                   className="p-2.5 bg-royal-950/50 backdrop-blur-md border border-white/10 hover:border-white/30 hover:bg-white/10 rounded-full transition-all text-slate-300 hover:text-white group shadow-lg"
+                   aria-label="Settings"
+               >
+                   <Settings size={18} className="group-hover:rotate-90 transition-transform duration-500" />
+               </button>
+           </div>
+
            {/* Banner/Cover */}
            <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-r from-royal-800 via-royal-700 to-royal-800 rounded-2xl opacity-50 -z-10 overflow-hidden">
                <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-30"></div>
@@ -393,15 +430,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                      exit={{ height: 0, opacity: 0 }}
                      className="overflow-hidden"
                    >
-                       <div className="mt-6 p-4 bg-black/20 rounded-xl border border-white/5">
-                           <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">Choose Avatar</p>
+                       <div className="mt-6 p-4 bg-black/20 rounded-xl border border-white/10">
+                           <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Choose Avatar</p>
                            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
                                {PRESET_AVATARS.map((avatar, i) => (
                                    <button 
                                       key={i}
                                       onClick={() => { setTempAvatar(avatar); playSFX('click'); }}
                                       className={`w-14 h-14 flex-shrink-0 rounded-full border-2 transition-all overflow-hidden relative ${
-                                          tempAvatar === avatar ? 'border-gold-500 scale-110 shadow-[0_0_15px_rgba(251,191,36,0.5)]' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'
+                                          tempAvatar === avatar ? 'border-gold-500 scale-110 shadow-md' : 'border-transparent opacity-60 hover:opacity-100 hover:scale-105'
                                       }`}
                                    >
                                         <img src={avatar} className="w-full h-full object-cover" alt={`Avatar option ${i + 1}`} />
@@ -426,16 +463,17 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                   key={tab}
                   onClick={() => { setActiveTab(tab); playSFX('click'); }}
                   className={`pb-4 text-sm font-bold capitalize transition-colors relative whitespace-nowrap px-2 ${
-                      activeTab === tab ? 'text-white' : 'text-slate-500 hover:text-slate-300'
+                      activeTab === tab ? 'text-white' : 'text-slate-400 hover:text-slate-300'
                   }`}
                >
-                   {tab === 'overview' && t('recent_activity')}
-                   {tab === 'history' && t('history')}
-                   {tab === 'settings' && t('settings')}
+{tab === 'overview' && t('recent_activity')}
+                    {tab === 'history' && t('history')}
+                    {tab === 'leaderboard' && 'Leaderboard'}
+                    {tab === 'settings' && t('settings')}
                    {activeTab === tab && (
                        <motion.div 
                            layoutId="profileTab" 
-                           className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-gold-400 to-gold-600 shadow-[0_-2px_10px_rgba(251,191,36,0.5)]" 
+                           className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-gold-400 to-gold-600 shadow-sm" 
                        />
                    )}
                </button>
@@ -459,7 +497,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                       <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                               {[
-                                  { label: t('total_games'), value: stats.totalGames.toString(), icon: Trophy, color: 'text-purple-400', bg: 'bg-purple-500/10', border: 'border-purple-500/20' },
+                                  { label: t('total_games'), value: stats.totalGames.toString(), icon: Trophy, color: 'text-indigo-400', bg: 'bg-indigo-500/10', border: 'border-indigo-500/20' },
                                   { label: t('win_rate'), value: `${stats.winRate}%`, icon: TrendingUp, color: 'text-green-400', bg: 'bg-green-500/10', border: 'border-green-500/20' },
                                   { label: t('current_streak'), value: `${stats.streak} ðŸ”¥`, icon: Zap, color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
                                   { label: t('total_earnings'), value: formatEarnings(stats.totalEarnings), icon: Wallet, color: 'text-gold-400', bg: 'bg-gold-500/10', border: 'border-gold-500/20' },
@@ -469,7 +507,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                           <stat.icon size={20} />
                                       </div>
                                       <div className="text-2xl font-bold text-white font-display">{stat.value}</div>
-                                      <div className="text-[10px] text-slate-500 uppercase tracking-wider font-bold">{stat.label}</div>
+                                      <div className="text-[10px] text-slate-400 uppercase tracking-wider font-bold">{stat.label}</div>
                                   </div>
                               ))}
                           </div>
@@ -490,7 +528,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                             initial={{ height: 0 }}
                                             animate={{ height: `${h}%` }}
                                             transition={{ duration: 1, delay: i * 0.1, ease: "circOut" }}
-                                            className="absolute bottom-0 w-full bg-gradient-to-t from-gold-600 to-gold-400 rounded-t-lg opacity-80 group-hover:opacity-100 transition-opacity shadow-[0_0_15px_rgba(251,191,36,0.2)]"
+                                            className="absolute bottom-0 w-full bg-gradient-to-t from-gold-600 to-gold-400 rounded-t-lg opacity-80 group-hover:opacity-100 transition-opacity shadow-sm"
                                           />
                                           {/* Tooltip */}
                                           <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-white text-royal-950 text-xs font-bold px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity">
@@ -499,7 +537,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                       </div>
                                   ))}
                               </div>
-                              <div className="flex justify-between mt-4 text-xs text-slate-500 font-mono px-2">
+                              <div className="flex justify-between mt-4 text-xs text-slate-400 font-mono px-2">
                                   <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
                               </div>
                           </div>
@@ -524,7 +562,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                   <div className="space-y-3">
                                       <button 
                                         onClick={() => { onNavigate('finance'); playSFX('click'); }}
-                                        className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-[0_0_20px_rgba(251,191,36,0.2)] hover:shadow-[0_0_30px_rgba(251,191,36,0.4)] active:scale-95 flex items-center justify-center gap-2"
+                                        className="w-full py-3.5 bg-gold-500 text-black font-bold rounded-xl hover:bg-gold-400 transition-all shadow-md hover:shadow-lg active:scale-95 flex items-center justify-center gap-2"
                                       >
                                           <Wallet size={18} /> {t('deposit')}
                                       </button>
@@ -540,10 +578,10 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                           
                           <div className="p-5 rounded-2xl border border-dashed border-white/10 text-center bg-royal-900/30">
                               <p className="text-sm text-slate-400 mb-2 font-medium">{t('referral_code')}</p>
-                              <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/5 select-all text-center">
+                              <div className="bg-black/40 p-3 rounded-xl font-mono text-gold-400 font-bold text-lg mb-3 tracking-widest border border-white/10 select-all text-center">
                                   {user.id.substring(0, 8).toUpperCase()}
                               </div>
-                              <p className="text-xs text-slate-500">{t('share_earn')} <span className="text-white font-bold">100 FCFA Promo Bonus</span> {t('per_friend')}</p>
+                              <p className="text-xs text-slate-400">{t('share_earn')} <span className="text-white font-bold">100 FCFA Promo Bonus</span> {t('per_friend')}</p>
                               <button
                                   onClick={() => {
                                       const code = user.id.substring(0, 8).toUpperCase();
@@ -564,15 +602,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                {/* HISTORY TAB */}
                {activeTab === 'history' && (
                    <motion.div variants={itemVariants} className="md:col-span-3">
-                       <div className="glass-panel rounded-2xl overflow-hidden border border-white/5">
-                           <div className="p-4 border-b border-white/5 flex justify-between items-center bg-royal-900/50">
+                       <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
+                           <div className="p-4 border-b border-white/10 flex justify-between items-center bg-royal-900/50">
                                <h3 className="font-bold text-white">{t('transaction_type')}</h3>
                                <button onClick={handleExportCSV} className="text-xs text-gold-400 font-bold uppercase hover:text-white">Export CSV</button>
                            </div>
                            <div className="overflow-x-auto">
                                {transactions.length > 0 ? (
                                    <table className="w-full text-left whitespace-nowrap">
-                                       <thead className="bg-royal-950/50 text-xs uppercase text-slate-500 font-medium">
+                                       <thead className="bg-royal-950/50 text-xs uppercase text-slate-400 font-medium">
                                            <tr>
                                                <th className="p-4">{t('transaction_type')}</th>
                                                <th className="p-4">Reference ID</th>
@@ -595,7 +633,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                                            <span className="capitalize font-bold text-slate-300">{tx.type}</span>
                                                        </div>
                                                    </td>
-                                                   <td className="p-4 text-xs text-slate-500 font-mono uppercase">{tx.id}</td>
+                                                   <td className="p-4 text-xs text-slate-400 font-mono uppercase">{tx.id}</td>
                                                    <td className="p-4 text-sm text-slate-400">{tx.date}</td>
                                                    <td className="p-4">
                                                        <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase border ${
@@ -614,7 +652,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </tbody>
                                    </table>
                                ) : (
-                                   <div className="p-12 text-center text-slate-500 text-sm">
+                                   <div className="p-12 text-center text-slate-400 text-sm">
                                        No transactions found. Start playing to build your history!
                                    </div>
                                )}
@@ -623,20 +661,106 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                    </motion.div>
                )}
                
-               {/* SETTINGS TAB */}
+               {/* LEADERBOARD TAB */}
+                {activeTab === 'leaderboard' && (
+                    <motion.div variants={itemVariants} className="md:col-span-3">
+                        <div className="glass-panel rounded-2xl overflow-hidden border border-white/10">
+                            <div className="p-4 border-b border-white/10 flex justify-between items-center bg-royal-900/50">
+                                <h3 className="font-bold text-white flex items-center gap-2">
+                                    <Trophy size={18} className="text-gold-400" /> Weekly Leaderboard
+                                </h3>
+                                <div className="flex gap-2">
+                                    {(['Chess', 'Checkers'] as const).map(type => (
+                                        <button
+                                            key={type}
+                                            onClick={() => { setLeaderboardGame(type); playSFX('click'); }}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                                                leaderboardGame === type
+                                                    ? 'bg-gold-500 text-royal-950'
+                                                    : 'bg-white/5 text-slate-400 hover:text-white'
+                                            }`}
+                                        >
+                                            {type}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            {leaderboardLoading ? (
+                                <div className="flex items-center justify-center py-16">
+                                    <div className="w-8 h-8 border-2 border-gold-500 border-t-transparent rounded-full animate-spin" />
+                                </div>
+                            ) : leaderboard.length === 0 ? (
+                                <div className="p-12 text-center text-slate-400 text-sm">
+                                    No rankings available yet. Be the first!
+                                </div>
+                            ) : (
+                                <div className="divide-y divide-white/5">
+                                    {leaderboard.slice(0, 50).map((entry) => {
+                                        const isCurrentUser = entry.userId === user.id;
+                                        return (
+                                            <div
+                                                key={entry.userId}
+                                                className={`flex items-center gap-4 p-4 hover:bg-white/5 transition-colors ${
+                                                    isCurrentUser ? 'bg-gold-500/10 border-l-2 border-gold-500' : ''
+                                                }`}
+                                            >
+                                                <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${
+                                                    entry.rank === 1 ? 'bg-yellow-500 text-black' :
+                                                    entry.rank === 2 ? 'bg-slate-400 text-black' :
+                                                    entry.rank === 3 ? 'bg-amber-700 text-white' :
+                                                    'bg-royal-800 text-slate-400'
+                                                }`}>
+                                                    {entry.rank}
+                                                </div>
+                                                <img
+                                                    src={entry.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${entry.userId}`}
+                                                    alt={entry.name}
+                                                    className="w-10 h-10 rounded-full border border-white/10"
+                                                />
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-bold text-white truncate">{entry.name}</span>
+                                                        {isCurrentUser && (
+                                                            <span className="text-[10px] bg-gold-500/20 text-gold-400 px-2 py-0.5 rounded-full font-bold">YOU</span>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex items-center gap-3 text-xs text-slate-400">
+                                                        <span className="font-mono">ELO: {entry.elo}</span>
+                                                        <span>{entry.gamesPlayed} games</span>
+                                                        <span>{entry.winCount} wins</span>
+                                                    </div>
+                                                </div>
+                                                <div className={`px-2 py-1 rounded-lg text-xs font-bold ${
+                                                    entry.rankTier === 'Diamond' ? 'bg-indigo-500/20 text-indigo-400' :
+                                                    entry.rankTier === 'Gold' ? 'bg-gold-500/20 text-gold-400' :
+                                                    entry.rankTier === 'Silver' ? 'bg-slate-500/20 text-slate-400' :
+                                                    'bg-orange-700/20 text-orange-400'
+                                                }`}>
+                                                    {entry.rankTier}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+
+                {/* SETTINGS TAB */}
                {activeTab === 'settings' && (
                    <>
                        <motion.div variants={itemVariants} className="md:col-span-2 space-y-6">
                            
                            {/* Security Section (MODIFIED) */}
-                           <section className="glass-panel p-6 rounded-2xl border border-white/5">
+                           <section className="glass-panel p-6 rounded-2xl border border-white/10">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                                    <Shield className="text-gold-400" size={20} /> {t('security_access')}
                                </h3>
                                
                                <div className="space-y-4">
                                    {/* Email Address */}
-                                   <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5 gap-4">
+                                   <div className="flex flex-col md:flex-row md:items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/10 gap-4">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Mail size={20}/></div>
                                            <div className="w-full">
@@ -649,7 +773,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                                       placeholder="new@email.com"
                                                    />
                                                ) : (
-                                                   <div className="text-xs text-slate-500 truncate max-w-[200px]">{currentEmail}</div>
+                                                   <div className="text-xs text-slate-400 truncate max-w-[200px]">{currentEmail}</div>
                                                )}
                                            </div>
                                        </div>
@@ -666,15 +790,15 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                    </div>
 
                                    {/* Password Reset */}
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/10">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Key size={20}/></div>
                                            <div>
                                                <div className="font-bold text-white text-sm">{t('pass_label')}</div>
-                                               <div className="text-xs text-slate-500">Secure your account</div>
+                                               <div className="text-xs text-slate-400">Secure your account</div>
                                            </div>
                                        </div>
-                                       <button onClick={handlePasswordReset} className="text-xs font-bold text-white hover:text-gold-400 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/5">
+                                       <button onClick={handlePasswordReset} className="text-xs font-bold text-white hover:text-gold-400 px-3 py-1.5 bg-white/5 hover:bg-white/10 rounded-lg transition-colors border border-white/10">
                                            Reset via Email
                                        </button>
                                    </div>
@@ -685,7 +809,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                            <div className="p-2 bg-red-500/10 rounded-lg text-red-500"><Trash2 size={20}/></div>
                                            <div>
                                                <div className="font-bold text-white text-sm">Delete Account</div>
-                                               <div className="text-xs text-slate-500">Permanent action</div>
+                                               <div className="text-xs text-slate-400">Permanent action</div>
                                            </div>
                                        </div>
                                        <button onClick={handleDeleteAccount} className="text-xs font-bold text-red-400 hover:text-white px-3 py-1.5 bg-red-500/10 hover:bg-red-500 rounded-lg transition-colors border border-red-500/20">
@@ -696,21 +820,21 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                            </section>
 
                            {/* App Preferences */}
-                           <section className="glass-panel p-6 rounded-2xl border border-white/5">
+                           <section className="glass-panel p-6 rounded-2xl border border-white/10">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
-                                   <Settings className="text-purple-400" size={20} /> {t('app_preferences')}
+                                   <Settings className="text-indigo-400" size={20} /> {t('app_preferences')}
                                </h3>
                                
                                <div className="space-y-4">
                                    {/* Theme Toggle */}
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/10">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
                                               {theme === 'dark' ? <Moon size={20}/> : <Sun size={20}/>}
                                            </div>
                                            <div>
                                                <div className="font-bold text-white text-sm">Appearance</div>
-                                               <div className="text-xs text-slate-500">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
+                                               <div className="text-xs text-slate-400">{theme === 'dark' ? 'Dark Mode' : 'Light Mode'}</div>
                                            </div>
                                        </div>
                                        <button 
@@ -721,12 +845,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </button>
                                    </div>
 
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/10">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Globe size={20}/></div>
                                            <div>
                                                <div className="font-bold text-white text-sm">{t('language')}</div>
-                                               <div className="text-xs text-slate-500">App interface language</div>
+                                               <div className="text-xs text-slate-400">App interface language</div>
                                            </div>
                                        </div>
                                        <select 
@@ -739,12 +863,12 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                        </select>
                                    </div>
 
-                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
+                                   <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/10">
                                        <div className="flex items-center gap-3">
                                            <div className="p-2 bg-royal-800 rounded-lg text-slate-400"><Volume2 size={20}/></div>
                                            <div>
                                                <div className="font-bold text-white text-sm">{t('sound_effects')}</div>
-                                               <div className="text-xs text-slate-500">Game audio and UI sounds</div>
+                                               <div className="text-xs text-slate-400">Game audio and UI sounds</div>
                                            </div>
                                        </div>
                                        <button 
@@ -761,7 +885,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
 
                        <motion.div variants={itemVariants} className="md:col-span-1 space-y-6">
                            {/* Notifications */}
-                           <section className="glass-panel p-6 rounded-2xl border border-white/5">
+                           <section className="glass-panel p-6 rounded-2xl border border-white/10">
                                <h3 className="text-lg font-bold text-white mb-6 flex items-center gap-2">
                                    <Bell className="text-red-400" size={20} /> {t('notifications')}
                                </h3>
@@ -787,8 +911,31 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout, onUpdateProfil
                                </div>
                            </section>
 
+                           {/* Finance & Tools */}
+                           <section className="glass-panel p-6 rounded-2xl border border-white/10">
+                               <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+                                   <Wallet className="text-gold-400" size={20} /> Finance & Tools
+                               </h3>
+                               <div className="space-y-2">
+                                   <button 
+                                     onClick={() => { onNavigate('finance'); playSFX('click'); }}
+                                     className="w-full text-left px-4 py-3 rounded-xl bg-royal-900/50 hover:bg-white/5 text-sm text-slate-300 hover:text-white transition-colors flex justify-between items-center group"
+                                   >
+                                       <span className="flex items-center gap-3"><Wallet size={16} className="text-slate-400 group-hover:text-gold-400 transition-colors"/> {t('nav_wallet') || 'Wallet & Finance'}</span> <ChevronRight size={16} />
+                                   </button>
+                                   {user.isAdmin && (
+                                     <button 
+                                       onClick={() => { onNavigate('admin'); playSFX('click'); }}
+                                       className="w-full text-left px-4 py-3 rounded-xl bg-red-900/20 border border-red-500/20 hover:bg-red-900/40 text-sm text-red-200 hover:text-red-100 transition-colors flex justify-between items-center group mt-2"
+                                     >
+                                         <span className="flex items-center gap-3"><ShieldAlert size={16} className="text-red-400 group-hover:text-red-300 transition-colors"/> {t('nav_admin') || 'Admin Dashboard'}</span> <ChevronRight size={16} />
+                                     </button>
+                                   )}
+                               </div>
+                           </section>
+
                            {/* Support */}
-                           <section className="glass-panel p-6 rounded-2xl border border-white/5">
+                           <section className="glass-panel p-6 rounded-2xl border border-white/10">
                                <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
                                    <HelpCircle className="text-blue-400" size={20} /> {t('support')}
                                </h3>

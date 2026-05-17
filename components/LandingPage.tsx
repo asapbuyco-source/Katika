@@ -208,22 +208,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
       </main>
 
       {/* Footer */}
-      <footer className="relative z-10 border-t border-white/5 bg-black/40 backdrop-blur-md pt-12 pb-8 px-6">
+      <footer className="relative z-10 border-t border-white/10 bg-royal-950/90 backdrop-blur-xl pt-16 pb-8 px-6 mt-12">
           <div className="max-w-7xl mx-auto">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
-                  <div className="col-span-2 md:col-span-1">
-                      <div className="flex items-center gap-2 mb-4">
-                          <div className="w-6 h-6 bg-slate-700 rounded-md flex items-center justify-center text-black font-bold text-xs">V</div>
-                          <span className="font-bold text-white">VANTAGE</span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-12 lg:gap-8 mb-16">
+                  <div className="sm:col-span-2 lg:col-span-2">
+                      <div className="flex items-center gap-3 mb-6">
+                          <div className="w-8 h-8 bg-gold-500 rounded-lg flex items-center justify-center text-royal-950 font-black text-sm shadow-[0_0_15px_rgba(251,191,36,0.3)]">V</div>
+                          <span className="font-display font-bold text-white tracking-widest text-lg">VANTAGE</span>
                       </div>
-                      <p className="text-xs text-slate-500 leading-relaxed">
-                          The trusted platform for skill-based gaming in Africa.
+                      <p className="text-sm text-slate-400 leading-relaxed max-w-sm">
+                          The trusted, premium platform for skill-based, real-money gaming in Africa. Play with confidence.
                       </p>
                   </div>
                   
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-4">Platform</h4>
-                      <ul className="space-y-2 text-xs text-slate-400">
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Platform</h4>
+                      <ul className="space-y-4 text-sm text-slate-400">
                           <li><button onClick={() => onNavigate('how-it-works')} className="hover:text-gold-400 transition-colors">How it Works</button></li>
                           <li><button onClick={() => onNavigate('matchmaking')} className="hover:text-gold-400 transition-colors">Games</button></li>
                           <li><button onClick={onLogin} className="hover:text-gold-400 transition-colors">Login / Sign Up</button></li>
@@ -231,8 +231,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                   </div>
 
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-4">Legal</h4>
-                      <ul className="space-y-2 text-xs text-slate-400">
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Legal</h4>
+                      <ul className="space-y-4 text-sm text-slate-400">
                           <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">Terms of Service</button></li>
                           <li><button onClick={() => onNavigate('privacy')} className="hover:text-gold-400 transition-colors">Privacy Policy</button></li>
                           <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">Fair Play Policy</button></li>
@@ -240,22 +240,22 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                   </div>
 
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-4">Support</h4>
-                      <ul className="space-y-2 text-xs text-slate-400">
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Support</h4>
+                      <ul className="space-y-4 text-sm text-slate-400">
                           <li><button onClick={() => onNavigate('help-center')} className="hover:text-gold-400 transition-colors">Help Center</button></li>
                           <li><button onClick={() => onNavigate('report-bug')} className="hover:text-gold-400 transition-colors">Report Issue</button></li>
-                          <li className="flex items-center gap-2">
-                              <Smartphone size={12} /> +237 657 960 690
+                          <li className="flex items-center gap-2 text-gold-400 font-medium">
+                              <Smartphone size={14} /> +237 657 960 690
                           </li>
                       </ul>
                   </div>
               </div>
               
-              <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] text-slate-600">
-                  <p>&copy; 2024 Vantage Gaming Cameroon. All rights reserved.</p>
-                  <div className="flex gap-4">
-                      <span>Douala, Cameroon</span>
-                      <span>18+ Play Responsibly</span>
+              <div className="pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-6 text-xs text-slate-500">
+                  <p>&copy; {new Date().getFullYear()} Vantage Gaming Cameroon. All rights reserved.</p>
+                  <div className="flex items-center gap-6 font-medium">
+                      <span className="hover:text-slate-300 transition-colors cursor-default">Douala, Cameroon</span>
+                      <span className="px-2 py-1 border border-slate-600 rounded text-[10px] tracking-widest text-slate-400">18+ PLAY RESPONSIBLY</span>
                   </div>
               </div>
           </div>

@@ -146,6 +146,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ─── LEADERBOARDS ──────────────────────────────────────────────────────────
+    // Live leaderboard doc: public read for all authenticated users; server-only write.
+    match /leaderboards/{gameType} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+    // Historical snapshots: public read; server-only write.
+    match /leaderboard_snapshots/{snapshotId} {
+      allow read: if isAuth();
+      allow write: if false;
+    }
+
     // ─── DISPUTES ────────────────────────────────────────────────────────────
     // Players can file disputes and read their own dispute status.
     // The filedBy field is null on the create call, so read must tolerate null on new docs.

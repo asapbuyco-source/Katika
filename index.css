@@ -6,14 +6,74 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Base Variables (Default Dark) ───────────────────────────────────────────
-   These are now the canonical CSS variables — the identical block in index.html
-   is kept as a fallback for the brief moment before this stylesheet loads.
-   ─────────────────────────────────────────────────────────────────────────── */
-:root {
-  --c-royal-950: 15 10 31;
-  --c-royal-900: 26 16 60;
-  --c-royal-800: 45 27 105;
-  --c-text-white: 255 255 255;
-  --c-text-base: 226 232 240;
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+
+    --radius: 0.75rem;
+
+    /* Katika specific, muted for premium look */
+    --c-royal-950: 240 10% 3.9%;
+    --c-royal-900: 240 5.9% 10%;
+    --c-royal-800: 240 3.7% 15.9%;
+    --c-text-white: 255 255 255;
+    --c-text-base: 226 232 240;
+  }
 }
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom premium classes */
+.glass-panel {
+  @apply bg-white/[0.03] backdrop-blur-xl border border-white/[0.08] shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.05),0_8px_32px_0_rgba(0,0,0,0.3)];
+}
+
+.premium-glass {
+  @apply bg-gradient-to-b from-white/[0.06] to-white/[0.01] backdrop-blur-2xl border border-white/[0.1] shadow-[inset_0_1px_1px_0_rgba(255,255,255,0.15),0_20px_40px_-10px_rgba(0,0,0,0.5)];
+}
+
+.ambient-glow {
+  @apply absolute rounded-full blur-[120px] pointer-events-none mix-blend-screen opacity-40;
+}
+
+.text-glow {
+  text-shadow: 0 0 20px rgba(255,255,255,0.3);
+}
+
+.text-glow-gold {
+  text-shadow: 0 0 20px rgba(251,191,36,0.5);
+}
+

@@ -321,9 +321,9 @@ const AppContent = () => {
             setRejoinFailed(false);
             // NET-6: Use acknowledgement callback to resolve early, with 12s fallback
             const timer = setTimeout(() => {
-                 if (!socketGame) {
-                     setRejoinFailed(true);
-                 }
+                if (!socketGame) {
+                    setRejoinFailed(true);
+                }
             }, 12000);
             return () => clearTimeout(timer);
         } else if (socketGame) {
@@ -366,7 +366,7 @@ const AppContent = () => {
 
     useEffect(() => {
         if (!socket) return;
-        
+
         const handleDailyBonus = (data: { amount: number; message?: string }) => {
             playSFX('win');
             toast.success(`🎁 Daily First Win Bonus: +${data.amount} FCFA!`);
@@ -545,7 +545,13 @@ const AppContent = () => {
 
 
     return (
-        <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500">
+        <div className="flex flex-col md:flex-row min-h-screen bg-royal-950 text-white font-sans overflow-x-hidden transition-colors duration-500 relative">
+            {/* Cinematic Background Atmosphere */}
+            <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
+                <div className="absolute -top-[20%] -right-[10%] w-[70vw] h-[70vw] rounded-full bg-royal-700/20 blur-[120px] mix-blend-screen"></div>
+                <div className="absolute -bottom-[20%] -left-[10%] w-[60vw] h-[60vw] rounded-full bg-gold-600/5 blur-[150px] mix-blend-screen"></div>
+            </div>
+
             {user && currentView !== 'game' && currentView !== 'matchmaking' && (
                 <Navigation currentView={currentView} setView={setView} user={user} hasUnreadMessages={unreadForum} />
             )}
@@ -556,7 +562,7 @@ const AppContent = () => {
 
             {isRejoining && (
                 <div className="fixed inset-0 z-[200] bg-royal-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center">
-                    <motion.div 
+                    <motion.div
                         initial={{ opacity: 0, scale: 0.9 }}
                         animate={{ opacity: 1, scale: 1 }}
                         className="flex flex-col items-center"
@@ -580,7 +586,7 @@ const AppContent = () => {
                                 <h2 className="text-2xl font-black text-white mb-2 tracking-tighter uppercase">Room Expired</h2>
                                 <p className="text-slate-400 text-sm max-w-xs mb-6">The match may have ended while you were disconnected.</p>
                                 <div className="flex gap-3">
-                                    <button 
+                                    <button
                                         onClick={() => {
                                             sessionStorage.removeItem('vantage_active_room');
                                             setIsRejoining(false);
@@ -657,9 +663,9 @@ const AppContent = () => {
 
             <AnimatePresence>
                 {user && user.hasSeenOnboarding === false && currentView !== 'game' && currentView !== 'matchmaking' && (
-                    <Onboarding 
-                        user={user} 
-                        onComplete={() => dispatch({ type: 'UPDATE_USER', payload: { hasSeenOnboarding: true } })} 
+                    <Onboarding
+                        user={user}
+                        onComplete={() => dispatch({ type: 'UPDATE_USER', payload: { hasSeenOnboarding: true } })}
                     />
                 )}
                 {/* Non-blocking connection status indicators */}

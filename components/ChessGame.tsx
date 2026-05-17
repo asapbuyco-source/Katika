@@ -1,3 +1,4 @@
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { ArrowLeft, Clock, BookOpen, X, AlertTriangle, RefreshCw, Cpu, ExternalLink, ChevronLeft, ChevronRight, List, Undo2 } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -278,7 +279,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             img.src = src;
         });
         return () => clearTimeout(timeout);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
     // BUG 3 FIX: Read time control from table (tournament can specify custom limits)
@@ -339,10 +340,10 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     // Undo last move - for practice/bot games only
     const undoLastMove = useCallback(() => {
         if (isP2P || isGameOver || game.history().length === 0) return;
-        
+
         const history = game.history({ verbose: true });
         const lastMove = history[history.length - 1];
-        
+
         if (lastMove) {
             game.undo();
             const newGame = new Chess();
@@ -406,7 +407,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     // --- SOCKET GAME_OVER LISTENER ---
     useEffect(() => {
         if (!isP2P || !socket) return;
-        
+
         const handleGameOver = (data: any) => {
             setIsGameOver(true);
             // SocketContext handles global SET_GAME_RESULT for P2P
@@ -614,11 +615,11 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const onDragStart = useCallback((square: Square, piece: any) => {
         const { game, viewIndex, myColor, isGameOver } = stateRef.current;
         if (isGameOver) return;
-        
+
         const moveHistory = game.history();
         const isViewingLatest = viewIndex === moveHistory.length - 1 || viewIndex === -1;
         if (!isViewingLatest) return;
-        
+
         if (piece && piece.color === myColor && game.turn() === myColor) {
             setDraggedSquare(square);
             const moves = game.moves({ square, verbose: true });
@@ -798,8 +799,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <button onClick={() => setShowMovesPanel(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                         <List size={18} />
                     </button>
-                    <button 
-                        onClick={undoLastMove} 
+                    <button
+                        onClick={undoLastMove}
                         disabled={game.history().length === 0 || isP2P || isGameOver}
                         className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-gold-400 disabled:opacity-30 disabled:cursor-not-allowed"
                         title="Undo last move"
@@ -811,7 +812,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     <div className="text-gold-400 font-bold uppercase tracking-widest text-xs">Pot Size</div>
                     <div className="text-xl font-display font-bold text-white">{Math.max(0, table.stake) > 0 ? (table.stake * 2).toLocaleString() + ' FCFA' : 'Practice'}</div>
                 </div>
-                <div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div>
+                <div className="flex items-center gap-4"><NetworkSignalIndicator /><div className="w-32 hidden md:block"><AIReferee externalLog={refereeLog} /></div></div>
             </div>
 
             {/* Turn Indicator */}
@@ -930,7 +931,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                 else myLosses.push(m.captured);
                             });
                             const oppPieceColor = myColor === 'w' ? 'b' : 'w';
-                            const upper: Record<string,string> = { p:'P',n:'N',b:'B',r:'R',q:'Q',k:'K' };
+                            const upper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
                             return (
                                 <>
                                     {opponentCaptures.map((c, i) => (
@@ -1017,7 +1018,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                             moves.push(
                                                 <div key={i} className="flex items-center gap-2 py-1">
                                                     <span className="text-xs text-slate-500 w-6">{moveNum}.</span>
-                                                    <button 
+                                                    <button
                                                         onClick={() => setViewIndex(i)}
                                                         className={`flex-1 text-left px-2 py-1 rounded ${viewIndex === i ? 'bg-gold-500/30 text-gold-400' : 'text-white hover:bg-white/5'}`}
                                                     >
@@ -1029,7 +1030,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                             moves.push(
                                                 <div key={i} className="flex items-center gap-2 py-1">
                                                     <span className="w-6" />
-                                                    <button 
+                                                    <button
                                                         onClick={() => setViewIndex(i)}
                                                         className={`flex-1 text-left px-2 py-1 rounded ${viewIndex === i ? 'bg-gold-500/30 text-gold-400' : 'text-white hover:bg-white/5'}`}
                                                     >
