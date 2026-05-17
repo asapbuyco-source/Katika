@@ -1,3 +1,4 @@
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { ArrowLeft, Dice1, Dice2, Dice3, Dice4, Dice5, Dice6 } from 'lucide-react';
 import { Table, User } from '../types';
@@ -488,9 +489,12 @@ export const GameRoom: React.FC<GameRoomProps> = ({ table, user, onGameEnd, sock
 
             {/* ── Header ── */}
             <div className="w-full max-w-[500px] flex items-center justify-between px-4 pt-3 pb-2">
-                <button onClick={() => setShowQuitModal(true)} className="p-2.5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors active:scale-95">
-                    <ArrowLeft size={18} className="text-slate-400" />
-                </button>
+                <div className="flex items-center gap-2">
+                    <div className="hidden md:block"><NetworkSignalIndicator /></div>
+                    <button onClick={() => setShowQuitModal(true)} className="p-2.5 bg-white/5 rounded-xl border border-white/10 hover:bg-white/10 transition-colors active:scale-95">
+                        <ArrowLeft size={18} className="text-slate-400" />
+                    </button>
+                </div>
                 <div className="flex flex-col items-center">
                     <div className="text-[10px] text-gold-500/70 uppercase tracking-widest font-bold">Prize Pool</div>
                     <div className="text-gold-400 font-black text-xl drop-shadow-[0_0_12px_rgba(251,191,36,0.4)]">{Math.max(0, table.stake) > 0 ? `💰 ${(table.stake * 2).toLocaleString()} FCFA` : '💰 Practice'}</div>

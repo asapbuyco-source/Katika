@@ -1,4 +1,5 @@
 
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Box, Clock, Hand, XCircle, CheckCircle2, RefreshCw, BookOpen, X, AlertTriangle } from 'lucide-react';
 import { Table, User as AppUser, AIRefereeLog } from '../types';
@@ -467,6 +468,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             {/* --- HEADER --- */}
             <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
                 <div className="flex items-center gap-2">
+                    <div className="mr-2"><NetworkSignalIndicator /></div>
                     <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
                         <ArrowLeft size={20} />
                     </button>

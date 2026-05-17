@@ -101,10 +101,15 @@ const ChessSquare = React.memo(({
         >
             {/* Move Hint / Option */}
             {moveOption && (
-                <div
-                    className="absolute inset-0 z-10 pointer-events-none"
-                    style={{ background: moveOption.background }}
-                />
+                <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                    {piece ? (
+                        // Capture option: premium hollow ring around the piece
+                        <div className="w-[84%] h-[84%] rounded-full border-[6px] border-black/20" />
+                    ) : (
+                        // Empty move option: premium black dot
+                        <div className="w-[26%] h-[26%] rounded-full bg-black/25 shadow-sm" />
+                    )}
+                </div>
             )}
 
             {/* Piece Render — SVG image from lichess cburnett set */}
@@ -359,14 +364,34 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     // Socket State Sync
     useEffect(() => {
         if (isP2P && socketGame) {
+            let currentMyColor = myColor;
             if (socketGame.players && socketGame.players[0]) {
                 const isPlayer1 = socketGame.players[0] === user.id;
-                setMyColor(isPlayer1 ? 'w' : 'b');
+                currentMyColor = isPlayer1 ? 'w' : 'b';
+                setMyColor(currentMyColor);
             }
 
             const newGame = new Chess();
             if (socketGame.gameState && socketGame.gameState.pgn) {
                 try { newGame.loadPgn(socketGame.gameState.pgn); } catch (e) { }
+            }
+
+            // Play opponent's move sound if history changes
+            const oldHistoryLength = game.history().length;
+            const newHistoryLength = newGame.history().length;
+            if (newHistoryLength > oldHistoryLength && oldHistoryLength > 0) {
+                const history = newGame.history({ verbose: true });
+                const lastMove = history[history.length - 1];
+                const lastMoveColor = lastMove.color;
+                if (lastMoveColor !== currentMyColor) {
+                    if (newGame.inCheck()) {
+                        playSFX('check');
+                    } else if (lastMove.captured) {
+                        playSFX('capture');
+                    } else {
+                        playSFX('move');
+                    }
+                }
             }
 
             const wasLatest = viewIndex === game.history().length - 1;
@@ -515,7 +540,9 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 setSelectedSquare(null);
                 setOptionSquares({});
 
-                if (move.captured) playSFX('capture'); else playSFX('move');
+                if (newGame.inCheck()) playSFX('check');
+                else if (move.captured) playSFX('capture');
+                else playSFX('move');
                 checkGameOver(newGame);
 
                 if (isP2P && socket && socketGame) {

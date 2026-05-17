@@ -13,6 +13,24 @@ import { useAppState } from '../services/AppContext';
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
 
+// --- Lidraughts API stubs (external Lidraughts API removed; local bot acts as fallback) ---
+const createLidraughtsGame = async (_level: number): Promise<{ id: string } | null> => null;
+const fetchLidraughtsState = async (_id: string): Promise<{ fen?: string; status?: string; winner?: string } | null> => null;
+const makeLidraughtsMove = (_id: string, _move: string): void => { /* no-op: local bot handles moves */ };
+/** Convert 10×10 draughts square number (1–50) to board {r, c} */
+const toCoords = (sq: number): { r: number; c: number } => {
+    const idx = sq - 1;
+    const row = Math.floor(idx / 5);
+    const col = (idx % 5) * 2 + (row % 2 === 0 ? 1 : 0);
+    return { r: row, c: col };
+};
+/** Convert board {r, c} to draughts notation string */
+const toNotation = (r: number, c: number): string => {
+    const sq = r * 5 + Math.floor(c / 2) + 1;
+    return String(sq);
+};
+// --- End stubs ---
+
 interface CheckersGameProps {
     table: Table;
     user: AppUser;
@@ -193,6 +211,24 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     ...p,
                     player: p.owner === user.id ? 'me' : 'opponent'
                 }));
+
+                const serverTurn = socketGame.turn ?? socketGame.gameState?.turn;
+                const isMyTurnNow = serverTurn === user.id;
+
+                if (isMyTurnNow && pieces.length > 0) {
+                    const piecesCountDiff = pieces.length - mappedPieces.length;
+                    const positionChanged = mappedPieces.some((np: any) => {
+                        const op = pieces.find(p => p.id === np.id);
+                        return op && (op.r !== np.r || op.c !== np.c);
+                    });
+
+                    if (piecesCountDiff > 0) {
+                        playSFX('capture');
+                    } else if (positionChanged) {
+                        playSFX('move');
+                    }
+                }
+
                 setPieces(mappedPieces);
             }
 

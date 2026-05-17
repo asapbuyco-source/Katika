@@ -1,4 +1,5 @@
 
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, X, Circle, Clock, Loader2, AlertTriangle, Wifi, Cpu } from 'lucide-react';
 import { Table, User, AIRefereeLog } from '../types';
@@ -270,7 +271,8 @@ export const TicTacToeGame: React.FC<TicTacToeGameProps> = ({ table, user, onGam
 
             {/* Header */}
             <div className="w-full max-w-lg flex justify-between items-center mb-8 mt-4">
-                <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+                <div className="mr-2"><NetworkSignalIndicator /></div>
+                    <button onClick={() => setShowForfeitModal(true)} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
                     <div className="p-2 bg-white/5 rounded-xl border border-white/10"><ArrowLeft size={18} /></div>
                 </button>
                 <div className="flex flex-col items-center">

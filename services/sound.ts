@@ -5,6 +5,34 @@
 let audioCtx: AudioContext | null = null;
 let isMuted = localStorage.getItem('vantage_sound') === 'false';
 
+// HTML5 Audio cache for premium sounds
+const audioCache: Record<string, HTMLAudioElement> = {};
+const getAudio = (file: string): HTMLAudioElement | null => {
+    if (typeof window === 'undefined') return null;
+    if (!audioCache[file]) {
+        try {
+            audioCache[file] = new Audio(`/sounds/${file}`);
+        } catch (e) {
+            console.warn("Failed to create Audio element", e);
+        }
+    }
+    return audioCache[file];
+};
+
+const playAudioFile = (file: string, fallbackSynth: () => void) => {
+    if (isMuted) return;
+    const audio = getAudio(file);
+    if (audio) {
+        audio.currentTime = 0;
+        audio.play().catch(e => {
+            console.warn(`HTML5 Audio play failed for ${file}, falling back to synth`, e);
+            fallbackSynth();
+        });
+    } else {
+        fallbackSynth();
+    }
+};
+
 const initAudio = () => {
     try {
         if (!audioCtx) {
@@ -85,7 +113,7 @@ const playNoise = (duration: number) => {
     }
 };
 
-export type SFXType = 'click' | 'move' | 'capture' | 'dice' | 'win' | 'loss' | 'error' | 'turn' | 'notification' | 'king' | 'shoot';
+export type SFXType = 'click' | 'move' | 'capture' | 'dice' | 'win' | 'loss' | 'error' | 'turn' | 'notification' | 'king' | 'shoot' | 'check' | 'explosion';
 
 export const playSFX = (type: SFXType) => {
     try {
@@ -94,42 +122,56 @@ export const playSFX = (type: SFXType) => {
                 playTone(800, 'sine', 0.1, 0.05);
                 break;
             case 'move':
-                playTone(200, 'triangle', 0.1, 0.1); // Thock sound
+                playAudioFile('Move.mp3', () => playTone(200, 'triangle', 0.1, 0.1));
                 break;
             case 'capture':
-                playTone(150, 'sawtooth', 0.1, 0.1); // Punchy low
-                playTone(400, 'sine', 0.1, 0.1); // With high ping
+                playAudioFile('Capture.mp3', () => {
+                    playTone(150, 'sawtooth', 0.1, 0.1);
+                    playTone(400, 'sine', 0.1, 0.1);
+                });
                 break;
             case 'dice':
                 playNoise(0.3); // Shaking noise
                 setTimeout(() => playTone(300, 'square', 0.05, 0.05), 100); // rattle
                 break;
             case 'turn':
-                playTone(500, 'sine', 0.3, 0.05);
+                playAudioFile('GenericNotify.mp3', () => playTone(500, 'sine', 0.3, 0.05));
                 break;
             case 'notification':
-                playTone(1000, 'sine', 0.5, 0.05);
+                playAudioFile('GenericNotify.mp3', () => playTone(1000, 'sine', 0.5, 0.05));
                 break;
             case 'king':
-                playTone(400, 'sine', 0.2, 0.1);
-                playTone(600, 'sine', 0.4, 0.1, 0.1);
+                playAudioFile('Check.mp3', () => {
+                    playTone(400, 'sine', 0.2, 0.1);
+                    playTone(600, 'sine', 0.4, 0.1, 0.1);
+                });
                 break;
             case 'shoot':
                 playTone(180, 'sawtooth', 0.15, 0.05);
                 playTone(120, 'square', 0.1, 0.08);
                 break;
             case 'win':
-                playTone(523.25, 'sine', 0.3, 0.1, 0);   // C5
-                playTone(659.25, 'sine', 0.3, 0.1, 0.1); // E5
-                playTone(783.99, 'sine', 0.4, 0.1, 0.2); // G5
-                playTone(1046.50, 'triangle', 0.6, 0.1, 0.3); // C6
+                playAudioFile('Victory.mp3', () => {
+                    playTone(523.25, 'sine', 0.3, 0.1, 0);   // C5
+                    playTone(659.25, 'sine', 0.3, 0.1, 0.1); // E5
+                    playTone(783.99, 'sine', 0.4, 0.1, 0.2); // G5
+                    playTone(1046.50, 'triangle', 0.6, 0.1, 0.3); // C6
+                });
                 break;
             case 'loss':
-                playTone(300, 'sawtooth', 0.4, 0.1, 0);
-                playTone(250, 'sawtooth', 0.5, 0.1, 0.2);
+                playAudioFile('Defeat.mp3', () => {
+                    playTone(300, 'sawtooth', 0.4, 0.1, 0);
+                    playTone(250, 'sawtooth', 0.5, 0.1, 0.2);
+                });
                 break;
             case 'error':
-                playTone(150, 'sawtooth', 0.2, 0.1);
+                playAudioFile('Error.mp3', () => playTone(150, 'sawtooth', 0.2, 0.1));
+                break;
+            case 'check':
+                playAudioFile('Check.mp3', () => playTone(350, 'sine', 0.15, 0.1));
+                break;
+            case 'explosion':
+                playAudioFile('Explosion.mp3', () => playNoise(0.4));
                 break;
         }
     } catch (e) {

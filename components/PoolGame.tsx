@@ -1,3 +1,4 @@
+import { NetworkSignalIndicator } from './NetworkSignalIndicator';
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { Ball, createBall, stepPhysics, isMoving } from '../game-graphics/physics';
 import { rackBalls, placeCueBall } from '../game-graphics/setup';
@@ -941,6 +942,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800" aria-live="polite">
                 <div className="flex items-center gap-3">
+                    <div className="hidden md:block"><NetworkSignalIndicator /></div>
                     <div className="text-2xl" aria-hidden="true">🎱</div>
                     <div>
                         <h1 className="text-lg font-bold text-yellow-400">8-Ball Pool</h1>
