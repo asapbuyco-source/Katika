@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth, editUserBalance, deleteUserAccount } from '../services/firebase';
 
 interface AdminDashboardProps {
     user: User;
@@ -169,6 +169,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         } catch (e: any) {
             console.error('Ban action failed:', e);
             alert(e.message || 'Ban action failed');
+        }
+    };
+
+    const handleEditBalance = async (player: any) => {
+        const input = window.prompt(`Enter new balance for ${player.name}:`, player.balance.toString());
+        if (input === null) return;
+        const newBalance = parseInt(input, 10);
+        if (isNaN(newBalance) || newBalance < 0) {
+            alert('Invalid balance amount');
+            return;
+        }
+        if (!window.confirm(`Update balance for "${player.name}" to ${newBalance} FCFA?`)) return;
+        try {
+            await editUserBalance(player.id, newBalance);
+            setUsersList(prev => prev.map(u => u.id === player.id ? { ...u, balance: newBalance } : u));
+            addLog(`Balance Updated`, `${player.name} -> ${newBalance}`, 'info');
+        } catch (e: any) {
+            console.error('Edit balance failed:', e);
+            alert(e.message || 'Edit balance failed');
+        }
+    };
+
+    const handleDeleteAccount = async (player: any) => {
+        const confirmText = window.prompt(`Type "DELETE" to permanently delete user "${player.name}":`);
+        if (confirmText !== "DELETE") {
+            if (confirmText !== null) alert("Deletion cancelled.");
+            return;
+        }
+        try {
+            await deleteUserAccount(player.id);
+            setUsersList(prev => prev.filter(u => u.id !== player.id));
+            addLog(`User Deleted`, player.name, 'critical');
+        } catch (e: any) {
+            console.error('Delete account failed:', e);
+            alert(e.message || 'Delete account failed');
         }
     };
 
@@ -600,6 +635,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                             title={player.isBanned ? "Unban User" : "Ban User"}
                                                         >
                                                             <Ban size={16} />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleEditBalance(player)}
+                                                            className="p-2 bg-royal-800 hover:bg-gold-500/20 text-gold-400 rounded-lg transition-colors border border-white/5" 
+                                                            title="Edit Balance"
+                                                        >
+                                                            <Coins size={16} />
+                                                        </button>
+                                                        <button 
+                                                            onClick={() => handleDeleteAccount(player)}
+                                                            className="p-2 bg-royal-800 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors border border-white/5" 
+                                                            title="Delete Account"
+                                                        >
+                                                            <Trash2 size={16} />
                                                         </button>
                                                         <button className="p-2 bg-royal-800 hover:bg-white/10 text-blue-400 rounded-lg transition-colors border border-white/5" title="View Details">
                                                             <Search size={16} />

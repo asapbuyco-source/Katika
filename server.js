@@ -1329,6 +1329,49 @@ app.post('/api/admin/ban-user', verifyAdmin, async (req, res) => {
     }
 });
 
+// --- ADMIN: EDIT USER BALANCE ---
+app.post('/api/admin/edit-balance', verifyAdmin, async (req, res) => {
+    const { userId, newBalance } = req.body;
+    if (!userId || typeof newBalance !== 'number') {
+        return res.status(400).json({ error: 'userId and newBalance (number) are required' });
+    }
+    try {
+        await db.collection('users').doc(userId).update({ balance: newBalance });
+        res.json({ success: true, newBalance });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// --- ADMIN: DELETE ACCOUNT ---
+app.post('/api/admin/delete-account', verifyAdmin, async (req, res) => {
+    const { userId } = req.body;
+    if (!userId) {
+        return res.status(400).json({ error: 'userId is required' });
+    }
+    try {
+        // Delete from Firebase Auth
+        await admin.auth().deleteUser(userId);
+        // Delete from Firestore
+        await db.collection('users').doc(userId).delete();
+        
+        // Disconnect active socket(s) immediately
+        const sockets = userSockets.get(userId);
+        if (sockets) {
+            const socketIds = typeof sockets.has === 'function' ? [...sockets] : [sockets];
+            for (const sid of socketIds) {
+                const sock = io.sockets.sockets.get(sid);
+                if (sock) sock.disconnect(true);
+            }
+            userSockets.delete(userId);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[Admin] Delete account error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- ADMIN: START TOURNAMENT ---
 app.post('/api/tournaments/start', verifyAdmin, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database unavailable' });

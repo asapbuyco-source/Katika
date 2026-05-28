@@ -241,10 +241,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
             if (socketGame.winner) {
                 setIsGameOver(true);
-                if (!isP2P) {
-                    if (socketGame.winner === user.id) onGameEnd('win');
-                    else onGameEnd('loss');
-                }
+                if (socketGame.winner === user.id) onGameEnd('win');
+                else if (socketGame.winner === 'draw' || socketGame.winner === null) onGameEnd('draw');
+                else onGameEnd('loss');
             }
             if (socketGame.players && socketGame.players.length > 0) {
                 const isPlayer1 = socketGame.players[0] === user.id;
@@ -312,22 +311,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         if (!isP2P || !socket) return;
 
         const handleGameOver = (data: { winner?: string; roomId?: string }) => {
-            // Guard to ensure we only process this once
-            setIsGameOver(prev => {
-                if (prev) return true;
-
-                // Determine result from winner field and call the parent callback
-                // so that useGameController.handleGameEnd runs and tears down the
-                // active game table, enabling the result overlay.
-                const result = !data.winner
-                    ? 'draw'
-                    : data.winner === user.id
-                        ? 'win'
-                        : 'loss';
-
-                onGameEndRef.current(result);
-                return true;
-            });
+            setIsGameOver(true);
+            const result = !data.winner
+                ? 'draw'
+                : data.winner === user.id
+                    ? 'win'
+                    : 'loss';
+            onGameEndRef.current(result);
         };
 
         socket.on('game_over', handleGameOver);

@@ -19,6 +19,36 @@ export const banUser = async (userId: string, ban: boolean): Promise<void> => {
     }
 };
 
+export const editUserBalance = async (userId: string, newBalance: number): Promise<void> => {
+    const SOCKET_URL = getApiUrl();
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/admin/edit-balance`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId, newBalance })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Edit balance failed');
+    }
+};
+
+export const deleteUserAccount = async (userId: string): Promise<void> => {
+    const SOCKET_URL = getApiUrl();
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const res = await fetch(`${SOCKET_URL}/api/admin/delete-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId })
+    });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Delete account failed');
+    }
+};
+
 export const setMaintenanceMode = async (enabled: boolean): Promise<void> => {
     const SOCKET_URL = getApiUrl();
     const token = await auth.currentUser?.getIdToken();

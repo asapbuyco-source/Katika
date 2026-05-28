@@ -49,7 +49,28 @@ export const subscribeToUser = (uid: string, callback: (user: User) => void) => 
 
 export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> => {
     if (!searchTerm || searchTerm.length < 3) return [];
+    
+    const results: PlayerProfile[] = [];
     const term = searchTerm;
+
+    // 1. Try exact ID match first
+    try {
+        const idDoc = await getDoc(doc(db, "users", term));
+        if (idDoc.exists()) {
+            const data = idDoc.data() as User;
+            results.push({
+                id: data.id,
+                name: data.name,
+                elo: data.elo,
+                avatar: data.avatar,
+                rankTier: data.rankTier
+            });
+        }
+    } catch (e) {
+        // Ignore invalid ID errors
+    }
+
+    // 2. Name prefix search (case-sensitive)
     const q = query(
         collection(db, "users"),
         orderBy("name"),
@@ -58,16 +79,42 @@ export const searchUsers = async (searchTerm: string): Promise<PlayerProfile[]> 
         limit(10)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => {
-        const data = doc.data() as User;
-        return {
-            id: data.id,
-            name: data.name,
-            elo: data.elo,
-            avatar: data.avatar,
-            rankTier: data.rankTier
-        };
+    
+    snapshot.docs.forEach(d => {
+        if (d.id !== term) { // Prevent duplicates
+            const data = d.data() as User;
+            results.push({
+                id: data.id,
+                name: data.name,
+                elo: data.elo,
+                avatar: data.avatar,
+                rankTier: data.rankTier
+            });
+        }
     });
+
+    // 3. Fallback: Case-insensitive scan of recent/active users if no results
+    if (results.length === 0) {
+        const fallbackQ = query(collection(db, "users"), limit(200));
+        const fallbackSnap = await getDocs(fallbackQ);
+        const lowerTerm = term.toLowerCase();
+        
+        for (const d of fallbackSnap.docs) {
+            const data = d.data() as User;
+            if (data.name.toLowerCase().includes(lowerTerm)) {
+                results.push({
+                    id: data.id,
+                    name: data.name,
+                    elo: data.elo,
+                    avatar: data.avatar,
+                    rankTier: data.rankTier
+                });
+                if (results.length >= 10) break;
+            }
+        }
+    }
+
+    return results;
 };
 
 export const getAllUsers = async (lastId?: string): Promise<User[]> => {

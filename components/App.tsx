@@ -14,7 +14,7 @@ import {
     subscribeToUser, subscribeToIncomingChallenges,
     respondToChallenge, getGame, subscribeToForum,
     reportTournamentMatchResult, setTournamentMatchActive,
-    createBotMatch, createChallengeGame, db
+    createBotMatch, createChallengeGame, db, getApiUrl
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -425,6 +425,26 @@ const AppContent = () => {
                     const appUser = await syncUserProfile(firebaseUser);
                     dispatch({ type: 'SET_USER', payload: appUser });
                     prevUserIdRef.current = appUser.id;
+
+                    // --- DEVICE VERIFICATION (Multi-Account check) ---
+                    let deviceId = localStorage.getItem('vantage_device_id');
+                    if (!deviceId) {
+                        deviceId = crypto.randomUUID();
+                        localStorage.setItem('vantage_device_id', deviceId);
+                    }
+                    firebaseUser.getIdToken().then(token => {
+                        fetch(`${getApiUrl()}/api/auth/verify-device`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                            body: JSON.stringify({ userId: appUser.id, deviceId })
+                        }).then(r => r.json()).then(data => {
+                            if (data.status === 'warning') {
+                                toast.warning(data.message, { duration: 10000 });
+                            } else if (data.status === 'banned') {
+                                toast.error(data.message, { duration: 10000 });
+                            }
+                        }).catch(console.error);
+                    });
 
                     // NET-5: Stagger subscription restart: user → 0ms, challenges → 200ms, forum → 500ms
                     firestoreUnsubRef.current.user = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));

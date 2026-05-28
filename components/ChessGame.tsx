@@ -414,20 +414,26 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 } as { w: number; b: number });
             }
 
-            // Bug B fix: condition was inverted — in P2P games (!isP2P === false)
-            // so the winner was NEVER declared through this path. Fixed to `isP2P`.
             if (socketGame.winner) {
                 setIsGameOver(true);
-                // BUG 2 FIX: was `!isP2P` which meant this block NEVER ran for P2P games.
-                // Changed to `isP2P` so P2P winner is correctly resolved.
                 if (isP2P) {
                     if (socketGame.winner === user.id) onGameEnd('win');
-                    else if (socketGame.winner === null) onGameEnd('draw');
+                    else if (socketGame.winner === 'draw' || socketGame.winner === null) onGameEnd('draw');
                     else onGameEnd('loss');
                 }
             }
         }
-    }, [socketGame, user.id, isP2P]);
+    }, [socketGame, user.id, isP2P, onGameEnd]);
+
+    // Auto-refresh/redirect after game over
+    useEffect(() => {
+        if (isGameOver) {
+            const timer = setTimeout(() => {
+                window.location.reload();
+            }, 5000);
+            return () => clearTimeout(timer);
+        }
+    }, [isGameOver]);
 
     // --- SOCKET GAME_OVER LISTENER ---
     useEffect(() => {
@@ -871,6 +877,38 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                             />
                             {opponentColor === 'w' ? 'White' : 'Black'}
                         </span>
+                    </div>
+                    {/* Captured pieces display for Opponent */}
+                    <div className="flex items-center gap-0.5 ml-2 h-6">
+                        {(() => {
+                            const verboseHistory = game.history({ verbose: true });
+                            const myCaptures: string[] = []; 
+                            const opponentLosses: string[] = []; 
+                            verboseHistory.forEach((m: any) => {
+                                if (!m.captured) return;
+                                if (m.color === opponentColor) myCaptures.push(m.captured);
+                                else opponentLosses.push(m.captured);
+                            });
+                            const upper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
+                            return (
+                                <>
+                                    {myCaptures.map((c, i) => (
+                                        <img key={`cap-${i}`}
+                                            src={`https://lichess1.org/assets/piece/cburnett/${myColor}${upper[c]}.svg`}
+                                            className="w-4 h-4 object-contain opacity-80"
+                                            alt={c} draggable={false}
+                                        />
+                                    ))}
+                                    {opponentLosses.map((c, i) => (
+                                        <img key={`lost-${i}`}
+                                            src={`https://lichess1.org/assets/piece/cburnett/${opponentColor}${upper[c]}.svg`}
+                                            className="w-4 h-4 object-contain opacity-40"
+                                            alt={c} draggable={false}
+                                        />
+                                    ))}
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === opponentColor ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>

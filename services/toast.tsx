@@ -8,11 +8,11 @@ import React, {
     ReactNode
 } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { CheckCircle, XCircle, Info, X } from 'lucide-react';
+import { CheckCircle, XCircle, Info, AlertTriangle, X } from 'lucide-react';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
-type ToastType = 'success' | 'error' | 'info';
+type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 interface Toast {
     id: string;
@@ -22,9 +22,10 @@ interface Toast {
 
 interface ToastContextValue {
     toast: {
-        success: (message: string) => void;
-        error: (message: string) => void;
-        info: (message: string) => void;
+        success: (message: string, options?: { duration?: number }) => void;
+        error: (message: string, options?: { duration?: number }) => void;
+        info: (message: string, options?: { duration?: number }) => void;
+        warning: (message: string, options?: { duration?: number }) => void;
     };
 }
 
@@ -38,6 +39,7 @@ const TOAST_CONFIG: Record<ToastType, { icon: React.FC<any>; bg: string; border:
     success: { icon: CheckCircle, bg: 'bg-green-950/95', border: 'border-green-500/50', iconClass: 'text-green-400' },
     error: { icon: XCircle, bg: 'bg-red-950/95', border: 'border-red-500/50', iconClass: 'text-red-400' },
     info: { icon: Info, bg: 'bg-royal-900/95', border: 'border-white/20', iconClass: 'text-blue-400' },
+    warning: { icon: AlertTriangle, bg: 'bg-yellow-950/95', border: 'border-yellow-500/50', iconClass: 'text-yellow-400' },
 };
 
 const ToastItem: React.FC<{ toast: Toast; onDismiss: (id: string) => void }> = ({ toast, onDismiss }) => {
@@ -78,17 +80,18 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) =
         if (timer) { clearTimeout(timer); timers.current.delete(id); }
     }, []);
 
-    const addToast = useCallback((type: ToastType, message: string) => {
+    const addToast = useCallback((type: ToastType, message: string, duration = 4000) => {
         const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         setToasts(prev => [{ id, type, message }, ...prev].slice(0, 5));
-        const timer = setTimeout(() => dismiss(id), 4000);
+        const timer = setTimeout(() => dismiss(id), duration);
         timers.current.set(id, timer);
     }, [dismiss]);
 
     const toast = {
-        success: (msg: string) => addToast('success', msg),
-        error: (msg: string) => addToast('error', msg),
-        info: (msg: string) => addToast('info', msg),
+        success: (msg: string, opts?: { duration?: number }) => addToast('success', msg, opts?.duration),
+        error: (msg: string, opts?: { duration?: number }) => addToast('error', msg, opts?.duration),
+        info: (msg: string, opts?: { duration?: number }) => addToast('info', msg, opts?.duration),
+        warning: (msg: string, opts?: { duration?: number }) => addToast('warning', msg, opts?.duration),
     };
 
     return (

@@ -58,7 +58,8 @@ export {
 } from './firebase/social';
 
 export {
-    banUser, setMaintenanceMode, subscribeToMaintenanceMode, getSystemLogs
+    banUser, setMaintenanceMode, subscribeToMaintenanceMode, getSystemLogs,
+    editUserBalance, deleteUserAccount
 } from './firebase/admin';
 
 export {
