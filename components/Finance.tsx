@@ -281,34 +281,33 @@ const handleWithdraw = async () => {
                 {/* LEFT COLUMN: WALLET CARD & ACTIONS */}
                 <div className="lg:col-span-2 space-y-6">
 
-                    {/* Digital Card */}
-                    <div className="relative h-64 rounded-[2rem] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5),0_0_40px_rgba(251,191,36,0.15)] transition-all duration-500 hover:scale-[1.02] border border-white/10 group">
+                    {/* Vantage Vault */}
+                    <div className="relative min-h-64 rounded-[2rem] overflow-hidden shadow-[0_25px_50px_-12px_rgba(0,0,0,0.5),0_0_40px_rgba(251,191,36,0.15)] transition-all duration-500 hover:scale-[1.01] border border-white/10 group">
                         <div className="absolute inset-0 bg-gradient-to-br from-royal-900 via-royal-950 to-black z-0"></div>
                         <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10 mix-blend-overlay z-0"></div>
-                        
-                        {/* Complex Mesh Gradient Orbs */}
-                        <div className="absolute -top-32 -right-32 w-80 h-80 bg-gold-500/20 rounded-full blur-[80px] group-hover:bg-gold-500/30 transition-colors duration-700"></div>
-                        <div className="absolute -bottom-32 -left-32 w-64 h-64 bg-royal-700/40 rounded-full blur-[80px]"></div>
 
-                        <div className="relative z-10 p-8 flex flex-col justify-between h-full premium-glass rounded-[2rem]">
+                        <div className="relative z-10 p-8 flex flex-col justify-between gap-8 h-full premium-glass rounded-[2rem]">
                             <div className="flex justify-between items-start">
                                 <div>
                                     <div className="text-xs text-gold-400 font-bold uppercase tracking-widest mb-1 flex items-center gap-2">
                                         <Wallet size={16} /> {t('vantage_vault')}
                                     </div>
-                                    <div className="text-slate-400 text-sm font-mono tracking-[0.2em] mt-2 opacity-60 group-hover:opacity-100 transition-opacity">**** **** **** 8842</div>
+                                    <div className="text-slate-400 text-sm mt-2 opacity-80 group-hover:opacity-100 transition-opacity">Escrow-backed wallet for MTN MoMo and Orange Money</div>
                                 </div>
-                                <div className="text-right">
-                                    <div className="font-display font-black text-2xl text-white italic tracking-tighter">VISA</div>
-                                    <div className="text-[10px] text-slate-400 uppercase tracking-widest font-bold mt-1">Virtual Card</div>
+                                <div className="flex items-center gap-2">
+                                    <div className="px-3 py-2 rounded-xl bg-[#ffcc00] text-black text-xs font-black shadow-lg">MTN</div>
+                                    <div className="px-3 py-2 rounded-xl bg-[#ff6600] text-white text-xs font-black shadow-lg">OM</div>
                                 </div>
                             </div>
 
-                            <div className="flex items-end justify-between">
+                            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-5">
                                 <div>
                                     <div className="text-slate-400 text-xs mb-2 font-bold uppercase tracking-wider">{t('balance_label')}</div>
                                     <div className="text-5xl font-mono font-bold text-white tracking-tighter flex items-end gap-2 text-glow">
                                         {user.balance.toLocaleString()} <span className="text-xl text-gold-500 font-sans tracking-normal mb-1">FCFA</span>
+                                    </div>
+                                    <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-green-500/20 bg-green-500/10 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-green-300">
+                                        <Shield size={12} /> Server protected balance
                                     </div>
                                 </div>
                                 

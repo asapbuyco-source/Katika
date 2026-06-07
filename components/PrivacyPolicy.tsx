@@ -54,7 +54,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                     <section>
                         <h3 className="text-white font-bold text-lg mb-2">3. Data Security</h3>
                         <p className="leading-relaxed">
-                            We employ industry-standard AES-256 encryption for all data in transit and at rest. Access to user data is restricted to authorized personnel only.
+                            We use Firebase and payment-provider security controls for data in transit and at rest. Access to user data is restricted to authorized personnel only.
                         </p>
                     </section>
 

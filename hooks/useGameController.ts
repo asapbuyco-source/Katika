@@ -3,7 +3,7 @@ import { ViewState, Table, SocketGameState, Tournament } from '../types';
 import { useAppState } from '../services/AppContext';
 import { useSocket } from '../services/SocketContext';
 import { useToast } from '../services/toast';
-import { createBotMatch, createChallengeGame, respondToChallenge, setTournamentMatchActive, logout, db } from '../services/firebase';
+import { createBotMatch, respondToChallenge, setTournamentMatchActive, logout, db } from '../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 export const useGameController = () => {
@@ -76,8 +76,8 @@ export const useGameController = () => {
     const handleAcceptChallenge = useCallback(async () => {
         if (!incomingChallenge || !user) return;
         try {
-            const gameId = await createChallengeGame(incomingChallenge, user);
-            await respondToChallenge(incomingChallenge.id, 'accepted', gameId);
+            const { gameId } = await respondToChallenge(incomingChallenge.id, 'accepted');
+            if (!gameId) throw new Error('Challenge accepted without a private room id.');
             startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
         } catch (e) {
             console.error('[App] Failed to create challenge game:', e);

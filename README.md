@@ -164,16 +164,20 @@ cp .env.example .env
 |----------|-------------|
 | `FAPSHI_API_KEY` | Fapshi API key |
 | `FAPSHI_USER_TOKEN` | Fapshi user token |
+| `FAPSHI_PAYOUT_API_KEY` | Optional separate Fapshi payout API key |
+| `FAPSHI_PAYOUT_USER_TOKEN` | Optional separate Fapshi payout user token |
 | `FRONTEND_URL` | CORS origin (Netlify URL) |
-| `ADMIN_SECRET` | Admin dashboard access secret |
-| `VITE_ADMIN_SECRET` | Same as ADMIN_SECRET, for frontend host |
+| `ADMIN_EMAILS` | Comma-separated admin account emails |
+| `FIREBASE_SERVICE_ACCOUNT` | Firebase Admin SDK JSON |
+| `SOCKET_AUTH` | Use `enforce` in production |
+| `LAUNCH_GAMES` | Server launch scope, default `Chess,Checkers,Dice` |
 | `NODE_ENV` | `production` or `development` |
 
 ### 3. Firebase Setup
 
 1. Enable **Firestore** in native mode
 2. Enable **Firebase Auth** (Email/Password, Google, Anonymous)
-3. Generate a service account key and set it as `GOOGLE_APPLICATION_CREDENTIALS` on the server
+3. Generate a service account key and set it as `FIREBASE_SERVICE_ACCOUNT` on the server
 4. Deploy `firestore.rules` and `firestore.indexes.json`
 5. Set a user's admin claim via `scripts/setAdminClaim.mjs`
 
@@ -220,7 +224,9 @@ Test coverage includes all game logic modules: chess, checkers, dice, ludo, tict
 - [ ] All Firebase config set (both client and server)
 - [ ] Fapshi API keys set on server only
 - [ ] `FRONTEND_URL` matches Netlify domain (CORS)
-- [ ] `ADMIN_SECRET` / `VITE_ADMIN_SECRET` set
+- [ ] `ADMIN_EMAILS` set
+- [ ] `SOCKET_AUTH=enforce` set
+- [ ] `LAUNCH_GAMES=Chess,Checkers,Dice` set
 - [ ] `NODE_ENV=production` on both hosts
 - [ ] Firestore indexes deployed
 - [ ] Firestore rules deployed

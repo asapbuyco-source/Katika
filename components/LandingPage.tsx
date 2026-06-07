@@ -19,8 +19,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
     },
     {
       icon: Zap,
-      title: "Instant Payouts",
-      desc: "Withdraw your winnings directly to MTN Mobile Money or Orange Money in seconds."
+      title: "Mobile Money Withdrawals",
+      desc: "Withdraw your winnings to MTN Mobile Money or Orange Money with server-side payout tracking."
     },
     {
       icon: Globe,
@@ -29,14 +29,21 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
     }
   ];
 
+  const launchScope = new Set(
+    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
+      .split(',')
+      .map((game: string) => game.trim())
+      .filter(Boolean)
+  );
+
   const games = [
-    { id: 'ludo', name: "Ludo King", icon: Grid3x3, color: "text-red-400", border: "border-red-500/20", bg: "bg-red-500/10", desc: "The classic race to home." },
-    { id: 'dice', name: "Dice Duel", icon: Dice5, color: "text-gold-400", border: "border-gold-500/20", bg: "bg-gold-500/10", desc: "Predict, roll, and win." },
-    { id: 'chess', name: "Master Chess", icon: Brain, color: "text-purple-400", border: "border-purple-500/20", bg: "bg-purple-500/10", desc: "Pure strategy & skill." },
-    { id: 'checkers', name: "Checkers Pro", icon: Target, color: "text-orange-400", border: "border-orange-500/20", bg: "bg-orange-500/10", desc: "Jump your way to victory." },
-    { id: 'tictactoe', name: "XO Clash", icon: X, color: "text-blue-400", border: "border-blue-500/20", bg: "bg-blue-500/10", desc: "Fast-paced logic battle." },
-    { id: 'cards', name: "Kmer Cards", icon: Layers, color: "text-pink-400", border: "border-pink-500/20", bg: "bg-pink-500/10", desc: "Local favorites (Whot/Kmer)." },
-  ];
+    { id: 'Ludo', name: "Ludo King", icon: Grid3x3, color: "text-red-400", border: "border-red-500/20", bg: "bg-red-500/10", desc: "The classic race to home." },
+    { id: 'Dice', name: "Dice Duel", icon: Dice5, color: "text-gold-400", border: "border-gold-500/20", bg: "bg-gold-500/10", desc: "Predict, roll, and win." },
+    { id: 'Chess', name: "Master Chess", icon: Brain, color: "text-purple-400", border: "border-purple-500/20", bg: "bg-purple-500/10", desc: "Pure strategy & skill." },
+    { id: 'Checkers', name: "Checkers Pro", icon: Target, color: "text-orange-400", border: "border-orange-500/20", bg: "bg-orange-500/10", desc: "Jump your way to victory." },
+    { id: 'TicTacToe', name: "XO Clash", icon: X, color: "text-blue-400", border: "border-blue-500/20", bg: "bg-blue-500/10", desc: "Fast-paced logic battle." },
+    { id: 'Cards', name: "Kmer Cards", icon: Layers, color: "text-pink-400", border: "border-pink-500/20", bg: "bg-pink-500/10", desc: "Local favorites (Whot/Kmer)." },
+  ].filter((game) => launchScope.has(game.id));
 
   const containerVariants = {
     hidden: { opacity: 0 },
@@ -127,7 +134,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
               </h1>
 
               <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-                  The first premium P2P gaming platform. Challenge real players in Ludo, Chess, and Dice. Secure withdrawals to MoMo.
+                  The first premium P2P gaming platform. Challenge real players in Chess, Checkers, and Dice. Secure withdrawals to MoMo.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">

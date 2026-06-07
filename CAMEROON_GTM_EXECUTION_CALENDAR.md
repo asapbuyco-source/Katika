@@ -1,4 +1,4 @@
-# Cameroon GTM Execution Calendar — Katika Chess + Checkers Launch
+# Cameroon GTM Execution Calendar — Katika Chess + Checkers + Dice Launch
 
 **Objective:** Drive user acquisition, deposit conversion, and platform trust in Cameroon (Douala + Yaoundé) over 30 days.  
 **Date:** 2026-05-15  
@@ -12,7 +12,7 @@
 **Week 1 Goals:**
 - Test payment flows (Fapshi MTN/Orange Mtn Money)
 - Verify withdrawal reliability end-to-end
-- Stress-test Chess + Checkers matchmaking
+- Stress-test Chess + Checkers + Dice matchmaking
 - Collect user feedback on UX
 
 **Channel Actions:**
@@ -27,7 +27,7 @@
 - Deposit conversion rate > 30% among beta users
 - Withdrawal success rate > 95% within 24h
 - Avg session duration > 8 minutes
-- Chess + Checkers games started: 500+
+- Chess + Checkers + Dice games started: 500+
 
 ---
 

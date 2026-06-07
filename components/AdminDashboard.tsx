@@ -893,7 +893,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             <p className="text-xs text-red-400/80 font-mono mb-6">{serverError}</p>
                             <div className="text-xs text-slate-500 space-y-1">
                                 <p>• Check that the server is running (<code className="text-slate-400">node server.js</code>)</p>
-                                <p>• Verify ADMIN_SECRET matches in both .env and VITE_ADMIN_SECRET</p>
+                                <p>• Verify ADMIN_EMAILS includes your Firebase account email</p>
                                 <p>• If in production, ensure the server is deployed and healthy</p>
                             </div>
                         </div>

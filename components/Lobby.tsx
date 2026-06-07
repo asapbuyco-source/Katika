@@ -40,7 +40,7 @@ const STATIC_GAME_LIST = [
 // P1-1: Scope lock — build-time constant (Vite define). Cannot be overridden at runtime.
 // Games not in this list are hidden from the lobby even if their admin status is 'active'.
 const LAUNCH_GAME_SCOPE = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers')
+    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
         .split(',').map((g: string) => g.trim()).filter(Boolean)
 );
 
@@ -493,15 +493,19 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
 
                                             <div>
                                                 <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 block">Select Game</label>
-                                                <div className="grid grid-cols-4 gap-2">
+                                                <div className="grid grid-cols-3 gap-2">
                                                     {availableGames.filter(g => g.status === 'active').map(g => (
                                                         <button
                                                             key={g.id}
+                                                            type="button"
+                                                            aria-label={`Select ${g.name}`}
+                                                            title={g.name}
                                                             onClick={() => { setChallengeGame(g.id); playSFX('click'); }}
-                                                            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border transition-all ${challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-400 hover:bg-white/5'
+                                                            className={`flex flex-col items-center justify-center gap-1.5 p-2 rounded-xl border transition-all min-h-[72px] ${challengeGame === g.id ? 'bg-royal-800 border-gold-500 text-white' : 'border-white/10 text-slate-400 hover:bg-white/5'
                                                                 }`}
                                                         >
                                                             <g.icon size={20} className={challengeGame === g.id ? 'text-gold-400' : ''} />
+                                                            <span className="text-[10px] font-bold leading-tight text-center">{g.name}</span>
                                                         </button>
                                                     ))}
                                                 </div>

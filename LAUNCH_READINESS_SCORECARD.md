@@ -1,4 +1,4 @@
-# Launch Readiness Scorecard — Katika Cameroon (Chess + Checkers)
+# Launch Readiness Scorecard — Katika Cameroon (Chess + Checkers + Dice)
 
 **Assessment Date:** 2026-05-15  
 **Gate:** All items must be ✅ to proceed to public launch.
@@ -22,7 +22,7 @@
 
 | Item | Status | Notes |
 |------|--------|-------|
-| P1-1: Scope lock (Chess + Checkers only) | ✅ GREEN | Build-time constant + server enforcement; LAUNCH_GAMES env var |
+| P1-1: Scope lock (Chess + Checkers + Dice only) | ✅ GREEN | Build-time constant + server enforcement; LAUNCH_GAMES env var |
 | P1-2: Room persistence / rejoin | ✅ GREEN | `active_rooms` persistence; `hydrateRoomsFromFirestore` on startup |
 | P1-3: Dispute evidence trail | ✅ GREEN | `game_logs/{roomId}` immutable; dispute filing within 24h; 30-min SLA |
 | P1-4: Subscription error callbacks | ✅ GREEN | All `onSnapshot` calls have `(snap, error) =>` error handlers |
@@ -86,7 +86,7 @@
 - [ ] **Live payout test:** Send 1000 FCFA to a Cameroon MTN number via `/api/pay/disburse`. Verify receipt within 30 min.
 - [ ] **Live withdrawal test:** Create a test withdrawal; verify auto-refund triggers if Fapshi timeout > 5 min.
 - [ ] **`SOCKET_AUTH=enforce`** set in Railway production environment.
-- [ ] **`LAUNCH_GAMES=Chess,Checkers`** set in Railway + frontend build env.
+- [ ] **`LAUNCH_GAMES=Chess,Checkers,Dice`** set in Railway + frontend build env.
 - [ ] **Firestore rules deployed:** Confirm in Firebase console → Firestore → Rules.
 - [ ] **Admin emails verified:** Confirm your email is in `ADMIN_EMAILS` env var.
 - [ ] **CSP hashes generated:** `npm run build` produces `public/csp-hashes.json`.

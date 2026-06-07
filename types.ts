@@ -82,7 +82,7 @@ export interface Challenge {
   gameType: string;
   stake: number;
   timestamp: number;
-  status?: 'pending' | 'accepted' | 'declined';
+  status?: 'pending' | 'accepted' | 'declined' | 'expired';
   gameId?: string; // The game created if accepted
 }
 

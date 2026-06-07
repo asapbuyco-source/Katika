@@ -77,7 +77,12 @@ const ChessSquare = React.memo(({
             onDragOver={handleDragOver}
             onDragStart={handleDragStart}
             draggable={!!piece}
-            onKeyDown={(e) => e.key === 'Enter' && handleClick()}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleClick();
+                }
+            }}
             tabIndex={0}
             role="button"
             aria-label={piece ? `${piece.color === 'w' ? 'White' : 'Black'} ${piece.type} on ${square}` : `Empty square ${square}`}

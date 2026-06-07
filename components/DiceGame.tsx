@@ -514,8 +514,17 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 </motion.div>
             </div>
 
+            <div className="mt-3 w-full max-w-lg relative z-20 grid grid-cols-2 gap-2 text-[10px] font-bold uppercase tracking-wider">
+                <div className="rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-green-300 flex items-center justify-center gap-1.5 text-center">
+                    <CheckCircle2 size={13} /> Server roll verified
+                </div>
+                <div className="rounded-xl border border-gold-500/20 bg-gold-500/10 px-3 py-2 text-gold-300 flex items-center justify-center gap-1.5 text-center">
+                    <Box size={13} /> {table.stake > 0 ? `${table.stake.toLocaleString()} FCFA escrow` : 'Practice round'}
+                </div>
+            </div>
+
             {/* --- ARENA --- */}
-            <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-4 gap-8">
+            <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-3 gap-6">
                 <div className="relative">
                     <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
                         <div className="flex items-center gap-3">

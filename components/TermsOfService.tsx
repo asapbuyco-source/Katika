@@ -50,7 +50,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
                             <li>An entry stake is deducted from your wallet.</li>
                             <li>Funds are held in a secure Escrow Vault until the match concludes.</li>
                             <li>The winner receives the total pot minus a platform fee (typically 10%).</li>
-                            <li>In the event of a draw, stakes are refunded minus a small processing fee.</li>
+                            <li>In the event of a draw, eligible stakes are refunded according to the final server-authoritative match state.</li>
                         </ul>
                     </section>
 
@@ -77,14 +77,21 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
                     </section>
 
                     <section>
-                        <h3 className="text-white font-bold text-lg mb-2">6. Limitation of Liability</h3>
+                        <h3 className="text-white font-bold text-lg mb-2">6. Responsible Play</h3>
+                        <p className="leading-relaxed">
+                            Real-money play is restricted to eligible adults in Cameroon. Players may contact support to request account cooling-off, self-exclusion, or deposit review. Vantage may suspend accounts that show signs of unsafe play, fraud, or regulatory risk.
+                        </p>
+                    </section>
+
+                    <section>
+                        <h3 className="text-white font-bold text-lg mb-2">7. Limitation of Liability</h3>
                         <p className="leading-relaxed">
                             Vantage Gaming Cameroon is not liable for losses due to user device failure, poor internet connection, or unauthorized account access resulting from user negligence (e.g., sharing PINs).
                         </p>
                     </section>
 
                     <section>
-                        <h3 className="text-white font-bold text-lg mb-2">7. Governing Law</h3>
+                        <h3 className="text-white font-bold text-lg mb-2">8. Governing Law</h3>
                         <p className="leading-relaxed">
                             These Terms are governed by the laws of the Republic of Cameroon and OHADA Uniform Acts. Any disputes shall be resolved in the competent courts of Douala.
                         </p>

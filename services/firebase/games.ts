@@ -2,9 +2,9 @@
 // Does NOT import Firebase SDK directly; uses db from init.ts.
 import {
     doc, getDoc, setDoc, collection, query, where, orderBy, limit,
-    getDocs, addDoc, updateDoc, onSnapshot, serverTimestamp
+    getDocs, updateDoc, onSnapshot, serverTimestamp
 } from "firebase/firestore";
-import { db } from './init';
+import { auth, db, getApiUrl } from './init';
 import { User, Challenge } from '../../types';
 
 // NOTE: findOrCreateMatch was removed in Phase 1.3.
@@ -16,7 +16,6 @@ export const createBotMatch = async (user: User, gameType: string, difficulty?: 
     // Bot games must be created server-side (Admin SDK) because the client SDK
     // is blocked from writing to bot_games by Firestore security rules.
     // See: firestore.rules — match /bot_games/{gameId} { allow create: if false; }
-    const { auth } = await import('./init');
     const currentUser = auth.currentUser;
     const token = currentUser ? await currentUser.getIdToken() : null;
     if (!token) throw new Error('Not authenticated.');
@@ -129,12 +128,11 @@ export const subscribeToChallengeStatus = (challengeId: string, callback: (data:
 export const sendChallenge = async (sender: User, targetId: string, gameType: string, stake: number) => {
     // AUDIT FIX: Include Authorization header so server verifyAuth middleware accepts this request.
     // Without it, all challenge sends were silently rejected with 401.
-    const { auth } = await import('./init');
     const currentUser = auth.currentUser;
     const token = currentUser ? await currentUser.getIdToken() : null;
     if (!token) throw new Error('Not authenticated.');
 
-    const response = await fetch('/api/challenges/send', {
+    const response = await fetch(`${getApiUrl()}/api/challenges/send`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -150,55 +148,25 @@ export const sendChallenge = async (sender: User, targetId: string, gameType: st
     return data.challengeId;
 };
 
-export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined', gameId?: string) => {
-    const response = await fetch('/api/challenges/respond', {
+export const respondToChallenge = async (challengeId: string, status: 'accepted' | 'declined'): Promise<{ gameId?: string }> => {
+    const currentUser = auth.currentUser;
+    const token = currentUser ? await currentUser.getIdToken() : null;
+    if (!token) throw new Error('Not authenticated.');
+
+    const action = status === 'accepted' ? 'accept' : 'decline';
+    const response = await fetch(`${getApiUrl()}/api/challenges/respond`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ challengeId, action: status, gameId })
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ challengeId, action })
     });
     if (!response.ok) {
         const err = await response.json();
         throw new Error(err.error || 'Failed to respond to challenge.');
     }
-};
-
-export const createChallengeGame = async (challenge: Challenge, receiver: User): Promise<string> => {
-    if (challenge.stake > 0) {
-        const receiverDoc = await getDoc(doc(db, "users", receiver.id));
-        if (!receiverDoc.exists()) {
-            throw new Error('Receiver not found.');
-        }
-        const rData = receiverDoc.data() as User;
-        const rAvailable = (rData.balance || 0) + (rData.promoBalance || 0);
-        if (rAvailable < challenge.stake) {
-            throw new Error('Insufficient funds to accept this challenge.');
-        }
-
-        if (challenge.sender.id) {
-            const senderDoc = await getDoc(doc(db, "users", challenge.sender.id));
-            if (!senderDoc.exists()) {
-                throw new Error('Sender not found.');
-            }
-            const sData = senderDoc.data() as User;
-            const sAvailable = (sData.balance || 0) + (sData.promoBalance || 0);
-            if (sAvailable < challenge.stake) {
-                throw new Error('Challenge sender has insufficient funds.');
-            }
-        }
-    }
-    const newGame = {
-        gameType: challenge.gameType,
-        stake: challenge.stake,
-        status: "active",
-        host: challenge.sender,
-        guest: { id: receiver.id, name: receiver.name, avatar: receiver.avatar, elo: receiver.elo, rankTier: receiver.rankTier },
-        players: [challenge.sender.id!, receiver.id],
-        createdAt: serverTimestamp(),
-        turn: challenge.sender.id,
-        gameState: {}
-    };
-    const docRef = await addDoc(collection(db, "games"), newGame);
-    return docRef.id;
+    return response.json();
 };
 
 export const getActiveGamesCount = async (): Promise<number> => {

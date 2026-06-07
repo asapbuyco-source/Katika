@@ -9,7 +9,7 @@
 //   games.ts      — createBotMatch, subscribeToGame, getGame, updateGameState,
     //                   updateTurn, updateGameStatus, subscribeToGameConfigs,
     //                   subscribeToIncomingChallenges, subscribeToChallengeStatus,
-    //                   sendChallenge, respondToChallenge, createChallengeGame,
+    //                   sendChallenge, respondToChallenge,
     //                   getActiveGamesCount, getGameActivityStats
     //                   NOTE: findOrCreateMatch and setGameResult REMOVED (Phase 1.3).
     //                   matchmaking uses socket join_game; game completion uses server
@@ -36,7 +36,7 @@ export {
     createBotMatch, subscribeToGame, getGame,
     updateGameState, updateTurn, updateGameStatus,
     subscribeToGameConfigs, subscribeToIncomingChallenges, subscribeToChallengeStatus,
-    sendChallenge, respondToChallenge, createChallengeGame,
+    sendChallenge, respondToChallenge,
     getActiveGamesCount, getGameActivityStats
 } from './firebase/games';
 

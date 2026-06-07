@@ -64,7 +64,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
 
   // P1-1: Build-time scope lock — only show launch-scope games on the dashboard.
   const LAUNCH_GAME_SCOPE = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers')
+    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
       .split(',').map((g: string) => g.trim()).filter(Boolean)
   );
 
@@ -163,7 +163,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
               </div>
               <h2 className="text-4xl md:text-5xl font-display font-bold text-white mt-2 tracking-tight">
                 <BalanceCounter value={user.balance} suffix=" FCFA" className="text-4xl md:text-5xl font-display font-bold" />
-                <span className="text-slate-400 text-2xl font-sans font-normal ml-1">FCFA</span>
               </h2>
               {(user.winStreak ?? 0) >= 2 && (
                 <div className="mt-2">

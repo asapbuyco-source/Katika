@@ -14,7 +14,7 @@ import {
     subscribeToUser, subscribeToIncomingChallenges,
     respondToChallenge, getGame, subscribeToForum,
     reportTournamentMatchResult, setTournamentMatchActive,
-    createBotMatch, createChallengeGame, db, getApiUrl
+    createBotMatch, db, getApiUrl
 } from '../services/firebase';
 import { playSFX } from '../services/sound';
 import { onAuthStateChanged } from 'firebase/auth';
@@ -692,7 +692,7 @@ const AppContent = () => {
                 {showConnectingBadge && !isConnected && !hasConnectedOnce && user && !bypassConnection && (
                     <ConnectingBadge onBypass={() => setBypassConnection(true)} />
                 )}
-                {!isConnected && hasConnectedOnce && currentView !== 'game' && (
+                {user && !isConnected && hasConnectedOnce && currentView !== 'game' && (
                     <WeakNetworkBanner onReconnect={() => socket?.connect()} />
                 )}
 

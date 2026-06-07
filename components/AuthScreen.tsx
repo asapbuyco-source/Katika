@@ -22,11 +22,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
     const [referralCode, setReferralCode] = useState('');
     const [resetEmail, setResetEmail] = useState('');
     const [resetSent, setResetSent] = useState(false);
+    const [eligibilityConfirmed, setEligibilityConfirmed] = useState(false);
 
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState('');
 
     const handleGoogleLogin = async () => {
+        if (!eligibilityConfirmed) {
+            setError('Confirm you are 18+ and located in Cameroon to continue.');
+            return;
+        }
         setIsLoading(true);
         setError('');
         if (isRegistering && referralCode) {
@@ -83,6 +88,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
         }
         if (password.length < 6) {
             setError("Password must be at least 6 characters.");
+            return;
+        }
+        if (isRegistering && !eligibilityConfirmed) {
+            setError('Confirm you are 18+ and located in Cameroon to create an account.');
             return;
         }
 
@@ -166,6 +175,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                     {/* METHOD SELECTION */}
                     {method === 'menu' && (
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="space-y-4">
+                            <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-300">
+                                <input
+                                    type="checkbox"
+                                    checked={eligibilityConfirmed}
+                                    onChange={(e) => setEligibilityConfirmed(e.target.checked)}
+                                    className="mt-0.5 h-4 w-4 accent-gold-500"
+                                />
+                                <span>I confirm I am 18+ and located in Cameroon.</span>
+                            </label>
 
                             {/* Standard Logins */}
                             <button
@@ -247,7 +265,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                 </div>
                                 
                                 {isRegistering && (
-                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
                                         <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Referral Code (Optional)</label>
                                         <div className="relative">
                                             <input
@@ -258,6 +276,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                                 className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 px-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-mono tracking-widest uppercase"
                                             />
                                         </div>
+                                        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-300">
+                                            <input
+                                                type="checkbox"
+                                                checked={eligibilityConfirmed}
+                                                onChange={(e) => setEligibilityConfirmed(e.target.checked)}
+                                                className="mt-0.5 h-4 w-4 accent-gold-500"
+                                            />
+                                            <span>I confirm I am 18+ and located in Cameroon.</span>
+                                        </label>
                                     </motion.div>
                                 )}
                             </div>

@@ -1,7 +1,6 @@
-// Checkers game validation logic
-// Extracted from server.js for better testability and maintainability
+// International Checkers game validation logic
 
-export const BOARD_SIZE = 8;
+export const BOARD_SIZE = 10;
 export const createInitialState = () => ({
     board: createBoard(),
     turn: 'red'
@@ -13,9 +12,9 @@ export const createBoard = () => {
     for (let row = 0; row < BOARD_SIZE; row++) {
         for (let col = 0; col < BOARD_SIZE; col++) {
             if ((row + col) % 2 === 1) {
-                if (row < 3) {
+                if (row < 4) {
                     board[row][col] = { color: 'black', king: false };
-                } else if (row > 4) {
+                } else if (row > 5) {
                     board[row][col] = { color: 'red', king: false };
                 }
             }
@@ -31,29 +30,57 @@ export const getValidMoves = (board, row, col) => {
     const direction = piece.color === 'red' ? -1 : 1;
     const moves = [];
     const jumps = [];
-    
-    const dirs = piece.king 
+    const captureDirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+    for (const [dr, dc] of captureDirs) {
+        let step = 1;
+        let foundEnemy = null;
+
+        while (true) {
+            const newRow = row + dr * step;
+            const newCol = col + dc * step;
+
+            if (newRow < 0 || newRow >= BOARD_SIZE || newCol < 0 || newCol >= BOARD_SIZE) break;
+
+            const occupant = board[newRow][newCol];
+            if (!occupant && foundEnemy) {
+                jumps.push({ row: newRow, col: newCol, captured: foundEnemy });
+            } else if (occupant?.color !== undefined) {
+                if (occupant.color === piece.color || foundEnemy) break;
+                foundEnemy = { row: newRow, col: newCol };
+            } else {
+                // Empty square before an enemy: flying kings may keep scanning.
+            }
+
+            if (!piece.king && step >= 2) break;
+            step++;
+        }
+    }
+
+    if (jumps.length > 0) return jumps;
+
+    const moveDirs = piece.king
         ? [[-1, -1], [-1, 1], [1, -1], [1, 1]]
         : [[direction, -1], [direction, 1]];
-    
-    for (const [dr, dc] of dirs) {
-        const newRow = row + dr;
-        const newCol = col + dc;
-        
-        if (newRow >= 0 && newRow < BOARD_SIZE && newCol >= 0 && newCol < BOARD_SIZE) {
-            if (!board[newRow][newCol]) {
-                moves.push({ row: newRow, col: newCol });
-            } else if (board[newRow][newCol].color !== piece.color) {
-                const jumpRow = newRow + dr;
-                const jumpCol = newCol + dc;
-                if (jumpRow >= 0 && jumpRow < BOARD_SIZE && jumpCol >= 0 && jumpCol < BOARD_SIZE && !board[jumpRow][jumpCol]) {
-                    jumps.push({ row: jumpRow, col: jumpCol, captured: { row: newRow, col: newCol } });
-                }
-            }
+
+    for (const [dr, dc] of moveDirs) {
+        let step = 1;
+
+        while (true) {
+            const newRow = row + dr * step;
+            const newCol = col + dc * step;
+
+            if (newRow < 0 || newRow >= BOARD_SIZE || newCol < 0 || newCol >= BOARD_SIZE) break;
+            if (board[newRow][newCol]) break;
+
+            moves.push({ row: newRow, col: newCol });
+
+            if (!piece.king) break;
+            step++;
         }
     }
     
-    return jumps.length > 0 ? jumps : moves;
+    return moves;
 };
 
 export const isValidMove = (board, fromRow, fromCol, toRow, toCol) => {

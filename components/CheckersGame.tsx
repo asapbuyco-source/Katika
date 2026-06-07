@@ -65,14 +65,38 @@ const formatTime = (seconds: number) => {
 const CheckersCell = React.memo(({ r, c, isDark, piece, isSelected, isHighlighted, validMove, isLastFrom, isLastTo, onPieceClick, onMoveClick, isMeTurn, rotate }: any) => {
     const isMe = piece?.player === 'me';
     const isClickable = (isMeTurn && isMe) || !!validMove;
+    const pieceLabel = piece
+        ? `${isMe ? 'Your' : 'Opponent'} ${piece.isKing ? 'king' : 'piece'}`
+        : 'Empty square';
+    const actionLabel = validMove
+        ? `${validMove.isJump ? 'Capture' : 'Move'} to row ${r + 1}, column ${c + 1}`
+        : piece
+            ? `${pieceLabel} on row ${r + 1}, column ${c + 1}`
+            : `${pieceLabel} row ${r + 1}, column ${c + 1}`;
 
     const handlePieceClick = () => { if (piece && isMe) onPieceClick(piece); };
     const handleMoveClick = () => { if (validMove) onMoveClick(validMove); };
+    const handleActivate = (e?: React.MouseEvent | React.KeyboardEvent) => {
+        e?.stopPropagation();
+        if (!isClickable) return;
+        handlePieceClick();
+        handleMoveClick();
+    };
 
     return (
         <div
-            onClick={(e) => { e.stopPropagation(); handlePieceClick(); handleMoveClick(); }}
-            className={`relative w-full h-full flex items-center justify-center ${isDark ? 'bg-royal-900/60' : 'bg-white/5'} ${isClickable ? 'cursor-pointer' : ''}`}
+            onClick={handleActivate}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleActivate(e);
+                }
+            }}
+            tabIndex={isClickable ? 0 : -1}
+            role="button"
+            aria-label={actionLabel}
+            aria-disabled={!isClickable}
+            className={`relative w-full h-full flex items-center justify-center ${isDark ? 'bg-royal-900/60' : 'bg-white/5'} ${isClickable ? 'cursor-pointer' : ''} focus:outline-none focus-visible:ring-2 focus-visible:ring-gold-300 focus-visible:ring-inset`}
         >
             {isDark && <div className="absolute inset-0 bg-black/20 shadow-inner pointer-events-none" />}
             {(isLastFrom || isLastTo) && <div className="absolute inset-0 bg-gold-400/10 border border-gold-400/20 pointer-events-none" />}

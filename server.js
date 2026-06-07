@@ -15,6 +15,7 @@ import { validateChessMove } from './server/chessLogic.js';
 import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWinner, createInitialState as ticTacToeInitialState, isBoardFull as isTicTacToeBoardFull } from './server/tictactoeLogic.js';
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
+import { validateWithdrawalRequest } from './server/withdrawalLogic.js';
 
 // NOTE: sequence is now per-room (room.sequence) to prevent false gap-detection
 // resyncs when multiple games share the same server-wide counter. (Audit fix)
@@ -53,6 +54,8 @@ if (missingEnv.length > 0) {
 const PORT = process.env.PORT || 8080;
 const FAPSHI_API_KEY = process.env.FAPSHI_API_KEY || '';
 const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
+const FAPSHI_PAYOUT_API_KEY = process.env.FAPSHI_PAYOUT_API_KEY || FAPSHI_API_KEY;
+const FAPSHI_PAYOUT_USER_TOKEN = process.env.FAPSHI_PAYOUT_USER_TOKEN || FAPSHI_USER_TOKEN;
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
 // [Step 1.7] Comma-separated list of IPs authorized to send Fapshi webhooks.
 // If not set, the webhook still verifies via Fapshi's API (defense-in-depth).
@@ -107,6 +110,8 @@ const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers,Dice')
 const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType);
 
 // --- FIREBASE ADMIN INITIALIZATION ---
+try {
+    const serviceAccountStr = process.env.FIREBASE_SERVICE_ACCOUNT;
     if (serviceAccountStr) {
         let serviceAccount;
         try {
@@ -121,9 +126,14 @@ const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType);
         console.log("Firebase Admin initialized successfully.");
     } else {
         console.warn("WARNING: FIREBASE_SERVICE_ACCOUNT not set. Tournament logic will be limited.");
+        if (process.env.NODE_ENV === 'production') {
+            console.error('FATAL: FIREBASE_SERVICE_ACCOUNT must be set in production.');
+            process.exit(1);
+        }
     }
 } catch (e) {
     console.error("Firebase Admin initialization error:", e);
+    if (process.env.NODE_ENV === 'production') process.exit(1);
 }
 
 const db = admin.apps.length > 0 ? admin.firestore() : null;
@@ -160,7 +170,7 @@ const buildCSPHeader = () => {
         "frame-ancestors 'none'",
         // Firebase Auth Google sign-in popup domains (AUDIT_GAPS IR-8)
         "frame-src https://accounts.google.com",
-        "script-src-elem 'self' https://accounts.google.com https://apis.google.com"
+        `script-src-elem 'self' ${scriptPart} https://accounts.google.com https://apis.google.com`
     ].join('; ');
 };
 
@@ -655,26 +665,12 @@ app.get('/api/time', (req, res) => {
 // If Fapshi fails, an immediate refund is issued within the same request.
 app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
     try {
-        const { amount, phone, userId } = req.body;
-
-        if (!amount || typeof amount !== 'number' || !Number.isInteger(amount))
-            return res.status(400).json({ error: 'Invalid amount.' });
-        if (amount <= 0)
-            return res.status(400).json({ error: 'Amount must be positive.' });
-        if (amount < 1000)
-            return res.status(400).json({ error: 'Minimum withdrawal is 1,000 FCFA.' });
-        if (amount > 500_000)
-            return res.status(400).json({ error: 'Maximum withdrawal is 500,000 FCFA per transaction.' });
-        if (!phone || typeof phone !== 'string' || !/^6\d{8}$/.test(phone.replace(/\s/g, '')))
-            return res.status(400).json({ error: 'Invalid Cameroon phone number (must start with 6, 9 digits total).' });
-        if (!userId || typeof userId !== 'string')
-            return res.status(400).json({ error: 'Invalid userId.' });
-        if (req.user.uid !== userId)
-            return res.status(403).json({ error: 'Forbidden: Cannot withdraw from another user' });
+        const validation = validateWithdrawalRequest(req.body, req.user.uid);
+        if (!validation.valid) return res.status(validation.status).json({ error: validation.error });
         if (!db)
             return res.status(503).json({ error: 'Database unavailable' });
 
-        const cleanPhone = phone.replace(/\s/g, '');
+        const { amount, cleanPhone, userId } = validation;
         const userRef = db.collection('users').doc(userId);
         let pendingTxRef = null;
 
@@ -707,7 +703,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         try {
             fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
                 method: 'POST',
-                headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY, 'Content-Type': 'application/json' },
+                headers: { 'apiuser': FAPSHI_PAYOUT_USER_TOKEN, 'apikey': FAPSHI_PAYOUT_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' }),
                 signal: payoutController.signal
             });
@@ -1685,13 +1681,13 @@ const settleGame = async (roomId, winnerId) => {
             const newWinnerElo = Math.round(wElo + K * (1 - expectedWin));
             const newLoserElo = Math.round(lElo - K * (1 - expectedWin));
 
-            const winnerUpdate: any = {
+            const winnerUpdate = {
                 balance: (winnerDoc.data().balance || 0) + winnings,
                 winCount: (winnerDoc.data().winCount || 0) + 1,
                 gamesPlayed: (winnerDoc.data().gamesPlayed || 0) + 1,
                 mostPlayedGame: gameType
             };
-            const loserUpdate: any = {
+            const loserUpdate = {
                 gamesPlayed: (loserDoc.data().gamesPlayed || 0) + 1,
                 mostPlayedGame: loserDoc.data().mostPlayedGame || gameType
             };
@@ -2109,7 +2105,7 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
 // --- CHALLENGE RESPOND (accept/decline) ---
 app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) => {
     try {
-        const { challengeId, action, gameId } = req.body;
+        const { challengeId, action } = req.body;
         const userId = req.user.uid;
 
         if (!challengeId || typeof challengeId !== 'string') return res.status(400).json({ error: 'Invalid challengeId.' });
@@ -2126,34 +2122,54 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         if (challenge.targetId !== userId) return res.status(403).json({ error: 'Not your challenge.' });
         if (challenge.status !== 'pending') return res.status(409).json({ error: `Challenge already ${challenge.status}.` });
 
+        if (challenge.expiresAt && challenge.expiresAt < Date.now()) {
+            await challengeRef.update({ status: 'expired', respondedAt: admin.firestore.FieldValue.serverTimestamp() });
+            return res.status(410).json({ error: 'Challenge expired.' });
+        }
+
         if (action === 'decline') {
             await challengeRef.update({ status: 'declined', respondedAt: admin.firestore.FieldValue.serverTimestamp() });
             return res.status(200).json({ ok: true });
         }
 
-        // Accept: validate receiver has sufficient stake
-        const receiverSnap = await db.collection('users').doc(userId).get();
-        if (!receiverSnap.exists()) return res.status(404).json({ error: 'Receiver not found.' });
-        const rData = receiverSnap.data();
-        const rAvailable = (rData.balance || 0) + (rData.promoBalance || 0);
-        if (rAvailable < challenge.stake) return res.status(400).json({ error: 'Insufficient funds to accept.' });
+        const gameId = `challenge_${challengeId}`;
+        const senderId = challenge.sender?.id;
+        if (!senderId || typeof senderId !== 'string') return res.status(400).json({ error: 'Invalid challenge sender.' });
 
-        // Validate gameId if provided
-        if (gameId) {
-            const gameSnap = await db.collection('games').doc(gameId).get();
-            if (!gameSnap.exists()) return res.status(404).json({ error: 'Game not found.' });
-            const gameData = gameSnap.data();
-            if (!gameData.players.includes(userId)) return res.status(403).json({ error: 'You are not a player in this game.' });
-        }
+        await db.runTransaction(async (tx) => {
+            const freshChallengeSnap = await tx.get(challengeRef);
+            if (!freshChallengeSnap.exists) throw new Error('CHALLENGE_NOT_FOUND');
+            const freshChallenge = freshChallengeSnap.data();
+            if (freshChallenge.status !== 'pending') throw new Error('CHALLENGE_NOT_PENDING');
 
-        await challengeRef.update({
-            status: 'accepted',
-            gameId: gameId || null,
-            respondedAt: admin.firestore.FieldValue.serverTimestamp()
+            const receiverRef = db.collection('users').doc(userId);
+            const senderRef = db.collection('users').doc(senderId);
+            const [receiverSnap, senderSnap] = await Promise.all([tx.get(receiverRef), tx.get(senderRef)]);
+            if (!receiverSnap.exists) throw new Error('RECEIVER_NOT_FOUND');
+            if (!senderSnap.exists) throw new Error('SENDER_NOT_FOUND');
+
+            const receiver = receiverSnap.data();
+            const sender = senderSnap.data();
+            const receiverAvailable = (receiver.balance || 0) + (receiver.promoBalance || 0);
+            const senderAvailable = (sender.balance || 0) + (sender.promoBalance || 0);
+            if (receiverAvailable < freshChallenge.stake) throw new Error('RECEIVER_INSUFFICIENT_FUNDS');
+            if (senderAvailable < freshChallenge.stake) throw new Error('SENDER_INSUFFICIENT_FUNDS');
+
+            tx.update(challengeRef, {
+                status: 'accepted',
+                gameId,
+                respondedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
         });
 
-        res.status(200).json({ ok: true });
+        res.status(200).json({ ok: true, gameId });
     } catch (err) {
+        if (err.message === 'CHALLENGE_NOT_FOUND') return res.status(404).json({ error: 'Challenge not found.' });
+        if (err.message === 'CHALLENGE_NOT_PENDING') return res.status(409).json({ error: 'Challenge is no longer pending.' });
+        if (err.message === 'RECEIVER_NOT_FOUND') return res.status(404).json({ error: 'Receiver not found.' });
+        if (err.message === 'SENDER_NOT_FOUND') return res.status(404).json({ error: 'Challenge sender not found.' });
+        if (err.message === 'RECEIVER_INSUFFICIENT_FUNDS') return res.status(400).json({ error: 'Insufficient funds to accept.' });
+        if (err.message === 'SENDER_INSUFFICIENT_FUNDS') return res.status(400).json({ error: 'Challenge sender has insufficient funds.' });
         console.error('[Challenge] respond error:', err);
         res.status(500).json({ error: 'Failed to respond to challenge.' });
     }
@@ -2828,6 +2844,11 @@ io.on('connection', (socket) => {
         // --- UPFRONT ESCROW DEDUCTION ---
         let realDeducted = 0;
         let promoDeducted = 0;
+
+        if (stake > 0 && !db) {
+            socket.emit('game_error', { message: 'Payments are temporarily unavailable. Please try again later.' });
+            return;
+        }
 
         if (stake > 0 && db) {
             const userRef = db.collection('users').doc(userId);
@@ -3527,8 +3548,7 @@ io.on('connection', (socket) => {
                             return;
                         }
                         if (clientGame.isGameOver()) {
-                            // Draw / stalemate — no winner, just end the game
-                            // For now, treat draws as a loss for both (no payout edge case)
+                            // Draw / stalemate: no winner. Staked games are refunded in endGame().
                             endGame(roomId, null, 'Draw');
                             return;
                         }

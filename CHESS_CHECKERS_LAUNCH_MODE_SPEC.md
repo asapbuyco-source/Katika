@@ -1,6 +1,6 @@
-# Chess + Checkers Launch Mode Spec
+# Chess + Checkers + Dice Launch Mode Spec
 
-**Objective:** Restrict platform to Chess + Checkers for safe Cameroon launch; enable staged reintroduction of other games.  
+**Objective:** Restrict platform to Chess, Checkers, and Dice for safe Cameroon launch; enable staged reintroduction of other games.  
 **Date:** 2026-05-15  
 
 ---
@@ -15,7 +15,7 @@ Two-layer enforcement (defense-in-depth):
 // vite.config.ts
 define: {
     'import.meta.env.VITE_LAUNCH_GAMES': JSON.stringify(
-        process.env.VITE_LAUNCH_GAMES || 'Chess,Checkers'
+        process.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice'
     )
 }
 ```
@@ -25,7 +25,7 @@ Used in `Lobby.tsx` and `Dashboard.tsx` to filter the game list before rendering
 `LAUNCH_GAMES` env var is read at server startup and applied to every `join_game`:
 ```javascript
 // server.js:104-107
-const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers')
+const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers,Dice')
     .split(',').map(g => g.trim()).filter(Boolean);
 const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType);
 ```
@@ -37,15 +37,15 @@ Client socket attacks (manipulating the client to send non-scope game types) are
 
 | Env Var | Values | Effect |
 |---------|--------|--------|
-| `LAUNCH_GAMES` | `Chess,Checkers` (default) | Launch mode — only Chess + Checkers |
+| `LAUNCH_GAMES` | `Chess,Checkers,Dice` (default) | Launch mode: Chess + Checkers + Dice |
 | `LAUNCH_GAMES` | `Chess,Checkers,Dice,Ludo,TicTacToe,Pool,Cards` | Full platform (all games) |
 | `LAUNCH_GAMES` | `Chess,Checkers,Dice,Ludo` | Partial rollout (staged) |
 | `VITE_LAUNCH_GAMES` | Must match server-side `LAUNCH_GAMES` | Frontend build-time constant |
 
 **Railway Configuration:**
 ```
-LAUNCH_GAMES=Chess,Checkers
-VITE_LAUNCH_GAMES=Chess,Checkers
+LAUNCH_GAMES=Chess,Checkers,Dice
+VITE_LAUNCH_GAMES=Chess,Checkers,Dice
 ```
 
 ---
@@ -56,7 +56,7 @@ VITE_LAUNCH_GAMES=Chess,Checkers
 |------|-------------|----------------|-------------|
 | Chess | ✅ Active | ✅ | ✅ |
 | Checkers | ✅ Active | ✅ | ✅ |
-| Dice | ❌ Hidden | ✅ | ✅ |
+| Dice | ✅ Active | ✅ | ✅ |
 | Ludo | ❌ Hidden | ✅ | ✅ |
 | TicTacToe | ❌ Hidden | ✅ | ✅ |
 | Pool | ❌ Hidden | ✅ | ✅ |
@@ -67,9 +67,9 @@ VITE_LAUNCH_GAMES=Chess,Checkers
 ## Scope Lock Verification
 
 After deployment, verify:
-1. Dashboard shows only Chess + Checkers game cards
-2. Lobby shows only Chess + Checkers game tiles
-3. Attempting to `join_game` with `gameType: 'Dice'` returns error: `"Dice is not available in this region yet."`
+1. Dashboard shows only Chess + Checkers + Dice game cards
+2. Lobby shows only Chess + Checkers + Dice game tiles
+3. Attempting to `join_game` with `gameType: 'Ludo'` returns error: `"Ludo is not available in this region yet."`
 4. `/health` returns `status: 'ok'` (no auth misconfiguration)
 
 ---
@@ -88,10 +88,10 @@ When ready to add more games:
 
 | Test | Expected Behavior |
 |------|------------------|
-| Fresh user opens Dashboard | Sees only Chess + Checkers cards |
-| Fresh user opens Lobby | Sees only Chess + Checkers game tiles |
+| Fresh user opens Dashboard | Sees only Chess + Checkers + Dice cards |
+| Fresh user opens Lobby | Sees only Chess + Checkers + Dice game tiles |
 | Bot game: Chess | ✅ Works (server API bypasses scope lock) |
-| Bot game: Dice | ❌ Rejected with "not available" message |
+| Bot game: Dice | ✅ Works |
 | Matchmaking: Checkers | ✅ Works |
 | Challenge: Checkers vs Chess | ❌ Game type selection filtered to scope |
-| Admin sets `game_configs/Dice` to `active` | UI still hides Dice (scope lock overrides admin config) |
+| Admin sets `game_configs/Ludo` to `active` | UI still hides Ludo (scope lock overrides admin config) |
