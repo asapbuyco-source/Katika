@@ -57,6 +57,10 @@ const FAPSHI_USER_TOKEN = process.env.FAPSHI_USER_TOKEN || '';
 const FAPSHI_PAYOUT_API_KEY = process.env.FAPSHI_PAYOUT_API_KEY || FAPSHI_API_KEY;
 const FAPSHI_PAYOUT_USER_TOKEN = process.env.FAPSHI_PAYOUT_USER_TOKEN || FAPSHI_USER_TOKEN;
 const FAPSHI_BASE_URL = process.env.FAPSHI_BASE_URL || 'https://live.fapshi.com';
+const PAYOUT_MODE = (process.env.PAYOUT_MODE || 'manual').toLowerCase();
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+const TELEGRAM_ADMIN_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID || '';
+const MANUAL_WITHDRAWAL_SLA_MS = Number(process.env.MANUAL_WITHDRAWAL_SLA_MS || 2 * 60 * 60 * 1000);
 // [Step 1.7] Comma-separated list of IPs authorized to send Fapshi webhooks.
 // If not set, the webhook still verifies via Fapshi's API (defense-in-depth).
 const FAPSHI_WEBHOOK_IPS = (process.env.FAPSHI_WEBHOOK_IPS || '').split(',').map(ip => ip.trim()).filter(Boolean);
@@ -70,6 +74,96 @@ if (process.env.NODE_ENV === 'production') {
     }
 }
 const FRONTEND_ORIGIN = FRONTEND_URL.replace(/\/$/, '');
+
+const formatFcfa = (amount) => `${Number(amount || 0).toLocaleString('en-US')} FCFA`;
+
+const sendTelegramAdminAlert = async (message) => {
+    if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ADMIN_CHAT_ID) {
+        console.warn('[Telegram] Withdrawal alert skipped: TELEGRAM_BOT_TOKEN or TELEGRAM_ADMIN_CHAT_ID is missing.');
+        return false;
+    }
+    try {
+        const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                chat_id: TELEGRAM_ADMIN_CHAT_ID,
+                text: message.slice(0, 3900),
+                disable_web_page_preview: true
+            })
+        });
+        if (!response.ok) {
+            const body = await response.text().catch(() => '');
+            console.error(`[Telegram] Alert failed: ${response.status} ${body}`);
+            return false;
+        }
+        return true;
+    } catch (e) {
+        console.error('[Telegram] Alert error:', e.message);
+        return false;
+    }
+};
+
+const serializeAuditTransaction = (doc) => {
+    const data = doc.data() || {};
+    return {
+        id: doc.id,
+        type: data.type || 'unknown',
+        amount: Number(data.amount || 0),
+        status: data.status || 'unknown',
+        date: data.date || null,
+        note: data.note || data.gameType || data.error || ''
+    };
+};
+
+const getWithdrawalAuditTrail = async (userId, limitCount = 12) => {
+    if (!db) return { recentTransactions: [], summary: {} };
+    const txCollection = db.collection('users').doc(userId).collection('transactions');
+    let snap;
+    try {
+        snap = await txCollection.orderBy('timestamp', 'desc').limit(limitCount).get();
+    } catch (e) {
+        snap = await txCollection.orderBy('date', 'desc').limit(limitCount).get();
+    }
+    const recentTransactions = snap.docs.map(serializeAuditTransaction);
+    const completed = recentTransactions.filter(tx => tx.status === 'completed');
+    const summary = {
+        deposits: completed.filter(tx => tx.type === 'deposit').reduce((sum, tx) => sum + Math.max(tx.amount, 0), 0),
+        winnings: completed.filter(tx => tx.type === 'winnings').reduce((sum, tx) => sum + Math.max(tx.amount, 0), 0),
+        stakes: completed.filter(tx => ['stake', 'stake_loss', 'escrow_lock'].includes(tx.type)).reduce((sum, tx) => sum + Math.abs(tx.amount), 0),
+        refunds: completed.filter(tx => ['escrow_refund', 'tournament_refund'].includes(tx.type)).reduce((sum, tx) => sum + Math.max(tx.amount, 0), 0),
+        completedWithdrawals: completed.filter(tx => tx.type === 'withdrawal').reduce((sum, tx) => sum + Math.abs(tx.amount), 0)
+    };
+    return { recentTransactions, summary };
+};
+
+const buildWithdrawalTelegramMessage = ({ requestId, userId, userData, amount, phone, audit }) => {
+    const userName = userData?.name || userData?.displayName || 'Unknown user';
+    const lines = [
+        'Katika withdrawal pending review',
+        `Request: ${requestId}`,
+        `User: ${userName}`,
+        `User ID: ${userId}`,
+        `Amount: ${formatFcfa(amount)}`,
+        `Phone: ${phone}`,
+        `SLA: verify within ${Math.round(MANUAL_WITHDRAWAL_SLA_MS / 3600000)} hours`,
+        '',
+        'Recent source summary:',
+        `Deposits: ${formatFcfa(audit.summary.deposits)}`,
+        `Winnings: ${formatFcfa(audit.summary.winnings)}`,
+        `Stakes/locks: ${formatFcfa(audit.summary.stakes)}`,
+        `Refunds: ${formatFcfa(audit.summary.refunds)}`,
+        `Previous withdrawals: ${formatFcfa(audit.summary.completedWithdrawals)}`,
+        '',
+        'Recent transactions:'
+    ];
+    audit.recentTransactions.slice(0, 8).forEach(tx => {
+        lines.push(`- ${tx.type} ${formatFcfa(tx.amount)} ${tx.status} ${tx.date || ''}`);
+    });
+    lines.push('');
+    lines.push('Open Admin Dashboard > Withdrawals, verify, manually send Mobile Money, attach proof, then mark paid.');
+    return lines.join('\n');
+};
 
 // FIX C2: Admin whitelist — authoritative source is the JWT email, NEVER Firestore's isAdmin flag
 // (isAdmin in Firestore is client-writable; email in a Firebase ID token is cryptographically signed)
@@ -137,6 +231,7 @@ try {
 }
 
 const db = admin.apps.length > 0 ? admin.firestore() : null;
+if (db) db.settings({ ignoreUndefinedProperties: true });
 
 // [Step 1.1] Hash-based CSP — compute hashes from Vite build output.
 // Remove 'unsafe-inline' from scriptSrc and replace with sha256 hashes of
@@ -161,15 +256,15 @@ const buildCSPHeader = () => {
         `script-src 'self' ${scriptPart}`,
         `style-src 'self' 'unsafe-inline' https://fonts.googleapis.com`,
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data: https://api.dicebear.com https://i.pravatar.cc https://www.google.com",
+        "img-src 'self' data: https://api.dicebear.com https://i.pravatar.cc https://www.google.com https://lh3.googleusercontent.com https://*.googleusercontent.com https://lichess1.org https://www.transparenttextures.com",
         // AUDIT FIX: connect-src must list the backend API origin (Railway), not the frontend origin.
         // FRONTEND_URL is where the SPA lives; the server's own domain is already covered by 'self'.
         // Add BACKEND_URL to Railway env if backend and frontend are on different domains.
-        "connect-src 'self' " + (process.env.BACKEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173') + " https://*.googleapis.com https://*.firebaseio.com https://live.fapshi.com wss://*",
+        "connect-src 'self' " + (process.env.BACKEND_URL || process.env.FRONTEND_URL || 'http://localhost:5173') + " https://*.googleapis.com https://*.firebaseio.com https://live.fapshi.com https://lichess.org https://lidraughts.org wss://*",
         "object-src 'none'",
         "frame-ancestors 'none'",
         // Firebase Auth Google sign-in popup domains (AUDIT_GAPS IR-8)
-        "frame-src https://accounts.google.com",
+        "frame-src https://accounts.google.com https://*.firebaseapp.com",
         `script-src-elem 'self' ${scriptPart} https://accounts.google.com https://apis.google.com`
     ].join('; ');
 };
@@ -218,6 +313,55 @@ app.use(cors({
 
 // [Step 0.4] DOMPurify replaces the homegrown HTML-stripping sanitize function.
 const sanitize = (text) => DOMPurify.sanitize(String(text), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).slice(0, 150);
+
+// Device verification used by the SPA after Firebase auth. It is intentionally
+// advisory: suspicious device sharing warns the client, while hard account
+// actions remain an ops/admin decision.
+app.post('/api/auth/verify-device', verifyAuth, async (req, res) => {
+    try {
+        const { userId, deviceId } = req.body || {};
+        if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Invalid userId.' });
+        if (!deviceId || typeof deviceId !== 'string') return res.status(400).json({ error: 'Invalid deviceId.' });
+        if (req.user.uid !== userId) return res.status(403).json({ error: 'Forbidden: Cannot verify another user device.' });
+        if (!db) return res.json({ status: 'ok' });
+
+        const cleanDeviceId = deviceId.trim().slice(0, 128);
+        const deviceHash = crypto.createHash('sha256').update(cleanDeviceId).digest('hex');
+        const deviceRef = db.collection('device_fingerprints').doc(deviceHash);
+        const userRef = db.collection('users').doc(userId);
+        let uniqueUserCount = 1;
+
+        await db.runTransaction(async (tx) => {
+            const deviceSnap = await tx.get(deviceRef);
+            const userIds = new Set(deviceSnap.exists ? (deviceSnap.data().userIds || []) : []);
+            userIds.add(userId);
+            uniqueUserCount = userIds.size;
+
+            tx.set(deviceRef, {
+                userIds: Array.from(userIds).slice(0, 25),
+                lastUserId: userId,
+                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            tx.set(userRef, {
+                lastDeviceHash: deviceHash,
+                lastDeviceVerifiedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        });
+
+        if (uniqueUserCount >= 4) {
+            return res.json({
+                status: 'warning',
+                message: 'This device has been used by multiple accounts. Please use one account to avoid review delays.'
+            });
+        }
+
+        res.json({ status: 'ok' });
+    } catch (err) {
+        console.error('[Auth] verify-device error:', err);
+        res.status(500).json({ error: 'Device verification failed.' });
+    }
+});
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -672,7 +816,13 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
 
         const { amount, cleanPhone, userId } = validation;
         const userRef = db.collection('users').doc(userId);
-        let pendingTxRef = null;
+        const pendingTxRef = userRef.collection('transactions').doc();
+        const withdrawalRequestRef = db.collection('withdrawal_requests').doc(pendingTxRef.id);
+        const isManualPayout = PAYOUT_MODE !== 'automatic';
+        const nowIso = new Date().toISOString();
+        const slaDeadlineIso = new Date(Date.now() + MANUAL_WITHDRAWAL_SLA_MS).toISOString();
+        let userSnapshot = null;
+        let balanceAfterDebit = 0;
 
         // STEP 1: Atomically debit balance and record as 'pending' BEFORE calling Fapshi.
         // Two concurrent requests cannot both pass — the second will see the reduced balance.
@@ -680,14 +830,43 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
             await db.runTransaction(async (tx) => {
                 const userDoc = await tx.get(userRef);
                 if (!userDoc.exists()) throw new Error('USER_NOT_FOUND');
-                const currentBalance = userDoc.data().balance || 0;
+                const userData = userDoc.data() || {};
+                const currentBalance = userData.balance || 0;
                 if (currentBalance < amount) throw new Error('INSUFFICIENT_BALANCE');
-                tx.update(userRef, { balance: currentBalance - amount });
-                pendingTxRef = userRef.collection('transactions').doc();
+                balanceAfterDebit = currentBalance - amount;
+                userSnapshot = {
+                    name: userData.name || userData.displayName || '',
+                    email: userData.email || '',
+                    avatar: userData.avatar || userData.photoURL || '',
+                    balanceBefore: currentBalance,
+                    balanceAfter: balanceAfterDebit
+                };
+                tx.update(userRef, { balance: balanceAfterDebit });
                 tx.set(pendingTxRef, {
-                    type: 'withdrawal', amount: -amount, status: 'pending',
-                    phone: cleanPhone, date: new Date().toISOString(),
+                    type: 'withdrawal',
+                    amount: -amount,
+                    status: 'pending',
+                    phone: cleanPhone,
+                    date: nowIso,
+                    payoutMode: isManualPayout ? 'manual' : 'automatic',
+                    manualReview: isManualPayout,
+                    reviewStatus: isManualPayout ? 'pending' : 'processing',
+                    requestedAt: nowIso,
+                    slaDeadline: slaDeadlineIso,
                     timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                tx.set(withdrawalRequestRef, {
+                    userId,
+                    amount,
+                    phone: cleanPhone,
+                    status: 'pending',
+                    payoutMode: isManualPayout ? 'manual' : 'automatic',
+                    transactionPath: pendingTxRef.path,
+                    userSnapshot,
+                    requestedAt: nowIso,
+                    slaDeadline: slaDeadlineIso,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
             });
         } catch (txErr) {
@@ -697,6 +876,35 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         }
 
         // STEP 2: Call Fapshi — balance is already safely debited
+        const audit = await getWithdrawalAuditTrail(userId).catch((e) => {
+            console.error('[Withdrawal] Audit trail failed:', e.message);
+            return { recentTransactions: [], summary: {} };
+        });
+
+        await withdrawalRequestRef.update({
+            audit,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }).catch(e => console.error('[Withdrawal] Failed to attach audit:', e.message));
+
+        if (isManualPayout) {
+            sendTelegramAdminAlert(buildWithdrawalTelegramMessage({
+                requestId: withdrawalRequestRef.id,
+                userId,
+                userData: userSnapshot,
+                amount,
+                phone: cleanPhone,
+                audit
+            })).catch(() => {});
+
+            return res.json({
+                success: true,
+                status: 'pending',
+                withdrawalId: withdrawalRequestRef.id,
+                reservedBalance: balanceAfterDebit,
+                message: 'Withdrawal request received. Funds are reserved while admin verifies payout. Maximum verification time is 2 hours.'
+            });
+        }
+
         const payoutController = new AbortController();
         const payoutTimeout = setTimeout(() => payoutController.abort(), 15000);
         let fapshiRes;
@@ -717,6 +925,11 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                     const userDoc = await tx.get(userRef);
                     if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
                     if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp(), error: 'payout_timeout' });
+                    tx.update(withdrawalRequestRef, {
+                        status: 'failed',
+                        error: 'payout_timeout',
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
                 }), 3, 500).catch(e => {
                     console.error('[Disburse] All refund retries failed:', e.message);
                     // Last resort: write to failed_settlements so reconciliation picks it up
@@ -743,6 +956,12 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                 const userDoc = await tx.get(userRef);
                 if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
                 if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp() });
+                tx.update(withdrawalRequestRef, {
+                    status: 'failed',
+                    error: 'fapshi_error',
+                    fapshiResponse: fapshiData || null,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
             }), 3, 500).catch(e => {
                 console.error('[Disburse] Refund transaction failed after retries:', e.message);
                 if (db && pendingTxRef) {
@@ -764,6 +983,12 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                 completedAt: admin.firestore.FieldValue.serverTimestamp()
             }).catch(e => console.error('[Disburse] Failed to mark tx completed:', e));
         }
+        withdrawalRequestRef.update({
+            status: 'completed',
+            transId: fapshiData.transId || null,
+            completedAt: admin.firestore.FieldValue.serverTimestamp(),
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }).catch(e => console.error('[Disburse] Failed to mark withdrawal request completed:', e));
         res.json({ success: true, transId: fapshiData.transId });
     } catch (err) {
         console.error('Fapshi disburse proxy error:', err);
@@ -1368,6 +1593,134 @@ app.post('/api/admin/delete-account', verifyAdmin, async (req, res) => {
     }
 });
 
+// --- ADMIN: MANUAL WITHDRAWAL REVIEW ---
+app.get('/api/admin/withdrawals', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const status = String(req.query.status || 'pending');
+    const validStatuses = ['pending', 'completed', 'rejected', 'failed'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid withdrawal status' });
+    try {
+        const snap = await db.collection('withdrawal_requests')
+            .where('status', '==', status)
+            .limit(75)
+            .get();
+        const withdrawals = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+            .sort((a, b) => new Date(b.requestedAt || 0).getTime() - new Date(a.requestedAt || 0).getTime());
+        res.json({ withdrawals });
+    } catch (e) {
+        console.error('[AdminWithdrawals] List failed:', e);
+        res.status(500).json({ error: 'Failed to load withdrawals' });
+    }
+});
+
+app.post('/api/admin/withdrawals/:id/mark-paid', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const { proofImage, proofNote, externalReference } = req.body || {};
+    if (!proofImage && !externalReference && !proofNote) {
+        return res.status(400).json({ error: 'Add a screenshot, payment reference, or note before marking paid.' });
+    }
+    if (proofImage && typeof proofImage === 'string' && proofImage.length > 750000) {
+        return res.status(400).json({ error: 'Proof image is too large. Upload a smaller screenshot.' });
+    }
+    try {
+        const requestRef = db.collection('withdrawal_requests').doc(req.params.id);
+        let result = null;
+        await db.runTransaction(async (tx) => {
+            const requestSnap = await tx.get(requestRef);
+            if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+            const request = requestSnap.data();
+            if (request.status !== 'pending') throw new Error('REQUEST_ALREADY_REVIEWED');
+            if (!request.transactionPath) throw new Error('TRANSACTION_MISSING');
+            const userTxRef = db.doc(request.transactionPath);
+            const userTxSnap = await tx.get(userTxRef);
+            if (!userTxSnap.exists) throw new Error('TRANSACTION_NOT_FOUND');
+            const reviewPayload = {
+                status: 'completed',
+                reviewStatus: 'paid',
+                proofImage: proofImage || null,
+                proofNote: proofNote || '',
+                externalReference: externalReference || '',
+                reviewedBy: req.adminUid,
+                reviewedByEmail: req.adminEmail || '',
+                completedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+            tx.update(requestRef, reviewPayload);
+            tx.update(userTxRef, {
+                status: 'completed',
+                reviewStatus: 'paid',
+                proofImage: proofImage || null,
+                proofNote: proofNote || '',
+                externalReference: externalReference || '',
+                reviewedBy: req.adminUid,
+                reviewedByEmail: req.adminEmail || '',
+                completedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            result = { amount: request.amount, userId: request.userId };
+        });
+        res.json({ success: true, ...result });
+    } catch (e) {
+        if (e.message === 'REQUEST_NOT_FOUND') return res.status(404).json({ error: 'Withdrawal request not found' });
+        if (e.message === 'REQUEST_ALREADY_REVIEWED') return res.status(409).json({ error: 'Withdrawal request already reviewed' });
+        console.error('[AdminWithdrawals] Mark paid failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to mark withdrawal paid' });
+    }
+});
+
+app.post('/api/admin/withdrawals/:id/reject', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const reason = String((req.body && req.body.reason) || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Rejection reason is required' });
+    try {
+        const requestRef = db.collection('withdrawal_requests').doc(req.params.id);
+        let result = null;
+        await db.runTransaction(async (tx) => {
+            const requestSnap = await tx.get(requestRef);
+            if (!requestSnap.exists) throw new Error('REQUEST_NOT_FOUND');
+            const request = requestSnap.data();
+            if (request.status !== 'pending') throw new Error('REQUEST_ALREADY_REVIEWED');
+            if (!request.transactionPath) throw new Error('TRANSACTION_MISSING');
+            const amount = Number(request.amount || 0);
+            const userRef = db.collection('users').doc(request.userId);
+            const userTxRef = db.doc(request.transactionPath);
+            const userSnap = await tx.get(userRef);
+            const userTxSnap = await tx.get(userTxRef);
+            if (!userSnap.exists || !userTxSnap.exists) throw new Error('USER_OR_TRANSACTION_NOT_FOUND');
+            tx.update(userRef, { balance: (userSnap.data().balance || 0) + amount });
+            tx.update(requestRef, {
+                status: 'rejected',
+                reviewStatus: 'rejected',
+                rejectionReason: reason,
+                reviewedBy: req.adminUid,
+                reviewedByEmail: req.adminEmail || '',
+                rejectedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            tx.update(userTxRef, {
+                status: 'failed',
+                reviewStatus: 'rejected',
+                rejectionReason: reason,
+                refundedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            tx.set(userRef.collection('transactions').doc(), {
+                type: 'escrow_refund',
+                amount,
+                status: 'completed',
+                date: new Date().toISOString(),
+                timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                note: `Withdrawal rejected and refunded: ${reason}`
+            });
+            result = { amount, userId: request.userId };
+        });
+        res.json({ success: true, ...result });
+    } catch (e) {
+        if (e.message === 'REQUEST_NOT_FOUND') return res.status(404).json({ error: 'Withdrawal request not found' });
+        if (e.message === 'REQUEST_ALREADY_REVIEWED') return res.status(409).json({ error: 'Withdrawal request already reviewed' });
+        console.error('[AdminWithdrawals] Reject failed:', e);
+        res.status(500).json({ error: e.message || 'Failed to reject withdrawal' });
+    }
+});
+
 // --- ADMIN: START TOURNAMENT ---
 app.post('/api/tournaments/start', verifyAdmin, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database unavailable' });
@@ -1908,8 +2261,8 @@ const runDisputeSLAResolver = async () => {
 setInterval(runDisputeSLAResolver, 5 * 60 * 1000);
 
 // ─── PAYMENT OPS SAFETY: RECONCILIATION + PENDING WITHDRAWAL RECOVERY ──────────
-// P0-6: Reconcile pending withdrawals every 10 minutes. Auto-refund or escalate
-// any withdrawal stuck in 'pending' state past the 5-minute SLA.
+// P0-6: Reconcile pending automatic withdrawals every 10 minutes. Manual
+// withdrawals stay pending for admin review and are only logged if overdue.
 // Runs alongside the dispute SLA resolver.
 const RECONCILIATION_INTERVAL_MS = 10 * 60 * 1000;
 const WITHDRAWAL_SLA_MS = 5 * 60 * 1000; // 5 minutes max for Fapshi payout
@@ -1920,14 +2273,20 @@ const runPendingWithdrawalReconciliation = async () => {
         const fiveMinAgo = new Date(Date.now() - WITHDRAWAL_SLA_MS);
         const pendingSnap = await db.collectionGroup('transactions')
             .where('type', '==', 'withdrawal')
-            .where('status', '==', 'pending')
             .get();
 
         let reconciledCount = 0;
 
         for (const doc of pendingSnap.docs) {
             const txData = doc.data();
+            if (txData.status !== 'pending') continue;
             const txDate = txData.date ? new Date(txData.date) : null;
+            if (txData.manualReview || txData.payoutMode === 'manual') {
+                if (txDate && Date.now() - txDate.getTime() > MANUAL_WITHDRAWAL_SLA_MS) {
+                    console.warn(`[Reconciliation] Manual withdrawal ${doc.id} is past the review SLA and still pending.`);
+                }
+                continue;
+            }
             if (!txDate || txDate > fiveMinAgo) continue; // not yet past SLA
 
             const userRef = doc.ref.parent.parent;
@@ -2925,8 +3284,8 @@ io.on('connection', (socket) => {
                     id: roomId,
                     gameType,
                     stake,
-                    privateRoomId: privateRoomId || undefined,
-                    tournamentMatchId: privateRoomId?.startsWith('m-') ? privateRoomId : undefined,
+                    privateRoomId: privateRoomId || null,
+                    tournamentMatchId: privateRoomId?.startsWith('m-') ? privateRoomId : null,
                     players: [opponentId, userId], // Player 0 (Host), Player 1 (Joiner)
                     escrowSplits: {
                         [userId]: { real: realDeducted, promo: promoDeducted },
@@ -4101,10 +4460,9 @@ const reconcileOrphanedEscrows = async () => {
         console.log('[Reconciliation] Scanning for orphaned escrows from the last 24h...');
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
-        // Collection group query to find recent escrow locks
+        // Query by type only and filter dates in JS to avoid a required composite index.
         const lockSnap = await db.collectionGroup('transactions')
             .where('type', '==', 'escrow_lock')
-            .where('date', '>=', yesterday)
             .get();
 
         if (lockSnap.empty) {
@@ -4117,6 +4475,7 @@ const reconcileOrphanedEscrows = async () => {
 
         for (const doc of lockSnap.docs) {
             const txData = doc.data();
+            if (!txData.date || txData.date < yesterday) continue;
             const userRef = doc.ref.parent.parent; 
             if (!userRef) continue;
 

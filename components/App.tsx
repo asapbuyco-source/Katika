@@ -437,7 +437,13 @@ const AppContent = () => {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
                             body: JSON.stringify({ userId: appUser.id, deviceId })
-                        }).then(r => r.json()).then(data => {
+                        }).then(async r => {
+                            if (!r.ok) return null;
+                            const contentType = r.headers.get('content-type') || '';
+                            if (!contentType.includes('application/json')) return null;
+                            return r.json();
+                        }).then(data => {
+                            if (!data) return;
                             if (data.status === 'warning') {
                                 toast.warning(data.message, { duration: 10000 });
                             } else if (data.status === 'banned') {

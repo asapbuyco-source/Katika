@@ -59,8 +59,10 @@ export {
 
 export {
     banUser, setMaintenanceMode, subscribeToMaintenanceMode, getSystemLogs,
-    editUserBalance, deleteUserAccount
+    editUserBalance, deleteUserAccount, getAdminWithdrawals, markWithdrawalPaid,
+    rejectWithdrawal
 } from './firebase/admin';
+export type { AdminWithdrawalRequest } from './firebase/admin';
 
 export {
     getLeaderboard

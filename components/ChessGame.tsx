@@ -43,10 +43,20 @@ const ChessSquare = React.memo(({
     rankLabel,
     fileLabel
 }: any) => {
+    const [imageFailed, setImageFailed] = useState(false);
 
     // Map piece type to lichess cburnett SVG piece images
     const pieceTypeUpper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
     const pieceSrc = piece ? `https://lichess1.org/assets/piece/cburnett/${piece.color}${pieceTypeUpper[piece.type]}.svg` : null;
+    const pieceGlyphs: Record<string, string> = {
+        wp: '♙', wn: '♘', wb: '♗', wr: '♖', wq: '♕', wk: '♔',
+        bp: '♟', bn: '♞', bb: '♝', br: '♜', bq: '♛', bk: '♚'
+    };
+    const pieceGlyph = piece ? pieceGlyphs[`${piece.color}${piece.type}`] : null;
+
+    useEffect(() => {
+        setImageFailed(false);
+    }, [pieceSrc]);
 
     const handleClick = () => {
         onClick(square);
@@ -126,12 +136,23 @@ const ChessSquare = React.memo(({
                     whileHover={{ scale: 1.08 }}
                     whileTap={{ scale: 0.95 }}
                 >
-                    <img
-                        src={pieceSrc}
-                        alt={`${piece.color === 'w' ? 'White' : 'Black'} ${piece.type}`}
-                        className="w-full h-full object-contain select-none"
-                        draggable={false}
-                    />
+                    {pieceGlyph && (
+                        <span
+                            aria-hidden="true"
+                            className={`absolute select-none text-[2.8rem] md:text-[3.4rem] leading-none ${piece.color === 'w' ? 'text-white drop-shadow-[0_2px_1px_rgba(0,0,0,0.75)]' : 'text-slate-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.45)]'} ${imageFailed ? 'opacity-100' : 'opacity-0'}`}
+                        >
+                            {pieceGlyph}
+                        </span>
+                    )}
+                    {!imageFailed && (
+                        <img
+                            src={pieceSrc}
+                            alt={`${piece.color === 'w' ? 'White' : 'Black'} ${piece.type}`}
+                            onError={() => setImageFailed(true)}
+                            className="w-full h-full object-contain select-none"
+                            draggable={false}
+                        />
+                    )}
                 </motion.div>
             )}
 

@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { User, Transaction } from '../types';
-import { getUserTransactions, auth } from '../services/firebase';
+import { getUserTransactions, auth, getApiUrl } from '../services/firebase';
 import { initiateFapshiPayment, checkPaymentStatus } from '../services/fapshi';
 import { useSocket } from '../services/SocketContext';
 import { ArrowUpRight, ArrowDownLeft, Wallet, History, CreditCard, ChevronRight, Smartphone, Building, RefreshCw, ExternalLink, CheckCircle, Info, ArrowRight, Shield } from 'lucide-react';
@@ -194,8 +194,7 @@ const handleWithdraw = async () => {
 
         try {
             const token = await auth.currentUser?.getIdToken();
-            const rawUrl = (import.meta.env.VITE_SOCKET_URL || '').replace(/\/$/, '');
-            const PROXY_BASE = rawUrl.startsWith('http') ? rawUrl : `https://${rawUrl}`;
+            const PROXY_BASE = getApiUrl();
             const response = await fetch(`${PROXY_BASE}/api/pay/disburse`, {
                 method: 'POST',
                 headers: { 
@@ -250,7 +249,7 @@ const handleWithdraw = async () => {
                         className="fixed top-0 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-royal-950 px-6 py-3 rounded-full font-bold shadow-2xl flex items-center gap-2"
                     >
                         <CheckCircle size={20} />
-                        {activeTab === 'deposit' ? '✅ Deposit Confirmed! Balance Updated.' : '✅ Withdrawal Submitted!'}
+                        {activeTab === 'deposit' ? 'Deposit Confirmed! Balance Updated.' : 'Withdrawal request submitted. Funds reserved for review.'}
                     </motion.div>
                 )}
             </AnimatePresence>
@@ -508,7 +507,7 @@ const handleWithdraw = async () => {
                                         </div>
                                         <div>
                                             <h3 className="text-lg font-bold text-white">{t('withdraw_funds')}</h3>
-                                            <p className="text-sm text-slate-400">Transfer to Mobile Wallet</p>
+                                            <p className="text-sm text-slate-400">Manual Mobile Money verification</p>
                                         </div>
                                     </div>
 
@@ -543,7 +542,7 @@ const handleWithdraw = async () => {
                                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex gap-3 items-start">
                                         <Info className="text-yellow-500 shrink-0 mt-0.5" size={16} />
                                         <p className="text-xs text-yellow-200/80 leading-relaxed">
-                                            {t('withdrawal_info')}. Ensure your number matches your Mobile Money account.
+                                            Funds are reserved immediately, then admin verifies and sends Mobile Money. Most requests are fast; maximum verification is 2 hours. Contact support if it takes longer.
                                         </p>
                                     </div>
 
@@ -552,7 +551,7 @@ const handleWithdraw = async () => {
                                         disabled={isLoading || !amount || !phone}
                                         className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                     >
-                                        {isLoading ? <RefreshCw className="animate-spin" /> : t('withdraw_cash')} <ArrowUpRight size={18} />
+                                        {isLoading ? <RefreshCw className="animate-spin" /> : 'Request Withdrawal'} <ArrowUpRight size={18} />
                                     </button>
                                 </motion.div>
                             )}

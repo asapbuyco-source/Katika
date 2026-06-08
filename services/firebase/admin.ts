@@ -4,6 +4,77 @@ import { db, getApiUrl } from './init';
 import { auth } from './init';
 import { doc, getDoc, collection, query, orderBy, limit, getDocs, onSnapshot } from "firebase/firestore";
 
+export interface AdminWithdrawalRequest {
+    id: string;
+    userId: string;
+    amount: number;
+    phone: string;
+    status: 'pending' | 'completed' | 'rejected' | 'failed';
+    payoutMode?: 'manual' | 'automatic';
+    requestedAt?: string;
+    slaDeadline?: string;
+    transactionPath?: string;
+    userSnapshot?: {
+        name?: string;
+        email?: string;
+        avatar?: string;
+        balanceBefore?: number;
+        balanceAfter?: number;
+    };
+    audit?: {
+        summary?: Record<string, number>;
+        recentTransactions?: Array<{
+            id: string;
+            type: string;
+            amount: number;
+            status: string;
+            date?: string | null;
+            note?: string;
+        }>;
+    };
+    proofImage?: string | null;
+    proofNote?: string;
+    externalReference?: string;
+    rejectionReason?: string;
+}
+
+const adminApiFetch = async (path: string, options: RequestInit = {}) => {
+    const SOCKET_URL = getApiUrl();
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    const headers = new Headers(options.headers || {});
+    headers.set('Authorization', `Bearer ${token}`);
+    if (!headers.has('Content-Type') && options.body) headers.set('Content-Type', 'application/json');
+    const res = await fetch(`${SOCKET_URL}${path}`, { ...options, headers });
+    if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Request failed (${res.status})`);
+    }
+    return res.json();
+};
+
+export const getAdminWithdrawals = async (status: AdminWithdrawalRequest['status'] = 'pending'): Promise<AdminWithdrawalRequest[]> => {
+    const data = await adminApiFetch(`/api/admin/withdrawals?status=${encodeURIComponent(status)}`);
+    return data.withdrawals || [];
+};
+
+export const markWithdrawalPaid = async (
+    id: string,
+    payload: { proofImage?: string; proofNote?: string; externalReference?: string }
+): Promise<void> => {
+    await adminApiFetch(`/api/admin/withdrawals/${id}/mark-paid`, {
+        method: 'POST',
+        body: JSON.stringify(payload)
+    });
+};
+
+export const rejectWithdrawal = async (id: string, reason: string): Promise<void> => {
+    await adminApiFetch(`/api/admin/withdrawals/${id}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason })
+    });
+};
+
 export const banUser = async (userId: string, ban: boolean): Promise<void> => {
     const SOCKET_URL = getApiUrl();
     const token = await auth.currentUser?.getIdToken();

@@ -1,16 +1,17 @@
 
 import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
-import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins, Clock } from 'lucide-react';
+import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins, Clock, UploadCloud, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth, editUserBalance, deleteUserAccount } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth, editUserBalance, deleteUserAccount, getAdminWithdrawals, markWithdrawalPaid, rejectWithdrawal } from '../services/firebase';
+import type { AdminWithdrawalRequest } from '../services/firebase';
 
 interface AdminDashboardProps {
     user: User;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
-    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'reports' | 'system' | 'games' | 'tournaments' | 'server'>('overview');
+    const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'withdrawals' | 'reports' | 'system' | 'games' | 'tournaments' | 'server'>('overview');
     const [searchQuery, setSearchQuery] = useState('');
 
     // -- STATE MANAGEMENT --
@@ -30,6 +31,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     // Bug Reports State
     const [bugReports, setBugReports] = useState<BugReport[]>([]);
     const [loadingBugs, setLoadingBugs] = useState(false);
+
+    // Manual Withdrawal Review State
+    const [withdrawals, setWithdrawals] = useState<AdminWithdrawalRequest[]>([]);
+    const [loadingWithdrawals, setLoadingWithdrawals] = useState(false);
+    const [withdrawalError, setWithdrawalError] = useState<string | null>(null);
+    const [proofInputs, setProofInputs] = useState<Record<string, { proofImage?: string; proofNote?: string; externalReference?: string; rejectReason?: string }>>({});
+    const [processingWithdrawalId, setProcessingWithdrawalId] = useState<string | null>(null);
 
     // Game Config State
     const [gameConfigs, setGameConfigs] = useState<Record<string, string>>({});
@@ -93,6 +101,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         if (activeTab === 'tournaments') {
             fetchAdminTournaments();
         }
+        if (activeTab === 'withdrawals') {
+            fetchWithdrawals();
+        }
         if (activeTab === 'server') {
             fetchServerStatus();
             const interval = setInterval(fetchServerStatus, 5000);
@@ -132,6 +143,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
     const fetchAdminTournaments = async () => {
         const data = await getTournaments();
         setAdminTournaments(data);
+    };
+
+    const fetchWithdrawals = async () => {
+        setLoadingWithdrawals(true);
+        setWithdrawalError(null);
+        try {
+            setWithdrawals(await getAdminWithdrawals('pending'));
+        } catch (e: any) {
+            console.error('Withdrawal queue fetch error', e);
+            setWithdrawalError(e.message || 'Failed to load withdrawals');
+        }
+        setLoadingWithdrawals(false);
     };
 
     const handleSelectTournament = async (id: string) => {
@@ -205,6 +228,64 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             console.error('Delete account failed:', e);
             alert(e.message || 'Delete account failed');
         }
+    };
+
+    const updateWithdrawalInput = (id: string, patch: Partial<{ proofImage: string; proofNote: string; externalReference: string; rejectReason: string }>) => {
+        setProofInputs(prev => ({ ...prev, [id]: { ...(prev[id] || {}), ...patch } }));
+    };
+
+    const handleProofUpload = (withdrawalId: string, file?: File) => {
+        if (!file) return;
+        if (file.size > 550000) {
+            alert('Screenshot is too large. Please crop it or choose a smaller image under 550KB.');
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = () => updateWithdrawalInput(withdrawalId, { proofImage: String(reader.result || '') });
+        reader.onerror = () => alert('Could not read that screenshot.');
+        reader.readAsDataURL(file);
+    };
+
+    const handleMarkWithdrawalPaid = async (withdrawal: AdminWithdrawalRequest) => {
+        const input = proofInputs[withdrawal.id] || {};
+        if (!input.proofImage && !input.externalReference && !input.proofNote) {
+            alert('Add a screenshot, payment reference, or note before marking paid.');
+            return;
+        }
+        if (!window.confirm(`Mark ${withdrawal.amount.toLocaleString()} FCFA paid to ${withdrawal.phone}?`)) return;
+        setProcessingWithdrawalId(withdrawal.id);
+        try {
+            await markWithdrawalPaid(withdrawal.id, {
+                proofImage: input.proofImage,
+                proofNote: input.proofNote,
+                externalReference: input.externalReference
+            });
+            setWithdrawals(prev => prev.filter(item => item.id !== withdrawal.id));
+            addLog('Withdrawal Paid', `${withdrawal.userSnapshot?.name || withdrawal.userId} - ${withdrawal.amount} FCFA`, 'info');
+        } catch (e: any) {
+            console.error('Mark withdrawal paid failed:', e);
+            alert(e.message || 'Failed to mark withdrawal paid');
+        }
+        setProcessingWithdrawalId(null);
+    };
+
+    const handleRejectWithdrawal = async (withdrawal: AdminWithdrawalRequest) => {
+        const reason = (proofInputs[withdrawal.id]?.rejectReason || '').trim();
+        if (!reason) {
+            alert('Add a rejection reason first.');
+            return;
+        }
+        if (!window.confirm(`Reject and refund ${withdrawal.amount.toLocaleString()} FCFA to this user?`)) return;
+        setProcessingWithdrawalId(withdrawal.id);
+        try {
+            await rejectWithdrawal(withdrawal.id, reason);
+            setWithdrawals(prev => prev.filter(item => item.id !== withdrawal.id));
+            addLog('Withdrawal Rejected', `${withdrawal.userSnapshot?.name || withdrawal.userId} - refunded`, 'warning');
+        } catch (e: any) {
+            console.error('Reject withdrawal failed:', e);
+            alert(e.message || 'Failed to reject withdrawal');
+        }
+        setProcessingWithdrawalId(null);
     };
 
     const handleForceWin = async (match: TournamentMatch, winnerId: string) => {
@@ -290,6 +371,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
         return num.toLocaleString();
     };
 
+    const formatWithdrawalTime = (iso?: string) => {
+        if (!iso) return 'Unknown';
+        const date = new Date(iso);
+        if (Number.isNaN(date.getTime())) return 'Unknown';
+        return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    const getSlaLabel = (iso?: string) => {
+        if (!iso) return { label: 'No SLA', overdue: false };
+        const diff = new Date(iso).getTime() - Date.now();
+        if (Number.isNaN(diff)) return { label: 'No SLA', overdue: false };
+        if (diff <= 0) return { label: 'Overdue', overdue: true };
+        const minutes = Math.ceil(diff / 60000);
+        if (minutes >= 60) return { label: `${Math.floor(minutes / 60)}h ${minutes % 60}m left`, overdue: false };
+        return { label: `${minutes}m left`, overdue: false };
+    };
+
     const filteredUsers = usersList.filter(u =>
         u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         u.id.toLowerCase().includes(searchQuery.toLowerCase())
@@ -335,7 +433,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
 
             {/* Admin Navigation */}
             <div className="flex gap-4 mb-8 border-b border-white/10 overflow-x-auto">
-                {['overview', 'users', 'reports', 'system', 'games', 'tournaments', 'server'].map(tab => (
+                {['overview', 'users', 'withdrawals', 'reports', 'system', 'games', 'tournaments', 'server'].map(tab => (
                     <button
                         key={tab}
                         onClick={() => setActiveTab(tab as any)}
@@ -362,6 +460,175 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                             </div>
                         ))}
                     </div>
+                </div>
+            )}
+
+            {/* WITHDRAWALS TAB */}
+            {activeTab === 'withdrawals' && (
+                <div className="space-y-5">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                            <h2 className="text-xl font-bold text-white">Manual Withdrawal Queue</h2>
+                            <p className="text-sm text-slate-400">Verify history, send Mobile Money manually, attach proof, then mark paid.</p>
+                        </div>
+                        <button
+                            onClick={fetchWithdrawals}
+                            disabled={loadingWithdrawals}
+                            className="px-4 py-2 bg-white/10 hover:bg-white/15 text-white rounded-lg text-sm font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+                        >
+                            <RefreshCw size={16} className={loadingWithdrawals ? 'animate-spin' : ''} /> Refresh
+                        </button>
+                    </div>
+
+                    {withdrawalError && (
+                        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl text-sm text-red-300 flex items-center gap-2">
+                            <AlertCircle size={16} /> {withdrawalError}
+                        </div>
+                    )}
+
+                    {loadingWithdrawals ? (
+                        <div className="p-8 text-center text-slate-500 flex items-center justify-center gap-2">
+                            <RefreshCw className="animate-spin" size={16} /> Loading withdrawal queue...
+                        </div>
+                    ) : withdrawals.length === 0 ? (
+                        <div className="glass-panel rounded-2xl border border-white/5 p-10 text-center">
+                            <CheckCircle className="text-green-400 mx-auto mb-3" size={36} />
+                            <h3 className="font-bold text-white mb-1">No Pending Withdrawals</h3>
+                            <p className="text-sm text-slate-500">New user requests will appear here after their balance is reserved.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {withdrawals.map((withdrawal) => {
+                                const input = proofInputs[withdrawal.id] || {};
+                                const sla = getSlaLabel(withdrawal.slaDeadline);
+                                const summary = withdrawal.audit?.summary || {};
+                                const recent = withdrawal.audit?.recentTransactions || [];
+                                return (
+                                    <div key={withdrawal.id} className={`glass-panel rounded-2xl border p-5 ${sla.overdue ? 'border-red-500/40' : 'border-white/5'}`}>
+                                        <div className="flex flex-col xl:flex-row xl:items-start justify-between gap-5">
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex flex-wrap items-center gap-3 mb-3">
+                                                    <div className="text-2xl font-black text-white">{withdrawal.amount.toLocaleString()} FCFA</div>
+                                                    <div className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${sla.overdue ? 'bg-red-500/15 text-red-300' : 'bg-yellow-500/15 text-yellow-300'}`}>
+                                                        {sla.label}
+                                                    </div>
+                                                    <div className="px-2 py-1 rounded-md text-[10px] font-black uppercase bg-blue-500/15 text-blue-300">
+                                                        {withdrawal.payoutMode || 'manual'}
+                                                    </div>
+                                                </div>
+                                                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+                                                    <div>
+                                                        <div className="text-xs text-slate-500 uppercase font-bold">User</div>
+                                                        <div className="text-white font-bold truncate">{withdrawal.userSnapshot?.name || 'Unknown user'}</div>
+                                                        <div className="text-xs text-slate-500 font-mono truncate">{withdrawal.userId}</div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs text-slate-500 uppercase font-bold">Mobile Money</div>
+                                                        <div className="text-white font-mono font-bold">{withdrawal.phone}</div>
+                                                        <div className="text-xs text-slate-500">Requested {formatWithdrawalTime(withdrawal.requestedAt)}</div>
+                                                    </div>
+                                                    <div>
+                                                        <div className="text-xs text-slate-500 uppercase font-bold">Balance Reserved</div>
+                                                        <div className="text-white font-mono font-bold">
+                                                            {(withdrawal.userSnapshot?.balanceBefore || 0).toLocaleString()} {'->'} {(withdrawal.userSnapshot?.balanceAfter || 0).toLocaleString()}
+                                                        </div>
+                                                        <div className="text-xs text-slate-500">Funds already removed from available balance</div>
+                                                    </div>
+                                                </div>
+
+                                                <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
+                                                    {[
+                                                        ['Deposits', summary.deposits || 0],
+                                                        ['Winnings', summary.winnings || 0],
+                                                        ['Stakes', summary.stakes || 0],
+                                                        ['Refunds', summary.refunds || 0],
+                                                        ['Withdrawn', summary.completedWithdrawals || 0],
+                                                    ].map(([label, value]) => (
+                                                        <div key={label as string} className="bg-black/20 rounded-lg p-3 border border-white/5">
+                                                            <div className="text-[10px] text-slate-500 uppercase font-bold">{label}</div>
+                                                            <div className="text-sm text-white font-mono font-bold">{Number(value).toLocaleString()}</div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+
+                                                <div className="mt-4">
+                                                    <div className="text-xs text-slate-500 uppercase font-bold mb-2">Recent Trail</div>
+                                                    <div className="space-y-1 max-h-28 overflow-y-auto custom-scrollbar">
+                                                        {recent.length === 0 ? (
+                                                            <div className="text-xs text-slate-500">No recent transaction trail available.</div>
+                                                        ) : recent.slice(0, 8).map(tx => (
+                                                            <div key={tx.id} className="grid grid-cols-[1fr_auto_auto] gap-3 text-xs bg-black/15 rounded-md px-3 py-2">
+                                                                <span className="text-slate-300 capitalize truncate">{tx.type}</span>
+                                                                <span className="font-mono text-white">{tx.amount > 0 ? '+' : ''}{tx.amount.toLocaleString()}</span>
+                                                                <span className={`${tx.status === 'completed' ? 'text-green-400' : tx.status === 'pending' ? 'text-yellow-400' : 'text-red-400'} uppercase font-bold`}>
+                                                                    {tx.status}
+                                                                </span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            <div className="w-full xl:w-80 space-y-3">
+                                                <label className="block">
+                                                    <span className="text-xs text-slate-500 uppercase font-bold mb-1 block">Payment Reference</span>
+                                                    <input
+                                                        value={input.externalReference || ''}
+                                                        onChange={(e) => updateWithdrawalInput(withdrawal.id, { externalReference: e.target.value })}
+                                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-green-500 outline-none"
+                                                        placeholder="MoMo reference"
+                                                    />
+                                                </label>
+                                                <label className="block">
+                                                    <span className="text-xs text-slate-500 uppercase font-bold mb-1 block">Proof Note</span>
+                                                    <textarea
+                                                        value={input.proofNote || ''}
+                                                        onChange={(e) => updateWithdrawalInput(withdrawal.id, { proofNote: e.target.value })}
+                                                        className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:border-green-500 outline-none min-h-20 resize-y"
+                                                        placeholder="Sent manually by admin..."
+                                                    />
+                                                </label>
+                                                <label className="flex items-center justify-center gap-2 cursor-pointer bg-white/10 hover:bg-white/15 text-white rounded-lg px-3 py-2 text-sm font-bold">
+                                                    <UploadCloud size={16} /> Screenshot
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        className="hidden"
+                                                        onChange={(e) => handleProofUpload(withdrawal.id, e.target.files?.[0])}
+                                                    />
+                                                </label>
+                                                {input.proofImage && (
+                                                    <img src={input.proofImage} alt="Payment proof preview" className="w-full max-h-32 object-contain rounded-lg border border-white/10 bg-black/30" />
+                                                )}
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button
+                                                        onClick={() => handleMarkWithdrawalPaid(withdrawal)}
+                                                        disabled={processingWithdrawalId === withdrawal.id}
+                                                        className="py-2 bg-green-500 hover:bg-green-400 text-royal-950 font-black rounded-lg text-sm disabled:opacity-50 flex items-center justify-center gap-1"
+                                                    >
+                                                        <CheckCircle size={15} /> Paid
+                                                    </button>
+                                                    <button
+                                                        onClick={() => handleRejectWithdrawal(withdrawal)}
+                                                        disabled={processingWithdrawalId === withdrawal.id}
+                                                        className="py-2 bg-red-500/90 hover:bg-red-400 text-white font-black rounded-lg text-sm disabled:opacity-50 flex items-center justify-center gap-1"
+                                                    >
+                                                        <XCircle size={15} /> Reject
+                                                    </button>
+                                                </div>
+                                                <input
+                                                    value={input.rejectReason || ''}
+                                                    onChange={(e) => updateWithdrawalInput(withdrawal.id, { rejectReason: e.target.value })}
+                                                    className="w-full bg-black/30 border border-white/10 rounded-lg px-3 py-2 text-xs text-white focus:border-red-500 outline-none"
+                                                    placeholder="Rejection reason for refund"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
             )}
 
