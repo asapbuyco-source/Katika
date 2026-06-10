@@ -23,6 +23,7 @@ export const Finance: React.FC<FinanceProps> = ({ user, onTopUp }) => {
     const [amount, setAmount] = useState('');
     const [provider, setProvider] = useState<'mtn' | 'orange'>('mtn');
     const [phone, setPhone] = useState('');
+    const [momoName, setMomoName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [paymentLink, setPaymentLink] = useState<string | null>(null);
     const [transId, setTransId] = useState<string | null>(null);
@@ -175,7 +176,7 @@ const handleWithdraw = async () => {
         if (withdrawingRef.current) return;
         withdrawingRef.current = true;
 
-        if (!amount || !phone) { setErrorMsg('Please fill in the amount and phone number.'); withdrawingRef.current = false; return; }
+        if (!amount || !phone || !momoName.trim()) { setErrorMsg('Please fill in the amount, phone number, and MoMo account name.'); withdrawingRef.current = false; return; }
         const withdrawAmount = parseInt(amount);
         if (isNaN(withdrawAmount) || withdrawAmount < 1000) {
             setErrorMsg('Minimum withdrawal is 1,000FCFA.');
@@ -185,6 +186,17 @@ const handleWithdraw = async () => {
         if (withdrawAmount > user.balance) { setErrorMsg('Insufficient balance for this withdrawal.'); withdrawingRef.current = false; return; }
         if (!/^6\d{8}$/.test(phone.replace(/\s/g, ''))) {
             setErrorMsg('Invalid phone number. Must start with 6 and be 9 digits.');
+            withdrawingRef.current = false;
+            return;
+        }
+        const cleanMomoName = momoName.trim().replace(/\s+/g, ' ');
+        if (cleanMomoName.length < 2) {
+            setErrorMsg('Enter the name shown on the Mobile Money account.');
+            withdrawingRef.current = false;
+            return;
+        }
+        const confirmed = window.confirm(`Confirm withdrawal to ${phone.replace(/\s/g, '')}\n\nMoMo account name: ${cleanMomoName}\n\nOnly continue if this name matches the Mobile Money account for this number.`);
+        if (!confirmed) {
             withdrawingRef.current = false;
             return;
         }
@@ -201,7 +213,7 @@ const handleWithdraw = async () => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${token}` 
                 },
-                body: JSON.stringify({ amount: withdrawAmount, phone: phone.replace(/\s/g, ''), userId: user.id })
+                body: JSON.stringify({ amount: withdrawAmount, phone: phone.replace(/\s/g, ''), momoName: cleanMomoName, userId: user.id })
             });
             const data = await response.json();
 
@@ -211,6 +223,7 @@ const handleWithdraw = async () => {
                 setShowSuccess(true);
                 setAmount('');
                 setPhone('');
+                setMomoName('');
                 setTimeout(() => setShowSuccess(false), 4000);
                 // Refresh transaction history
                 const history = await getUserTransactions(user.id);
@@ -539,16 +552,29 @@ const handleWithdraw = async () => {
                                         </div>
                                     </div>
 
+                                    <div>
+                                        <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 block">MoMo Account Name</label>
+                                        <input
+                                            type="text"
+                                            value={momoName}
+                                            onChange={(e) => setMomoName(e.target.value)}
+                                            className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 px-4 text-white font-bold focus:border-red-500 transition-colors"
+                                            placeholder="Name shown by MTN/Orange"
+                                            maxLength={80}
+                                        />
+                                        <p className="text-[11px] text-slate-500 mt-1">Enter the exact name registered on this Mobile Money number.</p>
+                                    </div>
+
                                     <div className="p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex gap-3 items-start">
                                         <Info className="text-yellow-500 shrink-0 mt-0.5" size={16} />
                                         <p className="text-xs text-yellow-200/80 leading-relaxed">
-                                            Funds are reserved immediately, then admin verifies and sends Mobile Money. Most requests are fast; maximum verification is 2 hours. Contact support if it takes longer.
+                                            Confirm your Mobile Money account name before submitting. Funds are reserved immediately, then admin verifies and sends Mobile Money. Most requests are fast; maximum verification is 2 hours.
                                         </p>
                                     </div>
 
                                     <button
                                         onClick={handleWithdraw}
-                                        disabled={isLoading || !amount || !phone}
+                                        disabled={isLoading || !amount || !phone || !momoName.trim()}
                                         className="w-full py-4 bg-white hover:bg-slate-200 text-royal-950 font-black rounded-xl shadow-lg transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                     >
                                         {isLoading ? <RefreshCw className="animate-spin" /> : 'Request Withdrawal'} <ArrowUpRight size={18} />

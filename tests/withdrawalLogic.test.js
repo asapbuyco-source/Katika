@@ -2,14 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { validateWithdrawalRequest } from '../server/withdrawalLogic.js';
 
 describe('Withdrawal validation', () => {
-    const validBody = { amount: 1000, phone: '670 000 000', userId: 'user_1' };
+    const validBody = { amount: 1000, phone: '670 000 000', momoName: 'Test User', userId: 'user_1' };
 
     it('accepts a valid Cameroon mobile-money withdrawal request', () => {
         expect(validateWithdrawalRequest(validBody, 'user_1')).toEqual({
             valid: true,
             amount: 1000,
             cleanPhone: '670000000',
+            cleanMomoName: 'Test User',
             userId: 'user_1'
+        });
+    });
+
+    it('requires the Mobile Money account name', () => {
+        expect(validateWithdrawalRequest({ ...validBody, momoName: '' }, 'user_1')).toMatchObject({
+            valid: false,
+            status: 400,
+            error: 'Enter the Mobile Money account name for this number.'
         });
     });
 

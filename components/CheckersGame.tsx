@@ -262,6 +262,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             if (serverTurn) {
                 setTurn(serverTurn === user.id ? 'me' : 'opponent');
             }
+            if (socketGame.gameState?.mustJumpFrom !== undefined) {
+                setMustJumpFrom(socketGame.gameState.mustJumpFrom);
+            }
 
             if (socketGame.winner) {
                 setIsGameOver(true);
@@ -308,20 +311,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     // B4 Fix: P2P State Reconciliation — sync board + turn from server on every gameState change.
     // CRITICAL: `turn` is at socketGame.turn (room level), NOT socketGame.gameState.turn.
     // The server's sanitizeRoomForClient puts it at the top level of the payload.
-    useEffect(() => {
-        if (!isP2P || !socketGame) return;
-        const gs = socketGame.gameState;
-        if (gs?.pieces) {
-            const mapped = gs.pieces.map((p: any) => ({
-                ...p, player: p.owner === user.id ? 'me' : 'opponent'
-            }));
-            setPieces(mapped);
-        }
-        // Read turn from room level first, fall back to gameState.turn
-        const serverTurn = socketGame.turn ?? gs?.turn;
-        if (serverTurn) setTurn(serverTurn === user.id ? 'me' : 'opponent');
-        if (gs?.mustJumpFrom !== undefined) setMustJumpFrom(gs.mustJumpFrom);
-    }, [socketGame?.gameState?.pieces, socketGame?.turn, socketGame?.gameState?.mustJumpFrom, user.id, isP2P]);
+    // P2P board reconciliation is handled in the initialization effect above.
 
     // --- SOCKET GAME_OVER LISTENER ---
     // FIX: Must call onGameEnd here so that handleGameEnd in useGameController
@@ -824,6 +814,30 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
     const pieceMap = useMemo(() => new Map(pieces.map(p => [`${p.r},${p.c}`, p])), [pieces]);
     const validMoveMap = useMemo(() => new Map(validMoves.map(m => [`${m.r},${m.c}`, m])), [validMoves]);
+    const boardCells = useMemo(() => (
+        Array.from({ length: 10 }).map((_, rIdx) => Array.from({ length: 10 }).map((_, cIdx) => {
+            const r = forwardDir === 1 ? 9 - rIdx : rIdx;
+            const c = forwardDir === 1 ? 9 - cIdx : cIdx;
+            const key = `${r},${c}`;
+            const piece = pieceMap.get(key);
+            return <CheckersCell
+                key={key}
+                r={r}
+                c={c}
+                isDark={(r + c) % 2 === 1}
+                piece={piece}
+                isSelected={selectedPieceId === piece?.id}
+                isHighlighted={highlightedPieces.includes(piece?.id || '')}
+                validMove={validMoveMap.get(key)}
+                isLastFrom={lastMove?.from === key}
+                isLastTo={lastMove?.to === key}
+                onPieceClick={handlePieceClick}
+                onMoveClick={handleMoveClick}
+                isMeTurn={turn === 'me'}
+                rotate={forwardDir}
+            />;
+        }))
+    ), [forwardDir, handleMoveClick, handlePieceClick, highlightedPieces, lastMove, pieceMap, selectedPieceId, turn, validMoveMap]);
 
     const getOpponentProfile = () => {
         if (!isP2P) return { name: lidraughtsId ? "Lidraughts AI" : "Vantage Bot", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=checkers" };
@@ -993,27 +1007,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             {/* BOARD */}
             <div className={`relative w-full max-w-[500px] aspect-square bg-[#1a103c] rounded-xl shadow-2xl p-1 md:p-2 border-4 ${turn === 'me' ? 'border-gold-500/50' : 'border-royal-800'} transition-colors duration-300`}>
                 <div className={`w-full h-full grid grid-cols-10 grid-rows-10 border border-white/10 overflow-hidden rounded-lg transition-all duration-700`}>
-                    {Array.from({ length: 10 }).map((_, rIdx) => Array.from({ length: 10 }).map((_, cIdx) => {
-                        const r = forwardDir === 1 ? 9 - rIdx : rIdx;
-                        const c = forwardDir === 1 ? 9 - cIdx : cIdx;
-                        const key = `${r},${c}`;
-                        return <CheckersCell
-                            key={key}
-                            r={r}
-                            c={c}
-                            isDark={(r + c) % 2 === 1}
-                            piece={pieceMap.get(key)}
-                            isSelected={selectedPieceId === pieceMap.get(key)?.id}
-                            isHighlighted={highlightedPieces.includes(pieceMap.get(key)?.id || '')}
-                            validMove={validMoveMap.get(key)}
-                            isLastFrom={lastMove?.from === key}
-                            isLastTo={lastMove?.to === key}
-                            onPieceClick={handlePieceClick}
-                            onMoveClick={handleMoveClick}
-                            isMeTurn={turn === 'me'}
-                            rotate={forwardDir}
-                        />;
-                    }))}
+                    {boardCells}
                 </div>
             </div>
 

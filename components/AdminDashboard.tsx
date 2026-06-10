@@ -525,6 +525,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                     <div>
                                                         <div className="text-xs text-slate-500 uppercase font-bold">Mobile Money</div>
                                                         <div className="text-white font-mono font-bold">{withdrawal.phone}</div>
+                                                        <div className="text-xs text-slate-400 truncate">{withdrawal.momoName || 'Name not provided'}</div>
                                                         <div className="text-xs text-slate-500">Requested {formatWithdrawalTime(withdrawal.requestedAt)}</div>
                                                     </div>
                                                     <div>

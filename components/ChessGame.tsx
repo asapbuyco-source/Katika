@@ -20,6 +20,7 @@ interface ChessGameProps {
 }
 
 const PIECE_VALUES: Record<string, number> = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+const PIECE_TYPE_UPPER: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
 
 const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -325,7 +326,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     useEffect(() => {
         setTimeRemaining({ w: baseTime, b: baseTime });
     }, [baseTime]);
-    const moveHistory = game.history();
+    const moveHistory = useMemo(() => game.history(), [game]);
+    const verboseHistory = useMemo(() => game.history({ verbose: true }), [game]);
     const displayGame = useMemo(() => {
         if (viewIndex === moveHistory.length - 1 || viewIndex === -1) return game;
         const tempGame = new Chess();
@@ -335,7 +337,32 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         return tempGame;
     }, [game, viewIndex, moveHistory.length]); // Optimized dep array
 
-    const board = displayGame.board();
+    const board = useMemo(() => displayGame.board(), [displayGame]);
+    const lastMoveSquares = useMemo(() => {
+        if (moveHistory.length === 0) return new Set<string>();
+        const hist = displayGame.history({ verbose: true });
+        const idx = viewIndex === -1 ? hist.length - 1 : viewIndex;
+        const lastMoveDetails = hist?.[idx];
+        return new Set(lastMoveDetails ? [lastMoveDetails.from, lastMoveDetails.to] : []);
+    }, [displayGame, moveHistory.length, viewIndex]);
+    const capturedPieces = useMemo(() => {
+        const mine: string[] = [];
+        const myLosses: string[] = [];
+        const opponentCaptures: string[] = [];
+        const opponentLosses: string[] = [];
+        if (!myColor) return { mine, myLosses, opponentCaptures, opponentLosses };
+        verboseHistory.forEach((m: any) => {
+            if (!m.captured) return;
+            if (m.color === myColor) {
+                mine.push(m.captured);
+                opponentCaptures.push(m.captured);
+            } else {
+                myLosses.push(m.captured);
+                opponentLosses.push(m.captured);
+            }
+        });
+        return { mine, myLosses, opponentCaptures, opponentLosses };
+    }, [verboseHistory, myColor]);
 
     // State Ref to allow stable callbacks
     const stateRef = useRef({
@@ -727,6 +754,43 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     const opponentColor = myColor === 'w' ? 'b' : myColor === 'b' ? 'w' : 'b';
     const opponent = !isP2P ? { name: "Vantage AI", avatar: "https://api.dicebear.com/7.x/bottts/svg?seed=chess" }
         : (socketGame?.profiles ? socketGame.profiles[socketGame.players.find((id: string) => id !== user.id)] : { name: "Opponent", avatar: "https://i.pravatar.cc/150?u=opp" });
+    const boardCells = useMemo(() => {
+        if (!myColor) return null;
+        return board.map((row: any[], rowIndex: number) =>
+            row.map((_piece: any, colIndex: number) => {
+                const actualRow = myColor === 'w' ? rowIndex : 7 - rowIndex;
+                const actualCol = myColor === 'w' ? colIndex : 7 - colIndex;
+                const visualPiece = board[actualRow]?.[actualCol];
+
+                const file = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'][actualCol];
+                const rank = 8 - actualRow;
+                const square = `${file}${rank}` as Square;
+
+                const isDark = (actualRow + actualCol) % 2 === 1;
+                const option = optionSquares[square];
+                const isKingInCheck = visualPiece?.type === 'k' && visualPiece.color === displayGame.turn() && displayGame.inCheck();
+
+                return (
+                    <ChessSquare
+                        key={square}
+                        square={square}
+                        isDark={isDark}
+                        isSelected={selectedSquare === square}
+                        isLastMove={lastMoveSquares.has(square)}
+                        isKingInCheck={isKingInCheck}
+                        piece={visualPiece}
+                        moveOption={option}
+                        onClick={onSquareClick}
+                        onDragStart={onDragStart}
+                        onDrop={onDrop}
+                        isDragging={draggedSquare === square}
+                        rankLabel={(actualCol === 0 && myColor === 'w') || (actualCol === 7 && myColor === 'b') ? rank : null}
+                        fileLabel={(actualRow === 7 && myColor === 'w') || (actualRow === 0 && myColor === 'b') ? file : null}
+                    />
+                );
+            })
+        );
+    }, [board, displayGame, draggedSquare, lastMoveSquares, myColor, onDragStart, onDrop, onSquareClick, optionSquares, selectedSquare]);
 
     // BUG 4 FIX: Show a skeleton board while piece SVGs are loading.
     // This prevents the blank/empty board flash on first render.
@@ -860,7 +924,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     </button>
                     <button
                         onClick={undoLastMove}
-                        disabled={game.history().length === 0 || isP2P || isGameOver}
+                        disabled={moveHistory.length === 0 || isP2P || isGameOver}
                         className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-gold-400 disabled:opacity-30 disabled:cursor-not-allowed"
                         title="Undo last move"
                     >
@@ -906,35 +970,20 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     </div>
                     {/* Captured pieces display for Opponent */}
                     <div className="flex items-center gap-0.5 ml-2 h-6">
-                        {(() => {
-                            const verboseHistory = game.history({ verbose: true });
-                            const myCaptures: string[] = []; 
-                            const opponentLosses: string[] = []; 
-                            verboseHistory.forEach((m: any) => {
-                                if (!m.captured) return;
-                                if (m.color === opponentColor) myCaptures.push(m.captured);
-                                else opponentLosses.push(m.captured);
-                            });
-                            const upper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
-                            return (
-                                <>
-                                    {myCaptures.map((c, i) => (
-                                        <img key={`cap-${i}`}
-                                            src={`https://lichess1.org/assets/piece/cburnett/${myColor}${upper[c]}.svg`}
-                                            className="w-4 h-4 object-contain opacity-80"
-                                            alt={c} draggable={false}
-                                        />
-                                    ))}
-                                    {opponentLosses.map((c, i) => (
-                                        <img key={`lost-${i}`}
-                                            src={`https://lichess1.org/assets/piece/cburnett/${opponentColor}${upper[c]}.svg`}
-                                            className="w-4 h-4 object-contain opacity-40"
-                                            alt={c} draggable={false}
-                                        />
-                                    ))}
-                                </>
-                            );
-                        })()}
+                        {capturedPieces.opponentCaptures.map((c, i) => (
+                            <img key={`opp-cap-${i}`}
+                                src={`https://lichess1.org/assets/piece/cburnett/${myColor}${PIECE_TYPE_UPPER[c]}.svg`}
+                                className="w-4 h-4 object-contain opacity-80"
+                                alt={c} draggable={false}
+                            />
+                        ))}
+                        {capturedPieces.opponentLosses.map((c, i) => (
+                            <img key={`opp-lost-${i}`}
+                                src={`https://lichess1.org/assets/piece/cburnett/${opponentColor}${PIECE_TYPE_UPPER[c]}.svg`}
+                                className="w-4 h-4 object-contain opacity-40"
+                                alt={c} draggable={false}
+                            />
+                        ))}
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === opponentColor ? 'bg-red-500/20 border-red-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
@@ -947,50 +996,7 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
             <div className={`relative w-full max-w-[600px] aspect-square bg-[#302e2b] rounded-xl shadow-2xl p-1 md:p-2 border-4 border-[#302e2b] transition-colors duration-300`}>
                 {/* Board Grid */}
                 <div className={`w-full h-full grid grid-cols-8 grid-rows-8 border border-white/10`}>
-                    {board.map((row: any[], rowIndex: number) =>
-                        row.map((piece: any, colIndex: number) => {
-                            const actualRow = myColor === 'w' ? rowIndex : 7 - rowIndex;
-                            const actualCol = myColor === 'w' ? colIndex : 7 - colIndex;
-                            const visualPiece = board[actualRow]?.[actualCol];
-
-                            const file = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'][actualCol];
-                            const rank = 8 - actualRow;
-                            const square = `${file}${rank}` as Square;
-
-                            const isDark = (actualRow + actualCol) % 2 === 1;
-                            const option = optionSquares[square];
-                            const isKingInCheck = visualPiece?.type === 'k' && visualPiece.color === displayGame.turn() && displayGame.inCheck();
-
-                            let isLastMove = false;
-                            if ((viewIndex === -1 && moveHistory.length > 0) || (viewIndex >= 0 && moveHistory?.[viewIndex])) {
-                                const hist = displayGame.history({ verbose: true });
-                                const idx = viewIndex === -1 ? hist.length - 1 : viewIndex;
-                                const lastMoveDetails = hist?.[idx];
-                                if (lastMoveDetails && (lastMoveDetails.to === square || lastMoveDetails.from === square)) {
-                                    isLastMove = true;
-                                }
-                            }
-
-                            return (
-                                <ChessSquare
-                                    key={square}
-                                    square={square}
-                                    isDark={isDark}
-                                    isSelected={selectedSquare === square}
-                                    isLastMove={isLastMove}
-                                    isKingInCheck={isKingInCheck}
-                                    piece={visualPiece}
-                                    moveOption={option}
-                                    onClick={onSquareClick}
-                                    onDragStart={onDragStart}
-                                    onDrop={onDrop}
-                                    isDragging={draggedSquare === square}
-                                    rankLabel={(actualCol === 0 && myColor === 'w') || (actualCol === 7 && myColor === 'b') ? rank : null}
-                                    fileLabel={(actualRow === 7 && myColor === 'w') || (actualRow === 0 && myColor === 'b') ? file : null}
-                                />
-                            );
-                        })
-                    )}
+                    {boardCells}
                 </div>
             </div>
 
@@ -1011,37 +1017,20 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                     </div>
                     {/* Captured pieces display */}
                     <div className="flex items-center gap-0.5 ml-2 h-6">
-                        {(() => {
-                            const verboseHistory = game.history({ verbose: true });
-                            // m.color = who moved; m.captured = type of piece taken (always lowercase)
-                            const opponentCaptures: string[] = []; // pieces I captured (opponent lost)
-                            const myLosses: string[] = [];         // pieces opponent captured (I lost)
-                            verboseHistory.forEach((m: any) => {
-                                if (!m.captured) return;
-                                if (m.color === myColor) opponentCaptures.push(m.captured);
-                                else myLosses.push(m.captured);
-                            });
-                            const oppPieceColor = myColor === 'w' ? 'b' : 'w';
-                            const upper: Record<string, string> = { p: 'P', n: 'N', b: 'B', r: 'R', q: 'Q', k: 'K' };
-                            return (
-                                <>
-                                    {opponentCaptures.map((c, i) => (
-                                        <img key={`cap-${i}`}
-                                            src={`https://lichess1.org/assets/piece/cburnett/${oppPieceColor}${upper[c]}.svg`}
-                                            className="w-4 h-4 object-contain opacity-80"
-                                            alt={c} draggable={false}
-                                        />
-                                    ))}
-                                    {myLosses.map((c, i) => (
-                                        <img key={`lost-${i}`}
-                                            src={`https://lichess1.org/assets/piece/cburnett/${myColor}${upper[c]}.svg`}
-                                            className="w-4 h-4 object-contain opacity-40"
-                                            alt={c} draggable={false}
-                                        />
-                                    ))}
-                                </>
-                            );
-                        })()}
+                        {capturedPieces.mine.map((c, i) => (
+                            <img key={`my-cap-${i}`}
+                                src={`https://lichess1.org/assets/piece/cburnett/${opponentColor}${PIECE_TYPE_UPPER[c]}.svg`}
+                                className="w-4 h-4 object-contain opacity-80"
+                                alt={c} draggable={false}
+                            />
+                        ))}
+                        {capturedPieces.myLosses.map((c, i) => (
+                            <img key={`my-lost-${i}`}
+                                src={`https://lichess1.org/assets/piece/cburnett/${myColor}${PIECE_TYPE_UPPER[c]}.svg`}
+                                className="w-4 h-4 object-contain opacity-40"
+                                alt={c} draggable={false}
+                            />
+                        ))}
                     </div>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-colors ${game.turn() === myColor ? 'bg-gold-500/20 border-gold-500 text-white animate-pulse' : 'bg-black/30 border-white/10 text-slate-400'}`}>
@@ -1091,15 +1080,14 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                                     <ChevronRight size={18} className="rotate-180 text-white" />
                                 </button>
                                 <span className="text-sm text-slate-400">
-                                    {game.turn() === 'w' ? `White to move (${game.history().length})` : `Black to move (${game.history().length})`}
+                                    {game.turn() === 'w' ? `White to move (${moveHistory.length})` : `Black to move (${moveHistory.length})`}
                                 </span>
-                                <button onClick={() => setViewIndex(Math.max(0, game.history().length - 1))} disabled={viewIndex === game.history().length - 1 || viewIndex === -1} className="p-2 bg-white/5 rounded-lg disabled:opacity-30">
+                                <button onClick={() => setViewIndex(Math.max(0, moveHistory.length - 1))} disabled={viewIndex === moveHistory.length - 1 || viewIndex === -1} className="p-2 bg-white/5 rounded-lg disabled:opacity-30">
                                     <ChevronRight size={18} className="text-white" />
                                 </button>
                             </div>
                             <div className="flex-1 overflow-y-auto custom-scrollbar">
                                 {(() => {
-                                    const verboseHistory = game.history({ verbose: true });
                                     const moves: JSX.Element[] = [];
                                     for (let i = 0; i < verboseHistory.length; i++) {
                                         const move = verboseHistory[i];

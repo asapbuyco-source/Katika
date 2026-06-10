@@ -9,6 +9,7 @@ export interface AdminWithdrawalRequest {
     userId: string;
     amount: number;
     phone: string;
+    momoName?: string;
     status: 'pending' | 'completed' | 'rejected' | 'failed';
     payoutMode?: 'manual' | 'automatic';
     requestedAt?: string;

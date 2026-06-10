@@ -137,7 +137,7 @@ const getWithdrawalAuditTrail = async (userId, limitCount = 12) => {
     return { recentTransactions, summary };
 };
 
-const buildWithdrawalTelegramMessage = ({ requestId, userId, userData, amount, phone, audit }) => {
+const buildWithdrawalTelegramMessage = ({ requestId, userId, userData, amount, phone, momoName, audit }) => {
     const userName = userData?.name || userData?.displayName || 'Unknown user';
     const lines = [
         'Katika withdrawal pending review',
@@ -146,6 +146,7 @@ const buildWithdrawalTelegramMessage = ({ requestId, userId, userData, amount, p
         `User ID: ${userId}`,
         `Amount: ${formatFcfa(amount)}`,
         `Phone: ${phone}`,
+        `MoMo name confirmed by user: ${momoName || 'Not provided'}`,
         `SLA: verify within ${Math.round(MANUAL_WITHDRAWAL_SLA_MS / 3600000)} hours`,
         '',
         'Recent source summary:',
@@ -414,7 +415,7 @@ const isUserBanned = async (uid) => {
     if (!db) return false;
     try {
         const userDoc = await db.collection('users').doc(uid).get();
-        const banned = !!(userDoc.exists() && userDoc.data().isBanned);
+        const banned = !!(userDoc.exists && userDoc.data().isBanned);
         banCache.set(uid, { banned, checkedAt: Date.now() });
         return banned;
     } catch { return false; }
@@ -690,7 +691,7 @@ app.post('/api/pay/webhook', async (req, res) => {
                 depositAmount = pending.depositAmount;
             } else if (db) {
                 const pendingDoc = await db.collection('pending_payments').doc(transId).get();
-                if (pendingDoc.exists()) {
+                if (pendingDoc.exists) {
                     const pData = pendingDoc.data();
                     userId = pData.userId;
                     depositAmount = pData.depositAmount;
@@ -712,7 +713,7 @@ app.post('/api/pay/webhook', async (req, res) => {
                 depositAmount = pending.depositAmount;
             } else if (db) {
                 const pendingDoc = await db.collection('pending_payments').doc(transId).get();
-                if (pendingDoc.exists()) {
+                if (pendingDoc.exists) {
                     depositAmount = pendingDoc.data().depositAmount;
                 }
             }
@@ -730,11 +731,11 @@ app.post('/api/pay/webhook', async (req, res) => {
         await db.runTransaction(async (tx) => {
             const [paySnap, userSnap] = await Promise.all([tx.get(paymentRef), tx.get(userRef)]);
 
-            if (paySnap.exists()) {
+            if (paySnap.exists) {
                 console.log(`[Webhook] transId=${transId} already processed — skipping.`);
                 return;
             }
-            if (!userSnap.exists()) {
+            if (!userSnap.exists) {
                 console.error(`[Webhook] User ${userId} not found for transId=${transId}`);
                 return;
             }
@@ -814,7 +815,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         if (!db)
             return res.status(503).json({ error: 'Database unavailable' });
 
-        const { amount, cleanPhone, userId } = validation;
+        const { amount, cleanPhone, cleanMomoName, userId } = validation;
         const userRef = db.collection('users').doc(userId);
         const pendingTxRef = userRef.collection('transactions').doc();
         const withdrawalRequestRef = db.collection('withdrawal_requests').doc(pendingTxRef.id);
@@ -829,7 +830,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         try {
             await db.runTransaction(async (tx) => {
                 const userDoc = await tx.get(userRef);
-                if (!userDoc.exists()) throw new Error('USER_NOT_FOUND');
+                if (!userDoc.exists) throw new Error('USER_NOT_FOUND');
                 const userData = userDoc.data() || {};
                 const currentBalance = userData.balance || 0;
                 if (currentBalance < amount) throw new Error('INSUFFICIENT_BALANCE');
@@ -847,6 +848,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                     amount: -amount,
                     status: 'pending',
                     phone: cleanPhone,
+                    momoName: cleanMomoName,
                     date: nowIso,
                     payoutMode: isManualPayout ? 'manual' : 'automatic',
                     manualReview: isManualPayout,
@@ -859,6 +861,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                     userId,
                     amount,
                     phone: cleanPhone,
+                    momoName: cleanMomoName,
                     status: 'pending',
                     payoutMode: isManualPayout ? 'manual' : 'automatic',
                     transactionPath: pendingTxRef.path,
@@ -893,6 +896,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                 userData: userSnapshot,
                 amount,
                 phone: cleanPhone,
+                momoName: cleanMomoName,
                 audit
             })).catch(() => {});
 
@@ -912,7 +916,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
             fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
                 method: 'POST',
                 headers: { 'apiuser': FAPSHI_PAYOUT_USER_TOKEN, 'apikey': FAPSHI_PAYOUT_API_KEY, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ amount, phone: cleanPhone, userId, message: 'Katika withdrawal' }),
+                body: JSON.stringify({ amount, phone: cleanPhone, userId, message: `Katika withdrawal for ${cleanMomoName}` }),
                 signal: payoutController.signal
             });
         } catch (err) {
@@ -923,7 +927,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
                 // Only gives up after 3 retries; writes failed_settlements if all retries fail.
                 await withRetry(() => db.runTransaction(async (tx) => {
                     const userDoc = await tx.get(userRef);
-                    if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
+                    if (userDoc.exists) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
                     if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp(), error: 'payout_timeout' });
                     tx.update(withdrawalRequestRef, {
                         status: 'failed',
@@ -954,7 +958,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
             console.error(`[Disburse] Fapshi payout failed for ${userId}. Issuing refund.`, fapshiData);
             await withRetry(() => db.runTransaction(async (tx) => {
                 const userDoc = await tx.get(userRef);
-                if (userDoc.exists()) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
+                if (userDoc.exists) tx.update(userRef, { balance: (userDoc.data().balance || 0) + amount });
                 if (pendingTxRef) tx.update(pendingTxRef, { status: 'failed', failedAt: admin.firestore.FieldValue.serverTimestamp() });
                 tx.update(withdrawalRequestRef, {
                     status: 'failed',
@@ -1962,8 +1966,8 @@ app.get('/api/pay/status/:transId', verifyAuth, async (req, res) => {
                     try {
                         await db.runTransaction(async (tx) => {
                             const [paySnap, userSnap] = await Promise.all([tx.get(paymentRef), tx.get(userRef)]);
-                            if (paySnap.exists()) return;
-                            if (!userSnap.exists()) return;
+                            if (paySnap.exists) return;
+                            if (!userSnap.exists) return;
                             tx.update(userRef, { balance: (userSnap.data().balance || 0) + pending.depositAmount });
                             tx.set(paymentRef, {
                                 creditedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -2271,69 +2275,70 @@ const runPendingWithdrawalReconciliation = async () => {
     if (!db) return;
     try {
         const fiveMinAgo = new Date(Date.now() - WITHDRAWAL_SLA_MS);
-        const pendingSnap = await db.collectionGroup('transactions')
-            .where('type', '==', 'withdrawal')
-            .get();
+        const userRefs = await db.collection('users').listDocuments();
 
         let reconciledCount = 0;
 
-        for (const doc of pendingSnap.docs) {
-            const txData = doc.data();
-            if (txData.status !== 'pending') continue;
-            const txDate = txData.date ? new Date(txData.date) : null;
-            if (txData.manualReview || txData.payoutMode === 'manual') {
-                if (txDate && Date.now() - txDate.getTime() > MANUAL_WITHDRAWAL_SLA_MS) {
-                    console.warn(`[Reconciliation] Manual withdrawal ${doc.id} is past the review SLA and still pending.`);
+        for (const userRef of userRefs) {
+            const pendingSnap = await userRef.collection('transactions')
+                .where('type', '==', 'withdrawal')
+                .get();
+
+            for (const doc of pendingSnap.docs) {
+                const txData = doc.data();
+                if (txData.status !== 'pending') continue;
+                const txDate = txData.date ? new Date(txData.date) : null;
+                if (txData.manualReview || txData.payoutMode === 'manual') {
+                    if (txDate && Date.now() - txDate.getTime() > MANUAL_WITHDRAWAL_SLA_MS) {
+                        console.warn(`[Reconciliation] Manual withdrawal ${doc.id} is past the review SLA and still pending.`);
+                    }
+                    continue;
                 }
-                continue;
-            }
-            if (!txDate || txDate > fiveMinAgo) continue; // not yet past SLA
+                if (!txDate || txDate > fiveMinAgo) continue; // not yet past SLA
 
-            const userRef = doc.ref.parent.parent;
-            if (!userRef) continue;
+                console.warn(`[Reconciliation] Withdrawal ${doc.id} stuck in pending for ${Math.round((Date.now() - txDate.getTime()) / 60000)}min. Attempting refund.`);
 
-            console.warn(`[Reconciliation] Withdrawal ${doc.id} stuck in pending for ${Math.round((Date.now() - txDate.getTime()) / 60000)}min. Attempting refund.`);
+                try {
+                    await withRetry(() => db.runTransaction(async (tx) => {
+                        const userSnap = await tx.get(userRef);
+                        if (!userSnap.exists) return;
 
-            try {
-                await withRetry(() => db.runTransaction(async (tx) => {
-                    const userSnap = await tx.get(userRef);
-                    if (!userSnap.exists) return;
+                        // Refund the debited balance
+                        const amount = Math.abs(txData.amount || 0);
+                        tx.update(userRef, { balance: (userSnap.data().balance || 0) + amount });
+                        tx.update(doc.ref, {
+                            status: 'failed',
+                            error: 'auto_refund_sla_breach',
+                            refundedAt: admin.firestore.FieldValue.serverTimestamp()
+                        });
+                        tx.set(userRef.collection('transactions').doc(), {
+                            type: 'escrow_refund',
+                            amount,
+                            status: 'completed',
+                            date: new Date().toISOString(),
+                            timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            note: `Auto-refund: withdrawal SLA breach (>${Math.round(WITHDRAWAL_SLA_MS / 60000)}min pending)`
+                        });
+                    }), 3, 500);
 
-                    // Refund the debited balance
-                    const amount = Math.abs(txData.amount || 0);
-                    tx.update(userRef, { balance: (userSnap.data().balance || 0) + amount });
-                    tx.update(doc.ref, {
-                        status: 'failed',
-                        error: 'auto_refund_sla_breach',
-                        refundedAt: admin.firestore.FieldValue.serverTimestamp()
-                    });
-                    tx.set(userRef.collection('transactions').doc(), {
-                        type: 'escrow_refund',
-                        amount,
-                        status: 'completed',
-                        date: new Date().toISOString(),
-                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                        note: `Auto-refund: withdrawal SLA breach (>${Math.round(WITHDRAWAL_SLA_MS / 60000)}min pending)`
-                    });
-                }), 3, 500);
+                    // Write to failed_settlements for audit trail
+                    if (db) {
+                        db.collection('failed_settlements').doc(`withdrawal_${doc.id}`).set({
+                            type: 'withdrawal_auto_refund',
+                            txId: doc.id,
+                            userId: userRef.id,
+                            amount: Math.abs(txData.amount || 0),
+                            slaBreachMs: Date.now() - txDate.getTime(),
+                            error: 'payout_timeout_auto_refund',
+                            reconciledAt: admin.firestore.FieldValue.serverTimestamp()
+                        }).catch(() => {});
+                    }
 
-                // Write to failed_settlements for audit trail
-                if (db) {
-                    db.collection('failed_settlements').doc(`withdrawal_${doc.id}`).set({
-                        type: 'withdrawal_auto_refund',
-                        txId: doc.id,
-                        userId: userRef.id,
-                        amount: Math.abs(txData.amount || 0),
-                        slaBreachMs: Date.now() - txDate.getTime(),
-                        error: 'payout_timeout_auto_refund',
-                        reconciledAt: admin.firestore.FieldValue.serverTimestamp()
-                    }).catch(() => {});
+                    reconciledCount++;
+                    console.log(`[Reconciliation] Refunded stuck withdrawal ${doc.id} for user ${userRef.id}`);
+                } catch (e) {
+                    console.error(`[Reconciliation] Failed to refund withdrawal ${doc.id}:`, e.message);
                 }
-
-                reconciledCount++;
-                console.log(`[Reconciliation] Refunded stuck withdrawal ${doc.id} for user ${userRef.id}`);
-            } catch (e) {
-                console.error(`[Reconciliation] Failed to refund withdrawal ${doc.id}:`, e.message);
             }
         }
 
@@ -2410,8 +2415,8 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
             db.collection('users').doc(targetId).get()
         ]);
 
-        if (!senderSnap.exists()) return res.status(404).json({ error: 'Sender not found.' });
-        if (!receiverSnap.exists()) return res.status(404).json({ error: 'Target user not found.' });
+        if (!senderSnap.exists) return res.status(404).json({ error: 'Sender not found.' });
+        if (!receiverSnap.exists) return res.status(404).json({ error: 'Target user not found.' });
 
         const senderData = senderSnap.data();
         const sAvailable = (senderData.balance || 0) + (senderData.promoBalance || 0);
@@ -2475,7 +2480,7 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         const challengeRef = db.collection('challenges').doc(challengeId);
         const challengeSnap = await challengeRef.get();
 
-        if (!challengeSnap.exists()) return res.status(404).json({ error: 'Challenge not found.' });
+        if (!challengeSnap.exists) return res.status(404).json({ error: 'Challenge not found.' });
 
         const challenge = challengeSnap.data();
         if (challenge.targetId !== userId) return res.status(403).json({ error: 'Not your challenge.' });
@@ -4460,12 +4465,16 @@ const reconcileOrphanedEscrows = async () => {
         console.log('[Reconciliation] Scanning for orphaned escrows from the last 24h...');
         const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
         
-        // Query by type only and filter dates in JS to avoid a required composite index.
-        const lockSnap = await db.collectionGroup('transactions')
-            .where('type', '==', 'escrow_lock')
-            .get();
+        const userRefs = await db.collection('users').listDocuments();
+        let lockDocs = [];
+        for (const userRef of userRefs) {
+            const userLocks = await userRef.collection('transactions')
+                .where('type', '==', 'escrow_lock')
+                .get();
+            lockDocs.push(...userLocks.docs);
+        }
 
-        if (lockSnap.empty) {
+        if (lockDocs.length === 0) {
             console.log('[Reconciliation] No orphaned escrows found.');
             return;
         }
@@ -4473,7 +4482,7 @@ const reconcileOrphanedEscrows = async () => {
         let refundCount = 0;
         let totalRefunded = 0;
 
-        for (const doc of lockSnap.docs) {
+        for (const doc of lockDocs) {
             const txData = doc.data();
             if (!txData.date || txData.date < yesterday) continue;
             const userRef = doc.ref.parent.parent; 
