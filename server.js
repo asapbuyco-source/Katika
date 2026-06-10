@@ -314,55 +314,6 @@ app.use(cors({
 // [Step 0.4] DOMPurify replaces the homegrown HTML-stripping sanitize function.
 const sanitize = (text) => DOMPurify.sanitize(String(text), { ALLOWED_TAGS: [], ALLOWED_ATTR: [] }).slice(0, 150);
 
-// Device verification used by the SPA after Firebase auth. It is intentionally
-// advisory: suspicious device sharing warns the client, while hard account
-// actions remain an ops/admin decision.
-app.post('/api/auth/verify-device', verifyAuth, async (req, res) => {
-    try {
-        const { userId, deviceId } = req.body || {};
-        if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Invalid userId.' });
-        if (!deviceId || typeof deviceId !== 'string') return res.status(400).json({ error: 'Invalid deviceId.' });
-        if (req.user.uid !== userId) return res.status(403).json({ error: 'Forbidden: Cannot verify another user device.' });
-        if (!db) return res.json({ status: 'ok' });
-
-        const cleanDeviceId = deviceId.trim().slice(0, 128);
-        const deviceHash = crypto.createHash('sha256').update(cleanDeviceId).digest('hex');
-        const deviceRef = db.collection('device_fingerprints').doc(deviceHash);
-        const userRef = db.collection('users').doc(userId);
-        let uniqueUserCount = 1;
-
-        await db.runTransaction(async (tx) => {
-            const deviceSnap = await tx.get(deviceRef);
-            const userIds = new Set(deviceSnap.exists ? (deviceSnap.data().userIds || []) : []);
-            userIds.add(userId);
-            uniqueUserCount = userIds.size;
-
-            tx.set(deviceRef, {
-                userIds: Array.from(userIds).slice(0, 25),
-                lastUserId: userId,
-                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-            tx.set(userRef, {
-                lastDeviceHash: deviceHash,
-                lastDeviceVerifiedAt: admin.firestore.FieldValue.serverTimestamp()
-            }, { merge: true });
-        });
-
-        if (uniqueUserCount >= 4) {
-            return res.json({
-                status: 'warning',
-                message: 'This device has been used by multiple accounts. Please use one account to avoid review delays.'
-            });
-        }
-
-        res.json({ status: 'ok' });
-    } catch (err) {
-        console.error('[Auth] verify-device error:', err);
-        res.status(500).json({ error: 'Device verification failed.' });
-    }
-});
-
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
     cors: {
@@ -508,6 +459,55 @@ const blockGuests = (req, res, next) => {
     }
     next();
 };
+
+// Device verification used by the SPA after Firebase auth. It is intentionally
+// advisory: suspicious device sharing warns the client, while hard account
+// actions remain an ops/admin decision.
+app.post('/api/auth/verify-device', verifyAuth, async (req, res) => {
+    try {
+        const { userId, deviceId } = req.body || {};
+        if (!userId || typeof userId !== 'string') return res.status(400).json({ error: 'Invalid userId.' });
+        if (!deviceId || typeof deviceId !== 'string') return res.status(400).json({ error: 'Invalid deviceId.' });
+        if (req.user.uid !== userId) return res.status(403).json({ error: 'Forbidden: Cannot verify another user device.' });
+        if (!db) return res.json({ status: 'ok' });
+
+        const cleanDeviceId = deviceId.trim().slice(0, 128);
+        const deviceHash = crypto.createHash('sha256').update(cleanDeviceId).digest('hex');
+        const deviceRef = db.collection('device_fingerprints').doc(deviceHash);
+        const userRef = db.collection('users').doc(userId);
+        let uniqueUserCount = 1;
+
+        await db.runTransaction(async (tx) => {
+            const deviceSnap = await tx.get(deviceRef);
+            const userIds = new Set(deviceSnap.exists ? (deviceSnap.data().userIds || []) : []);
+            userIds.add(userId);
+            uniqueUserCount = userIds.size;
+
+            tx.set(deviceRef, {
+                userIds: Array.from(userIds).slice(0, 25),
+                lastUserId: userId,
+                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+            tx.set(userRef, {
+                lastDeviceHash: deviceHash,
+                lastDeviceVerifiedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+        });
+
+        if (uniqueUserCount >= 4) {
+            return res.json({
+                status: 'warning',
+                message: 'This device has been used by multiple accounts. Please use one account to avoid review delays.'
+            });
+        }
+
+        res.json({ status: 'ok' });
+    } catch (err) {
+        console.error('[Auth] verify-device error:', err);
+        res.status(500).json({ error: 'Device verification failed.' });
+    }
+});
 
 // --- HEALTH CHECK (required for Railway) ---
 app.get('/health', (_req, res) => {
