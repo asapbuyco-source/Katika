@@ -36,7 +36,9 @@ const sanitizeRoomForClient = (room, roomId) => {
         gameState: room.gameState,
         profiles: room.profiles,
         chat: room.chat,
-        winner: room.winner || null
+        winner: room.winner || null,
+        privateRoomId: room.privateRoomId || null,
+        tournamentMatchId: room.tournamentMatchId || null
     };
 };
 
@@ -202,7 +204,8 @@ const SOCKET_AUTH_MODE = misconfiguredSocketAuth ? 'log' : (process.env.SOCKET_A
 const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers,Dice')
     .split(',').map(g => g.trim()).filter(Boolean);
 
-const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType);
+const IMPLEMENTED_P2P_GAMES = new Set(['Chess', 'Checkers', 'Dice', 'TicTacToe', 'Ludo', 'Pool']);
+const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType) && IMPLEMENTED_P2P_GAMES.has(gameType);
 
 // --- FIREBASE ADMIN INITIALIZATION ---
 try {
@@ -786,13 +789,9 @@ app.post('/api/pay/webhook', async (req, res) => {
         pendingDeposits.delete(transId);
 
         // Notify the user's active socket so the UI updates immediately
-        const socketId = userSockets.get(userId);
-        if (socketId) {
-            const sock = io.sockets.sockets.get(socketId);
-            if (sock) {
-                sock.emit('payment_confirmed', { transId, amount: depositAmount });
-                console.log(`[Webhook] Emitted payment_confirmed to socket ${socketId}`);
-            }
+        const notified = emitToUser(userId, 'payment_confirmed', { transId, amount: depositAmount });
+        if (notified > 0) {
+            console.log(`[Webhook] Emitted payment_confirmed to ${notified} active socket(s)`);
         }
     } catch (err) {
         console.error('[Webhook] Error processing payment:', err);
@@ -801,7 +800,8 @@ app.post('/api/pay/webhook', async (req, res) => {
 
 // --- SERVER TIME SYNC ---
 app.get('/api/time', (req, res) => {
-    res.json({ time: Date.now() });
+    const now = Date.now();
+    res.json({ time: now, serverTime: now });
 });
 
 // --- FAPSHI PAYOUT (REAL WITHDRAWAL) ---
@@ -1083,6 +1083,18 @@ app.post('/api/tournaments/register', verifyAuth, blockGuests, async (req, res) 
 
 // ─── TOURNAMENT CORE LOGIC ──────────────────────────────────────────────────
 
+const getTournamentMatchPlayerIds = (matchData = {}) => {
+    if (Array.isArray(matchData.players)) return matchData.players.filter(Boolean);
+    return [matchData.player1?.id, matchData.player2?.id].filter(Boolean);
+};
+
+const canTournamentMatchOpen = (matchData = {}) => {
+    if (matchData.status === 'active' || matchData.status === 'pending') return true;
+    if (matchData.status !== 'scheduled') return false;
+    const startMs = new Date(matchData.startTime || 0).getTime();
+    return !Number.isFinite(startMs) || startMs <= Date.now();
+};
+
 // Server endpoint: tournament match activation (replaces client Firestore write)
 app.post('/api/tournaments/match-activate', verifyAuth, blockGuests, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database service unavailable' });
@@ -1093,13 +1105,42 @@ app.post('/api/tournaments/match-activate', verifyAuth, blockGuests, async (req,
         const matchSnap = await db.collection('tournament_matches').doc(matchId).get();
         if (!matchSnap.exists) return res.status(404).json({ error: 'Match not found' });
         const matchData = matchSnap.data();
-        if (!(matchData.players || []).includes(userId)) return res.status(403).json({ error: 'Not a player in this match' });
-        if (matchData.status !== 'pending') return res.status(409).json({ error: 'Match already active or completed' });
+        if (!getTournamentMatchPlayerIds(matchData).includes(userId)) return res.status(403).json({ error: 'Not a player in this match' });
+        if (matchData.status === 'completed') return res.status(409).json({ error: 'Match already completed' });
+        if (!['pending', 'scheduled', 'active'].includes(matchData.status)) {
+            return res.status(409).json({ error: 'Match cannot be activated' });
+        }
+        if (!canTournamentMatchOpen(matchData)) return res.status(409).json({ error: 'Match has not started yet' });
+        if (matchData.status === 'active') return res.json({ success: true, alreadyActive: true });
         await db.collection('tournament_matches').doc(matchId).update({ status: 'active', startedAt: admin.firestore.FieldValue.serverTimestamp() });
         res.json({ success: true });
     } catch (e) {
         console.error('[MatchActivate]', e);
         res.status(500).json({ error: 'Failed to activate match' });
+    }
+});
+
+app.post('/api/tournaments/match-check-in', verifyAuth, blockGuests, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database service unavailable' });
+    const { matchId } = req.body;
+    const userId = req.user.uid;
+    if (!matchId) return res.status(400).json({ error: 'matchId required' });
+    try {
+        const matchRef = db.collection('tournament_matches').doc(matchId);
+        const matchSnap = await matchRef.get();
+        if (!matchSnap.exists) return res.status(404).json({ error: 'Match not found' });
+        const matchData = matchSnap.data() || {};
+        if (!getTournamentMatchPlayerIds(matchData).includes(userId)) return res.status(403).json({ error: 'Not a player in this match' });
+        if (matchData.status === 'completed') return res.status(409).json({ error: 'Match already completed' });
+
+        await matchRef.update({
+            checkedIn: admin.firestore.FieldValue.arrayUnion(userId),
+            lastCheckInAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        res.json({ success: true });
+    } catch (e) {
+        console.error('[MatchCheckIn]', e);
+        res.status(500).json({ error: 'Failed to check in for match' });
     }
 });
 
@@ -1223,6 +1264,7 @@ const checkAndAdvanceTournamentLogic = async (tournamentId, round) => {
             matchIndex: nextMatchCount,
             player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo || 0 },
             player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo || 0 } : null,
+            players: [p1.id, p2Id].filter(Boolean),
             // If bye, auto-win for player1
             winnerId: isBye ? p1Id : null,
             status: isBye ? 'completed' : 'scheduled',
@@ -1298,6 +1340,7 @@ const startTournamentLogic = async (tournamentId) => {
                 matchIndex: matchCount,
                 player1: { id: p1.id, name: p1.name, avatar: p1.avatar, rankTier: p1.rankTier, elo: p1.elo || 0 },
                 player2: p2 ? { id: p2.id, name: p2.name, avatar: p2.avatar, rankTier: p2.rankTier, elo: p2.elo || 0 } : null,
+                players: [p1.id, p2?.id].filter(Boolean),
                 winnerId: isBye ? p1.id : null,
                 status: isBye ? 'completed' : 'scheduled',
                 startTime,   // ISO string from tournament config
@@ -1337,11 +1380,7 @@ const recordTournamentMatchResult = async (matchId, winnerId) => {
 
         // Notify connected players via socket
         [mData.player1?.id, mData.player2?.id].filter(Boolean).forEach(pid => {
-            const sId = userSockets.get(pid);
-            if (sId) {
-                const sock = io.sockets.sockets.get(sId);
-                if (sock) sock.emit('tournament_match_result', { matchId, winnerId });
-            }
+            emitToUser(pid, 'tournament_match_result', { matchId, winnerId });
         });
     } catch (err) {
         console.error(`[Tournament] recordTournamentMatchResult ${matchId}:`, err);
@@ -1394,15 +1433,11 @@ const startTournamentScheduler = () => {
 
                     // Notify both players via socket
                     [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
-                        const sId = userSockets.get(pid);
-                        if (sId) {
-                            const sock = io.sockets.sockets.get(sId);
-                            if (sock) sock.emit('tournament_match_active', {
-                                matchId: m.id,
-                                tournamentId: m.tournamentId,
-                                opponent: m.player1?.id === pid ? m.player2 : m.player1
-                            });
-                        }
+                        emitToUser(pid, 'tournament_match_active', {
+                            matchId: m.id,
+                            tournamentId: m.tournamentId,
+                            opponent: m.player1?.id === pid ? m.player2 : m.player1
+                        });
                     });
                 }
             }
@@ -1424,14 +1459,10 @@ const startTournamentScheduler = () => {
                 if (m.status === 'active' && elapsedMin > 4 && elapsedMin <= 5 && !m.warningIssued) {
                     await db.collection('tournament_matches').doc(m.id).update({ warningIssued: true });
                     [m.player1?.id, m.player2?.id].filter(Boolean).forEach(pid => {
-                        const sId = userSockets.get(pid);
-                        if (sId) {
-                            const sock = io.sockets.sockets.get(sId);
-                            if (sock) sock.emit('tournament_warning', {
-                                matchId: m.id,
-                                message: 'Your match will be auto-forfeited in 60 seconds! Join the lobby now.'
-                            });
-                        }
+                        emitToUser(pid, 'tournament_warning', {
+                            matchId: m.id,
+                            message: 'Your match will be auto-forfeited in 60 seconds! Join the lobby now.'
+                        });
                     });
                 }
 
@@ -1538,15 +1569,7 @@ app.post('/api/admin/ban-user', verifyAdmin, async (req, res) => {
         clearBanCacheForUser(userId);
         // If banning, disconnect active socket(s) immediately
         if (ban) {
-            // userSockets may be Map<userId, socketId> or Map<userId, Set<socketId>>
-            const sockets = userSockets.get(userId);
-            if (sockets) {
-                const socketIds = typeof sockets.has === 'function' ? [...sockets] : [sockets];
-                for (const sid of socketIds) {
-                    const sock = io.sockets.sockets.get(sid);
-                    if (sock) sock.disconnect(true);
-                }
-            }
+            disconnectUserSockets(userId);
         }
         res.json({ success: true });
     } catch (err) {
@@ -1581,15 +1604,7 @@ app.post('/api/admin/delete-account', verifyAdmin, async (req, res) => {
         await db.collection('users').doc(userId).delete();
         
         // Disconnect active socket(s) immediately
-        const sockets = userSockets.get(userId);
-        if (sockets) {
-            const socketIds = typeof sockets.has === 'function' ? [...sockets] : [sockets];
-            for (const sid of socketIds) {
-                const sock = io.sockets.sockets.get(sid);
-                if (sock) sock.disconnect(true);
-            }
-            userSockets.delete(userId);
-        }
+        disconnectUserSockets(userId);
         res.json({ success: true });
     } catch (err) {
         console.error('[Admin] Delete account error:', err.message);
@@ -1831,7 +1846,8 @@ app.post('/api/tournaments/force-result', verifyAdmin, async (req, res) => {
         if (!mSnap.exists) return res.status(404).json({ error: 'Match not found' });
         const mData = mSnap.data();
         if (mData.status === 'completed') return res.status(400).json({ error: 'Match already completed' });
-        await mRef.update({ winnerId, status: 'completed' });
+        if (!getTournamentMatchPlayerIds(mData).includes(winnerId)) return res.status(400).json({ error: 'Winner is not a player in this match' });
+        await mRef.update({ winnerId, status: 'completed', completedAt: admin.firestore.FieldValue.serverTimestamp() });
         await checkAndAdvanceTournamentLogic(mData.tournamentId, mData.round);
         res.json({ success: true });
     } catch (err) {
@@ -2012,8 +2028,11 @@ const settleGame = async (roomId, winnerId) => {
     const loserId = room.players.find(id => id !== winnerId);
     if (!loserId) return;
 
-    // Idempotency: prevent double-settling on rematch or duplicate events
-    const settlementRef = db.collection('processed_settlements').doc(`settle_${roomId}`);
+    // Idempotency: prevent duplicate settlement for each game in a rematch chain.
+    // The first game keeps the legacy key; rematches append the match sequence.
+    const settlementRound = room.matchSequence || 0;
+    const settlementId = settlementRound > 0 ? `settle_${roomId}_${settlementRound}` : `settle_${roomId}`;
+    const settlementRef = db.collection('processed_settlements').doc(settlementId);
 
     try {
         await withRetry(() => db.runTransaction(async (tx) => {
@@ -2080,7 +2099,7 @@ const settleGame = async (roomId, winnerId) => {
                     note: `Settled loss for ${room.gameType}`
                 });
             }
-            tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
+            tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId, settlementRound });
         }));
         console.log(`[settleGame] ${roomId}: credited ${winnings} FCFA to ${winnerId}`);
 
@@ -2224,8 +2243,7 @@ app.post('/api/disputes/resolve', verifyAdmin, async (req, res) => {
         });
         // Notify the user who filed
         const filedBy = snap.data().filedBy;
-        const sid = userSockets.get(filedBy);
-        if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('dispute_resolved', { disputeId, resolution }); }
+        emitToUser(filedBy, 'dispute_resolved', { disputeId, resolution });
         console.log(`[Dispute] Resolved: ${disputeId} by ${req.adminEmail}`);
         res.json({ success: true });
     } catch (err) {
@@ -2256,8 +2274,7 @@ const runDisputeSLAResolver = async () => {
                 resolution,
                 resolvedAt: admin.firestore.FieldValue.serverTimestamp()
             });
-            const sid = userSockets.get(data.filedBy);
-            if (sid) { const sock = io.sockets.sockets.get(sid); if (sock) sock.emit('dispute_resolved', { disputeId: doc.id, resolution }); }
+            emitToUser(data.filedBy, 'dispute_resolved', { disputeId: doc.id, resolution });
             console.log(`[Dispute] SLA auto-resolved: ${doc.id}`);
         }
     } catch (e) { console.error('[DisputeSLA]', e); }
@@ -2376,8 +2393,7 @@ setInterval(() => {
         const createdAt = room.gameState?.startTime || 0;
         if (createdAt > tenMinAgo) continue; // room is fresh
         const hasActivePlayers = (room.players || []).some(pid => {
-            const sid = userSockets.get(pid);
-            return sid && io.sockets.sockets.has(sid);
+            return hasActiveSocketForUser(pid);
         });
         if (!hasActivePlayers) {
             console.warn(`[Reaper] Evicting orphan room ${roomId} (${room.gameType}, both players disconnected)`);
@@ -2691,9 +2707,73 @@ app.post('/api/games/bot', verifyAuth, async (req, res) => {
 // --- IN-MEMORY STATE ---
 const rooms = new Map(); // roomId -> { players: [], gameState: {}, ... }
 const queues = new Map(); // gameType_stake -> [ { socketId, userProfile } ]
-const userSockets = new Map(); // userId -> socketId
+const userSockets = new Map(); // userId -> Set<socketId>
 const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
+
+const getUserSocketIds = (userId) => {
+    const entry = userSockets.get(userId);
+    if (!entry) return [];
+    return entry instanceof Set ? [...entry] : [entry].filter(Boolean);
+};
+
+const addUserSocket = (userId, socketId) => {
+    const entry = userSockets.get(userId);
+    if (entry instanceof Set) {
+        entry.add(socketId);
+    } else if (entry) {
+        userSockets.set(userId, new Set([entry, socketId]));
+    } else {
+        userSockets.set(userId, new Set([socketId]));
+    }
+    socketUsers.set(socketId, userId);
+};
+
+const removeUserSocket = (userId, socketId) => {
+    const entry = userSockets.get(userId);
+    if (entry instanceof Set) {
+        entry.delete(socketId);
+        if (entry.size === 0) userSockets.delete(userId);
+    } else if (entry === socketId) {
+        userSockets.delete(userId);
+    }
+    socketUsers.delete(socketId);
+};
+
+const emitToUser = (userId, event, payload) => {
+    let sent = 0;
+    for (const socketId of getUserSocketIds(userId)) {
+        const sock = io.sockets.sockets.get(socketId);
+        if (sock) {
+            sock.emit(event, payload);
+            sent++;
+        }
+    }
+    return sent;
+};
+
+const joinUserSocketsToRoom = (userId, roomId) => {
+    let joined = 0;
+    for (const socketId of getUserSocketIds(userId)) {
+        const sock = io.sockets.sockets.get(socketId);
+        if (sock) {
+            sock.join(roomId);
+            joined++;
+        }
+    }
+    return joined;
+};
+
+const hasActiveSocketForUser = (userId) =>
+    getUserSocketIds(userId).some(socketId => io.sockets.sockets.has(socketId));
+
+const disconnectUserSockets = (userId) => {
+    for (const socketId of getUserSocketIds(userId)) {
+        const sock = io.sockets.sockets.get(socketId);
+        if (sock) sock.disconnect(true);
+    }
+    userSockets.delete(userId);
+};
 
 // P0 Durability: Persist active rooms to Firestore for restart resilience
 // Loads previously active games after server restart
@@ -2724,12 +2804,13 @@ const hydrateRoomsFromFirestore = async () => {
 const persistRoomToFirestore = async (roomId, room) => {
     if (!db) return;
     try {
+        const { settlementPromise, ...serializableRoom } = room;
         // AUDIT FIX: Firestore cannot serialize a JS Set — spread it to an Array
         // before writing. The hydration side (hydrateRoomsFromFirestore) already
         // converts the Array back to a Set on read. Without this, rematchVotes
         // silently writes as {} (empty object) and breaks rematch voting.
         const roomToSave = {
-            ...room,
+            ...serializableRoom,
             rematchVotes: [...(room.rematchVotes instanceof Set ? room.rematchVotes : [])],
             rematchStreak: room.rematchStreak || 0,
             lastRematchAt: room.lastRematchAt || null
@@ -2876,14 +2957,14 @@ const endGame = (roomId, winnerId, reason) => {
 
     // Settle finances server-side (non-blocking)
     if (winnerId && room.stake > 0) {
-        settleGame(roomId, winnerId);
+        room.settlementPromise = settleGame(roomId, winnerId);
     } else if (!winnerId && room.stake > 0) {
         // Draw: Refund escrows
         const splits = room.escrowSplits || {};
-        room.players.forEach(pid => {
+        room.settlementPromise = Promise.all(room.players.map(pid => {
             const split = splits[pid];
-            if (split) refundEscrow(pid, split.real, split.promo);
-        });
+            return split ? refundEscrow(pid, split.real, split.promo) : Promise.resolve();
+        }));
     }
 
     io.to(roomId).emit('game_over', {
@@ -2900,8 +2981,11 @@ const endGame = (roomId, winnerId, reason) => {
 
     // ── Audit log: write final game state to Firestore for dispute replay ──────
     if (db) {
-        db.collection('game_logs').doc(roomId).set({
+        const matchSequence = room.matchSequence || 0;
+        const gameLogId = matchSequence > 0 ? `${roomId}_${matchSequence}` : roomId;
+        db.collection('game_logs').doc(gameLogId).set({
             roomId,
+            matchSequence,
             gameType: room.gameType,
             stake: room.stake,
             players: room.players,
@@ -2937,11 +3021,7 @@ const endGame = (roomId, winnerId, reason) => {
             });
 
             // Only notify AFTER the transaction committed successfully
-            const sid = userSockets.get(winnerId);
-            if (sid) {
-                const sock = io.sockets.sockets.get(sid);
-                if (sock) sock.emit('daily_bonus', { amount: 50, reason: 'first_win' });
-            }
+            emitToUser(winnerId, 'daily_bonus', { amount: 50, reason: 'first_win' });
         }).catch(e => console.error('[endGame] Daily bonus error:', e));
     }
 
@@ -2984,6 +3064,62 @@ const endGame = (roomId, winnerId, reason) => {
 // [REMOVED] Card Game Helpers — Fisher-Yates shuffle with crypto RNG
 // const fisherYatesShuffle = (arr) => { ... };
 // const createDeck = () => { ... };
+
+const POOL_TABLE_WIDTH = 900;
+const POOL_TABLE_HEIGHT = 450;
+const POOL_CUSHION_THICKNESS = 36;
+const POOL_BALL_RADIUS = 14;
+const POOL_FIELD_LEFT = POOL_CUSHION_THICKNESS;
+const POOL_FIELD_TOP = POOL_CUSHION_THICKNESS;
+const POOL_RACK_X = POOL_FIELD_LEFT + POOL_TABLE_WIDTH * 0.72;
+const POOL_RACK_Y = POOL_FIELD_TOP + POOL_TABLE_HEIGHT / 2;
+const POOL_BREAK_X = POOL_FIELD_LEFT + POOL_TABLE_WIDTH * 0.25;
+const POOL_BREAK_Y = POOL_FIELD_TOP + POOL_TABLE_HEIGHT / 2;
+const POOL_RACK_PATTERN = [
+    [1],
+    [9, 2],
+    [10, 8, 3],
+    [11, 4, 12, 5],
+    [13, 6, 14, 7, 15]
+];
+
+const createPoolBall = (id, x, y) => ({
+    id,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    spin: 0,
+    sidespin: 0,
+    pocketed: false,
+    justPocketed: false
+});
+
+const createPoolRack = () => {
+    const balls = [];
+    const dx = POOL_BALL_RADIUS * 1.732;
+    const dy = POOL_BALL_RADIUS * 1.05;
+
+    POOL_RACK_PATTERN.forEach((row, ri) => {
+        row.forEach((id, ci) => {
+            const x = POOL_RACK_X + ri * dx;
+            const y = POOL_RACK_Y + (ci - (row.length - 1) / 2) * dy * 2;
+            balls.push(createPoolBall(id, x, y));
+        });
+    });
+
+    balls.push(createPoolBall(0, POOL_BREAK_X, POOL_BREAK_Y));
+    return balls;
+};
+
+const getPoolPlayerGroup = (gameState = {}, players = [], playerId) => {
+    const idx = players.indexOf(playerId);
+    if (idx < 0) return null;
+    const fromPlayers = gameState.players?.[idx]?.group;
+    if (fromPlayers === 'solids' || fromPlayers === 'stripes') return fromPlayers;
+    const legacyGroup = idx === 0 ? gameState.myGroupP1 : gameState.myGroupP2;
+    return legacyGroup === 'solids' || legacyGroup === 'stripes' ? legacyGroup : null;
+};
 
 const createInitialGameState = (gameType, p1, p2) => {
     const common = {
@@ -3045,7 +3181,23 @@ case 'Chess':
             };
         case 'Pool':
             // Pool game: client drives all state; wins are reported via MOVE action with newState.winner
-            return { ...common, balls: Array.from({ length: 15 }, (_, i) => ({ id: i + 1, pocketed: false, owner: null })), turn: p1 };
+            return {
+                ...common,
+                balls: createPoolRack(),
+                players: [
+                    { name: 'Player 1', group: null, ballsPocketed: [], id: p1, elo: 0, avatar: '' },
+                    { name: 'Player 2', group: null, ballsPocketed: [], id: p2, elo: 0, avatar: '' }
+                ],
+                phase: 'aiming',
+                shotCount: 0,
+                firstHit: null,
+                foul: false,
+                winner: null,
+                ballInHand: false,
+                myGroupP1: null,
+                myGroupP2: null,
+                turn: p1
+            };
         default:
             return common;
     }
@@ -3062,7 +3214,7 @@ io.on('connection', (socket) => {
         socket.disconnect(true);
     }, 55 * 60 * 1000);
 
-    socket.on('refresh_token', async ({ token }) => {
+    socket.on('refresh_token', async ({ token }, callback) => {
         try {
             const decoded = await admin.auth().verifyIdToken(token);
             socket.user = decoded;
@@ -3072,13 +3224,20 @@ io.on('connection', (socket) => {
                 socket.disconnect(true);
             }, 55 * 60 * 1000);
             socket.emit('token_verified');
+            if (callback) callback({ success: true, uid: decoded.uid });
         } catch (err) {
             console.warn(`[Auth] Token refresh failed for ${socket.id}`);
+            if (callback) callback({ success: false, error: 'token_refresh_failed' });
             socket.disconnect(true);
         }
     });
 
     socket.on('reconnect_game', ({ userId: reconnectUserId }) => {
+        if (!socket.user?.uid || socket.user.uid !== reconnectUserId) {
+            socket.emit('auth_required', { message: 'Please log in again to reconnect.' });
+            return;
+        }
+        addUserSocket(reconnectUserId, socket.id);
         for (const [roomId, room] of rooms.entries()) {
             if (room.players.includes(reconnectUserId) && room.status === 'active') {
                 socket.join(roomId);
@@ -3118,6 +3277,52 @@ io.on('connection', (socket) => {
             socket.emit('game_error', { message: `${gameType} is not available in this region yet.` });
             return;
         }
+        if (privateRoomId?.startsWith('m-')) {
+            if (!db) {
+                socket.emit('game_error', { message: 'Tournament service is temporarily unavailable.' });
+                return;
+            }
+            try {
+                const matchSnap = await db.collection('tournament_matches').doc(privateRoomId).get();
+                if (!matchSnap.exists) {
+                    socket.emit('game_error', { message: 'Tournament match was not found.' });
+                    return;
+                }
+                const matchData = matchSnap.data() || {};
+                const matchPlayers = getTournamentMatchPlayerIds(matchData);
+                if (!matchPlayers.includes(userId)) {
+                    socket.emit('game_error', { message: 'You are not assigned to this tournament match.' });
+                    return;
+                }
+                if (matchData.status === 'completed') {
+                    socket.emit('game_error', { message: 'This tournament match is already completed.' });
+                    return;
+                }
+                if (!canTournamentMatchOpen(matchData)) {
+                    socket.emit('game_error', { message: 'This tournament match has not started yet.' });
+                    return;
+                }
+
+                const tournamentSnap = matchData.tournamentId
+                    ? await db.collection('tournaments').doc(matchData.tournamentId).get()
+                    : null;
+                if (tournamentSnap?.exists) {
+                    const tournamentData = tournamentSnap.data() || {};
+                    if (tournamentData.status !== 'active') {
+                        socket.emit('game_error', { message: 'This tournament is not active yet.' });
+                        return;
+                    }
+                    if (tournamentData.gameType && tournamentData.gameType !== gameType) {
+                        socket.emit('game_error', { message: 'Tournament game type mismatch.' });
+                        return;
+                    }
+                }
+            } catch (e) {
+                console.error(`[Tournament] Join validation failed for ${privateRoomId}:`, e);
+                socket.emit('game_error', { message: 'Could not verify tournament match. Please try again.' });
+                return;
+            }
+        }
         if (socket.user.email && ADMIN_EMAILS.includes(socket.user.email)) {
             socket.join('admins');
         }
@@ -3147,8 +3352,7 @@ io.on('connection', (socket) => {
                     });
                 });
                 if (bonus > 0) {
-                    const sid = userSockets.get(userId);
-                    if (sid) { const s = io.sockets.sockets.get(sid); if (s) s.emit('streak_bonus', { streak, amount: bonus }); }
+                    emitToUser(userId, 'streak_bonus', { streak, amount: bonus });
                     console.log(`[Streak] Day ${streak} bonus ${bonus} FCFA → ${userId}`);
                 }
             }).catch(e => console.error('[Streak]', e));
@@ -3171,8 +3375,7 @@ io.on('connection', (socket) => {
             };
         }
 
-        userSockets.set(userId, socket.id);
-        socketUsers.set(socket.id, userId);
+        addUserSocket(userId, socket.id);
 
         // Check if reconnecting to active or recently-completed room
         for (const [roomId, room] of rooms.entries()) {
@@ -3197,7 +3400,9 @@ io.on('connection', (socket) => {
                         turn: room.turn,
                         profiles: room.profiles,
                         chat: room.chat,
-                        winner: room.winner || null
+                        winner: room.winner || null,
+                        privateRoomId: room.privateRoomId || null,
+                        tournamentMatchId: room.tournamentMatchId || null
                     });
                     console.log(`User ${userId} reconnected to ${roomId}`);
                     return;
@@ -3305,7 +3510,8 @@ io.on('connection', (socket) => {
                     gameState: createInitialGameState(gameType, opponentId, userId),
                     chat: [],
                     rematchVotes: new Set(),
-                    rematchStreak: 0  // P2-3: track consecutive rematches for cap enforcement
+                    rematchStreak: 0,  // P2-3: track consecutive rematches for cap enforcement
+                    matchSequence: 0
                 };
 
                 rooms.set(roomId, room);
@@ -3313,14 +3519,9 @@ io.on('connection', (socket) => {
                 // Persist to Firestore for restart resilience
                 persistRoomToFirestore(roomId, room);
 
-                // Notify Players
-                const oppSocketId = userSockets.get(opponentId);
-
                 // Join Socket Rooms
                 socket.join(roomId);
-                if (io.sockets.sockets.get(oppSocketId)) {
-                    io.sockets.sockets.get(oppSocketId).join(roomId);
-                }
+                joinUserSocketsToRoom(opponentId, roomId);
 
                 // Emit Start
                 io.to(roomId).emit('match_found', {
@@ -3330,7 +3531,9 @@ io.on('connection', (socket) => {
                     stake,
                     gameState: room.gameState,
                     turn: room.turn,
-                    profiles: room.profiles
+                    profiles: room.profiles,
+                    privateRoomId: room.privateRoomId || null,
+                    tournamentMatchId: room.tournamentMatchId || null
                 });
 
                 console.log(`Match created: ${roomId}`);
@@ -3382,8 +3585,7 @@ io.on('connection', (socket) => {
             disconnectTimers.delete(userId);
         }
 
-        userSockets.set(userId, socket.id);
-        socketUsers.set(socket.id, userId);
+        addUserSocket(userId, socket.id);
 
         let roomFound = false;
         for (const [roomId, room] of rooms.entries()) {
@@ -3399,7 +3601,9 @@ io.on('connection', (socket) => {
                     gameState: room.gameState,
                     turn: room.turn,
                     profiles: room.profiles,
-                    chat: room.chat
+                    chat: room.chat,
+                    privateRoomId: room.privateRoomId || null,
+                    tournamentMatchId: room.tournamentMatchId || null
                 });
                 roomFound = true;
                 break;
@@ -3547,6 +3751,17 @@ io.on('connection', (socket) => {
 
                 // B11 Fix: Re-escrow both players for rematch atomically.
                 if (room.stake > 0 && db) {
+                    if (room.settlementPromise) {
+                        try {
+                            await room.settlementPromise;
+                        } catch (e) {
+                            console.error(`[Rematch] Previous settlement failed for ${roomId}:`, e);
+                            socket.emit('game_error', { message: 'Previous match settlement is still being reconciled. Please start a new match.' });
+                            return;
+                        }
+                    }
+
+                    const rematchEscrowSplits = {};
                     try {
                         await db.runTransaction(async (tx) => {
                             for (const pid of room.players) {
@@ -3559,16 +3774,23 @@ io.on('connection', (socket) => {
                                 let remaining = room.stake;
                                 let newPb = pb;
                                 let newRb = rb;
+                                let promoDeducted = 0;
+                                let realDeducted = 0;
 
                                 if (newPb >= remaining) {
+                                    promoDeducted = remaining;
                                     newPb -= remaining;
+                                    remaining = 0;
                                 } else {
+                                    promoDeducted = newPb;
                                     remaining -= newPb;
                                     newPb = 0;
+                                    realDeducted = remaining;
                                     newRb -= remaining;
                                 }
 
                                 if (newRb < 0) throw new Error(`Insufficient funds for rematch: ${pid}`);
+                                rematchEscrowSplits[pid] = { real: realDeducted, promo: promoDeducted };
                                 tx.update(userRef, { balance: newRb, promoBalance: newPb });
                                 tx.set(userRef.collection('transactions').doc(), {
                                     type: 'escrow_lock', amount: -room.stake, status: 'completed',
@@ -3578,9 +3800,16 @@ io.on('connection', (socket) => {
                             }
                         });
                     } catch (e) {
-                        socket.emit('game_error', { message: e.message || 'Insufficient funds for rematch' });
+                        const message = e.message?.includes('Insufficient funds')
+                            ? 'Rematch could not start because one player does not have enough available funds.'
+                            : (e.message || 'Rematch could not start. Please try a new match.');
+                        if (room.rematchVotes) room.rematchVotes.clear();
+                        io.to(roomId).emit('rematch_status', { requestorId: userId, status: 'failed' });
+                        io.to(roomId).emit('game_error', { message });
+                        persistRoomToFirestore(roomId, room);
                         return;
                     }
+                    room.escrowSplits = rematchEscrowSplits;
                 }
 
                 // Reset Room State
@@ -3589,6 +3818,8 @@ io.on('connection', (socket) => {
                 room.rematchVotes.clear();
                 room.rematchStreak = (room.rematchStreak || 0) + 1;  // P2-3: increment streak
                 room.lastRematchAt = Date.now();                      // P2-3: record timestamp
+                room.matchSequence = (room.matchSequence || 0) + 1;
+                room.settlementPromise = null;
                 room.turn = room.players[0];
                 room.gameState = createInitialGameState(room.gameType, room.players[0], room.players[1]);
 
@@ -3601,7 +3832,9 @@ io.on('connection', (socket) => {
                     gameState: room.gameState,
                     turn: room.turn,
                     profiles: room.profiles,
-                    chat: room.chat
+                    chat: room.chat,
+                    privateRoomId: room.privateRoomId || null,
+                    tournamentMatchId: room.tournamentMatchId || null
                 });
             }
             return;
@@ -3955,10 +4188,15 @@ io.on('connection', (socket) => {
                 if (room.gameType === 'Pool' && action.newState) {
                     // P0 Hardening: Shot event ledger for deterministic verification
                     // Track shot sequence to prevent replay attacks
+                    const poolEvent = action.poolEvent || 'state';
                     const shotCount = room.gameState.shotCount || 0;
                     if (action.newState.shotCount !== undefined) {
-                        if (action.newState.shotCount <= shotCount) {
+                        if (poolEvent === 'shot' && action.newState.shotCount <= shotCount) {
                             console.warn(`[Pool][${roomId}] Shot count regression or replay from ${userId}: ${action.newState.shotCount} <= ${shotCount}. Rejected.`);
+                            return;
+                        }
+                        if (poolEvent !== 'shot' && action.newState.shotCount < shotCount) {
+                            console.warn(`[Pool][${roomId}] Shot count rollback from ${userId}: ${action.newState.shotCount} < ${shotCount}. Rejected.`);
                             return;
                         }
                     }
@@ -4017,13 +4255,12 @@ io.on('connection', (socket) => {
                         if (newCount - prevCount > maxPocketable) {
                             console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: ${maxPocketable}). Rejected.`); return;
                         }
-                        // Task 22 Fix: Verify winner's group is cleared before accepting win
-                        const isP1 = room.players[0] === userId;
-                        const winnerGrp = isP1 ? room.gameState.myGroupP1 : room.gameState.myGroupP2;
+                        // Task 22 Fix: Verify shooter's group is cleared before accepting a self win
+                        const winnerGrp = getPoolPlayerGroup(action.newState, room.players, userId) || getPoolPlayerGroup(room.gameState, room.players, userId);
                         const myIds = winnerGrp === 'solids' ? [1,2,3,4,5,6,7] : winnerGrp === 'stripes' ? [9,10,11,12,13,14,15] : [];
                         const grpCleared = myIds.every(id => authBalls.find(b => b.id === id)?.pocketed || authBalls.find(b => b.id === id)?.isPotted);
-                        if (action.newState.winner === userId && grpCleared && myIds.length > 0 && !eightPocketed) {
-                            console.warn(`[Pool][${roomId}] Group cleared but 8-ball not pocketed by ${userId}. Rejected.`); return;
+                        if (action.newState.winner === userId && (!eightPocketed || !winnerGrp || myIds.length === 0 || !grpCleared)) {
+                            console.warn(`[Pool][${roomId}] Invalid 8-ball win by ${userId}: group=${winnerGrp || 'unassigned'} cleared=${grpCleared} eight=${eightPocketed}. Rejected.`); return;
                         }
                     }
                 }
@@ -4098,21 +4335,20 @@ io.on('connection', (socket) => {
                     const cuePocketed = proposedBalls.find(b => b.id === 0 && (b.pocketed || b.isPotted));
 
                     if (eightPocketed) {
-                        const isP1 = room.players[0] === action.newState.winner;
-                        const winnerGrp = isP1 ? room.gameState.myGroupP1 : room.gameState.myGroupP2;
+                        const shooterGrp = getPoolPlayerGroup(action.newState, room.players, userId) || getPoolPlayerGroup(room.gameState, room.players, userId);
 
                         // If groups have been assigned, check if winner cleared their group first
-                        if (winnerGrp) {
-                            const groupIds = winnerGrp === 'solids' ? [1,2,3,4,5,6,7] : [9,10,11,12,13,14,15];
-                            const allCleared = groupIds.every(id => {
+                        {
+                            const groupIds = shooterGrp === 'solids' ? [1,2,3,4,5,6,7] : shooterGrp === 'stripes' ? [9,10,11,12,13,14,15] : [];
+                            const allCleared = groupIds.length > 0 && groupIds.every(id => {
                                 const b = proposedBalls.find(pb => pb.id === id);
                                 return b && (b.pocketed || b.isPotted);
                             });
 
                             // Winner claims win but their group is NOT cleared — automatic loss
                             if (!allCleared) {
-                                console.warn(`[Pool][${roomId}] Early 8-ball by ${action.newState.winner}: group ${winnerGrp} not cleared. Auto-loss.`);
-                                const loserId = action.newState.winner;
+                                console.warn(`[Pool][${roomId}] Early 8-ball by ${userId}: group ${shooterGrp || 'unassigned'} not cleared. Auto-loss.`);
+                                const loserId = userId;
                                 const winnerId = room.players.find(p => p !== loserId);
                                 room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
                                 endGame(roomId, winnerId, 'Early 8-ball');
@@ -4128,13 +4364,30 @@ io.on('connection', (socket) => {
                             endGame(roomId, winnerId, 'Scratch on 8-ball');
                             return;
                         }
+
+                        if (action.newState.winner !== userId) {
+                            console.warn(`[Pool][${roomId}] Invalid 8-ball winner ${action.newState.winner}; shooter ${userId} legally cleared. Rejected.`);
+                            return;
+                        }
                     }
+                }
+
+                if (room.gameType === 'Pool' && Array.isArray(action.newState.players)) {
+                    action.newState.myGroupP1 = action.newState.players[0]?.group || null;
+                    action.newState.myGroupP2 = action.newState.players[1]?.group || null;
                 }
 
                 // Apply state after passing validation
                 room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
                 if (action.newState.timers) room.gameState.timers = action.newState.timers;
-                if (action.newState.turn) room.turn = action.newState.turn;
+                if (room.gameType === 'Pool' && action.newState.turn !== undefined) {
+                    const nextTurn = typeof action.newState.turn === 'number'
+                        ? room.players[action.newState.turn]
+                        : action.newState.turn;
+                    if (room.players.includes(nextTurn)) room.turn = nextTurn;
+                } else if (action.newState.turn) {
+                    room.turn = action.newState.turn;
+                }
 
                 // [Step 2.1] Persist Chess state after every move for crash-restart resilience
                 if (room.gameType === 'Chess' && action.newState.pgn) {
@@ -4384,9 +4637,21 @@ io.on('connection', (socket) => {
         console.log(`User disconnected: ${socket.id} (${userId})`);
 
         if (userId) {
+            removeUserSocket(userId, socket.id);
+            const hasAnotherActiveSocket = hasActiveSocketForUser(userId);
+            if (hasAnotherActiveSocket && disconnectTimers.has(userId)) {
+                clearTimeout(disconnectTimers.get(userId));
+                disconnectTimers.delete(userId);
+            }
+
             // Find active room
             for (const [roomId, room] of rooms.entries()) {
                 if (room.players.includes(userId) && room.status === 'active') {
+                    if (hasAnotherActiveSocket) {
+                        console.log(`User ${userId} still has another active socket; skipping disconnect forfeit timer.`);
+                        break;
+                    }
+
                     // Start Disconnect Timer — duration varies by game type:
                     // Fast games (Dice, TicTacToe) get 60s since rounds are short.
                     // Chess/Checkers get the full 4 minutes (240s).
@@ -4407,13 +4672,7 @@ io.on('connection', (socket) => {
                         // [Step 0.1] Re-check: timer may have been cleared by a reconnection.
                         // Also check whether the user still has an active socket (they reconnected).
                         if (!disconnectTimers.has(userId)) return;
-                        const activeSockets = userSockets.get(userId);
-                        // [Step 0.1] userSockets may be Map<userId, socketId> (string) OR
-                        // Map<userId, Set<socketId>> (after multi-tab fix). Handle both.
-                        const hasActiveSocket = activeSockets
-                            ? (typeof activeSockets.has === 'function' ? activeSockets.size > 0 : !!activeSockets)
-                            : false;
-                        if (hasActiveSocket) {
+                        if (hasActiveSocketForUser(userId)) {
                             console.log(`[Timer] ${userId} reconnected before forfeit — cancelling timer.`);
                             disconnectTimers.delete(userId);
                             return;
@@ -4430,20 +4689,17 @@ io.on('connection', (socket) => {
                     break;
                 }
                 // Also notify if game is completed but players are in rematch phase
-                if (room.players.includes(userId) && room.status === 'completed') {
+                if (!hasAnotherActiveSocket && room.players.includes(userId) && room.status === 'completed') {
                     io.to(roomId).emit('rematch_status', { requestorId: userId, status: 'declined' });
                 }
             }
-
-            userSockets.delete(userId);
-            socketUsers.delete(socket.id);
 
             // Remove from matchmaking queues and refund escrow.
             // [Step 2.7] CG-3: Only refund queue escrow if the user is NOT in an active room.
             // If they were matched and are in an active room, the room holds the escrow
             // (and forfeit/disconnect timer handles the game outcome).
             queues.forEach((queue, key) => {
-                const idx = queue.findIndex(i => i.userProfile.id === userId);
+                const idx = queue.findIndex(i => i.socketId === socket.id);
                 if (idx > -1) {
                     // Verify not also in an active room before refunding
                     const inActiveRoom = [...rooms.values()].some(r =>
@@ -4567,10 +4823,7 @@ const gracefulShutdown = async (signal) => {
             // Only refund if the game is genuinely stale (no move in last 60s)
             // or both players are already disconnected.
             const timeSinceLastMove = Date.now() - (room.gameState?.lastMoveTime || room.gameState?.startTime || 0);
-            const bothDisconnected = !room.players.some(pid => {
-                const sid = userSockets.get(pid);
-                return sid && io.sockets.sockets.has(sid);
-            });
+            const bothDisconnected = !room.players.some(pid => hasActiveSocketForUser(pid));
 
             if (timeSinceLastMove > 60_000 || bothDisconnected) {
                 for (const pid of room.players) {

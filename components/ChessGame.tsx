@@ -282,6 +282,18 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
     // BUG 5a FIX: For bot games, we are always White. Resolve immediately so the
     // board doesn't need to wait for a socketGame event.
     const isBotGame = !isP2P && (table.guest?.id === 'bot' || !table.guest);
+    const onGameEndRef = useRef(onGameEnd);
+    const p2pGameOverHandledRef = useRef(false);
+    const activeRoomId = isP2P ? (socketGame?.roomId || socketGame?.id || table.id) : table.id;
+
+    useEffect(() => {
+        onGameEndRef.current = onGameEnd;
+    }, [onGameEnd]);
+
+    useEffect(() => {
+        p2pGameOverHandledRef.current = false;
+        setIsGameOver(false);
+    }, [activeRoomId]);
 
     // BUG 4 FIX: Preload all 12 piece SVGs before showing the board.
     // Once all images have loaded (or after 2s timeout), set boardReady = true.
@@ -467,41 +479,33 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
                 } as { w: number; b: number });
             }
 
-            if (socketGame.winner) {
+            if (socketGame.status === 'completed' || socketGame.winner) {
+                p2pGameOverHandledRef.current = true;
                 setIsGameOver(true);
-                if (isP2P) {
-                    if (socketGame.winner === user.id) onGameEnd('win');
-                    else if (socketGame.winner === 'draw' || socketGame.winner === null) onGameEnd('draw');
-                    else onGameEnd('loss');
-                }
             }
         }
-    }, [socketGame, user.id, isP2P, onGameEnd]);
-
-    // Auto-refresh/redirect after game over
-    useEffect(() => {
-        if (isGameOver) {
-            const timer = setTimeout(() => {
-                window.location.reload();
-            }, 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [isGameOver]);
+    }, [socketGame, user.id, isP2P]);
 
     // --- SOCKET GAME_OVER LISTENER ---
     useEffect(() => {
         if (!isP2P || !socket) return;
 
         const handleGameOver = (data: any) => {
+            if (data?.roomId && socketGame?.roomId && data.roomId !== socketGame.roomId) return;
+            if (p2pGameOverHandledRef.current) return;
+            p2pGameOverHandledRef.current = true;
             setIsGameOver(true);
-            // SocketContext handles global SET_GAME_RESULT for P2P
+            playSFX(data?.winner === user.id ? 'win' : data?.winner ? 'loss' : 'notification');
+            // SocketContext handles global SET_GAME_RESULT for P2P.
+            // Do not call onGameEnd here; that can overwrite the financials from
+            // the server game_over payload and create duplicate end transitions.
         };
 
         socket.on('game_over', handleGameOver);
         return () => {
             socket.off('game_over', handleGameOver);
         };
-    }, [isP2P, socket, user.id, onGameEnd]);
+    }, [isP2P, socket, socketGame?.roomId, user.id]);
 
     // Ref to ensure we only send TIMEOUT_CLAIM once per game session
     const timeoutClaimSentRef = useRef(false);
@@ -564,19 +568,25 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
         // an empty dependency array).
         const { myColor: currentColor, isP2P: currentIsP2P } = stateRef.current;
         if (currentGamState.isGameOver()) {
+            // In P2P chess, the server is authoritative for the final result and
+            // financial settlement. Do not locally lock the board before the
+            // server emits game_over; otherwise a delayed/rejected final move can
+            // leave the user looking at a frozen board with no result overlay.
+            if (currentIsP2P) return;
+
             setIsGameOver(true);
             if (currentGamState.isCheckmate()) {
                 const winnerColor = currentGamState.turn() === 'w' ? 'b' : 'w';
                 const isWinner = winnerColor === currentColor;
                 playSFX(isWinner ? 'win' : 'loss');
-                if (!currentIsP2P) onGameEnd(isWinner ? 'win' : 'loss');
+                onGameEndRef.current(isWinner ? 'win' : 'loss');
             } else {
                 // BUG 1 FIX: draw conditions (stalemate, insufficient material, etc.)
                 // must use 'draw', NOT 'quit' which triggers a forfeit/loss in GameRoom
-                if (!currentIsP2P) onGameEnd('draw');
+                onGameEndRef.current('draw');
             }
         }
-    }, [onGameEnd]);
+    }, []);
 
     // Stable Move Execution
     const executeMove = useCallback(async (from: Square, to: Square, promotion?: string) => {

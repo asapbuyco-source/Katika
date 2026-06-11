@@ -11,7 +11,7 @@ import { io, Socket } from 'socket.io-client';
 import { onIdTokenChanged } from 'firebase/auth';
 import { SocketGameState } from '../types';
 import { useAppState } from './AppContext';
-import { auth, reportTournamentMatchResult } from './firebase';
+import { auth, setTournamentMatchActive } from './firebase';
 import { playSFX } from './sound';
 import { useToast } from './toast';
 
@@ -248,16 +248,8 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
 
         const handleMatchFound = (gameState: SocketGameState) => {
             if (gameState.tournamentMatchId) {
-                const user = auth.currentUser;
-                if (user) {
-                    user.getIdToken().then(token => {
-                        fetch('/api/tournaments/match-activate', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                            body: JSON.stringify({ matchId: gameState.tournamentMatchId })
-                        }).catch(e => console.error('Failed to activate tournament match:', e));
-                    });
-                }
+                setTournamentMatchActive(gameState.tournamentMatchId)
+                    .catch(e => console.error('Failed to activate tournament match:', e));
             }
             setSocketGame(gameState);
             setIsWaitingForSocketMatch(false);
@@ -304,6 +296,17 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
                 playSFX('notification');
             } else if (status === 'declined') {
                 dispatch({ type: 'SET_REMATCH_STATUS', payload: 'declined' });
+            } else if (status === 'failed') {
+                dispatch({ type: 'SET_REMATCH_STATUS', payload: 'failed' });
+            }
+        };
+
+        const handleGameError = (data?: { message?: string }) => {
+            toast.error(data?.message || 'Game action failed. Please try again.');
+            setIsWaitingForSocketMatch(false);
+            if (viewRef.current === 'matchmaking') {
+                dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
+                dispatch({ type: 'SET_VIEW', payload: 'lobby' });
             }
         };
 
@@ -316,11 +319,6 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             if (roomId && currentGame?.roomId && roomId !== currentGame.roomId) {
                 console.warn(`[Socket] Ignored stale game_over for room ${roomId}. Current room: ${currentGame.roomId}`);
                 return;
-            }
-
-            if (currentUser && winner === currentUser.id && currentGame?.tournamentMatchId) {
-                reportTournamentMatchResult(currentGame.tournamentMatchId, winner)
-                    .catch(e => console.error('Tournament result report failed:', e));
             }
 
             if (currentUser && winner === currentUser.id) {
@@ -346,6 +344,7 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         });
         socket.on('rematch_status', handleRematchStatus);
         socket.on('game_over', handleGameOver);
+        socket.on('game_error', handleGameError);
 
         return () => {
             socket.off('match_found', handleMatchFound);
@@ -355,8 +354,9 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
             socket.off('opponent_reconnected');
             socket.off('rematch_status', handleRematchStatus);
             socket.off('game_over', handleGameOver);
+            socket.off('game_error', handleGameError);
         };
-    }, [socket, dispatch, viewRef]);
+    }, [socket, dispatch, viewRef, toast]);
 
     // Rejoin on reconnect (only when there's an active game to rejoin)
     useEffect(() => {

@@ -3,7 +3,7 @@ import { ViewState, Table, SocketGameState, Tournament } from '../types';
 import { useAppState } from '../services/AppContext';
 import { useSocket } from '../services/SocketContext';
 import { useToast } from '../services/toast';
-import { createBotMatch, respondToChallenge, setTournamentMatchActive, logout, db } from '../services/firebase';
+import { auth, createBotMatch, respondToChallenge, setTournamentMatchActive, logout, db } from '../services/firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
 export const useGameController = () => {
@@ -31,6 +31,22 @@ export const useGameController = () => {
     const activeGameTable = socketGame ? constructTableFromSocket(socketGame) : offlineTable;
 
     // ── Matchmaking ───────────────────────────────────────────────────────────
+    const refreshSocketAuth = useCallback(async () => {
+        if (!socket?.connected) return;
+        const currentUser = auth.currentUser;
+        if (!currentUser) throw new Error('Please log in again before joining a match.');
+        const token = await currentUser.getIdToken();
+        await new Promise<void>((resolve, reject) => {
+            socket.timeout(5000).emit('refresh_token', { token }, (err: Error | null, ack?: { success?: boolean; error?: string }) => {
+                if (err || !ack?.success) {
+                    reject(new Error(ack?.error || 'Could not verify your game session.'));
+                    return;
+                }
+                resolve();
+            });
+        });
+    }, [socket]);
+
     const startMatchmaking = useCallback(async (stake: number, gameType: string, specificGameId?: string, difficulty?: string, isTournament = false) => {
         if (!user) return;
         const validGames = ['Dice', 'Checkers', 'Chess', 'TicTacToe', 'Cards', 'Ludo', 'Pool'];
@@ -62,10 +78,17 @@ export const useGameController = () => {
         }
 
         if (!socket) return;
+        try {
+            await refreshSocketAuth();
+        } catch (e: any) {
+            console.error('[App] Socket auth refresh failed:', e);
+            toast.error(e?.message || 'Could not verify your game session. Please try again.');
+            return;
+        }
         dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: { stake, gameType, isTournament } });
         dispatch({ type: 'SET_VIEW', payload: 'matchmaking' });
         socket.emit('join_game', { stake, userProfile: user, privateRoomId: specificGameId, gameType });
-    }, [user, isConnected, bypassConnection, socket, dispatch, toast]);
+    }, [user, isConnected, bypassConnection, socket, dispatch, toast, refreshSocketAuth]);
 
     const cancelMatchmaking = useCallback(() => {
         if (socket) socket.emit('leave_queue');
@@ -94,7 +117,8 @@ export const useGameController = () => {
         isTransitioningRef.current = false;
 
         if (table.tournamentMatchId) {
-            setTournamentMatchActive(table.tournamentMatchId);
+            setTournamentMatchActive(table.tournamentMatchId)
+                .catch(e => console.error('[Tournament] Failed to activate match:', e));
             activeTournamentMatchIdRef.current = table.tournamentMatchId;
         }
     }, []);

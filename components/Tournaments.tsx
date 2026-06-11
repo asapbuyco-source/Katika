@@ -732,19 +732,27 @@ export const Tournaments: React.FC<TournamentsProps> = ({ user, onJoinMatch, soc
                                                 </div>
 
                                             </div>
-                                            {myNextMatch.player2 ? (
-                                                <button
-                                                    onClick={() => {
-                                                        // Mark player as checked in for fair forfeit resolution
-                                                        setTournamentMatchCheckedIn(myNextMatch.id, user.id)
-                                                            .catch(e => console.error('Check-in failed:', e));
-                                                        onJoinMatch(selectedTournament.gameType, myNextMatch.id);
-                                                    }}
-                                                    className="w-full py-3 bg-green-500 hover:bg-green-400 text-white font-bold rounded-xl shadow-lg animate-pulse"
-                                                >
-                                                    ENTER MATCH LOBBY
-                                                </button>
-                                            ) : (
+                                            {myNextMatch.player2 ? (() => {
+                                                const matchOpen = myNextMatch.status === 'active' || normalizeTimestamp(myNextMatch.startTime).getTime() <= getServerTime();
+                                                return (
+                                                    <button
+                                                        disabled={!matchOpen}
+                                                        onClick={() => {
+                                                            if (!matchOpen) return;
+                                                            // Mark player as checked in for fair forfeit resolution
+                                                            setTournamentMatchCheckedIn(myNextMatch.id, user.id)
+                                                                .catch(e => console.error('Check-in failed:', e));
+                                                            onJoinMatch(selectedTournament.gameType, myNextMatch.id);
+                                                        }}
+                                                        className={`w-full py-3 text-white font-bold rounded-xl shadow-lg transition-all ${matchOpen
+                                                            ? 'bg-green-500 hover:bg-green-400 animate-pulse'
+                                                            : 'bg-white/10 text-slate-400 cursor-not-allowed border border-white/10'
+                                                            }`}
+                                                    >
+                                                        {matchOpen ? 'ENTER MATCH LOBBY' : 'MATCH NOT OPEN YET'}
+                                                    </button>
+                                                );
+                                            })() : (
                                                 <div className="w-full py-3 bg-white/5 border border-white/10 text-slate-300 font-bold rounded-xl text-center">
                                                     Automatic Bye (Wait for Next Round)
                                                 </div>

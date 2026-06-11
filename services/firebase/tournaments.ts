@@ -2,8 +2,8 @@
 // SERVER is the authoritative source for all tournament operations.
 // Client-side tournament functions delegate to the server API.
 import {
-    doc, getDoc, setDoc, collection, query, where, orderBy, limit,
-    getDocs, addDoc, updateDoc, onSnapshot, serverTimestamp, runTransaction, writeBatch
+    doc, collection, query, where, orderBy,
+    getDocs, onSnapshot
 } from "firebase/firestore";
 import { db } from './init';
 import { Tournament, TournamentMatch } from '../../types';
@@ -31,13 +31,26 @@ export const normalizeTimestamp = (val: any): Date => {
 
 let _serverTimeOffset = 0;
 
+const getAuthToken = async () => {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw new Error('Not authenticated');
+    return token;
+};
+
+const parseApiError = async (res: Response, fallback: string) => {
+    const data = await res.json().catch(() => ({}));
+    return new Error(data.error || fallback);
+};
+
 export const fetchServerTimeOffset = async () => {
     try {
         const before = Date.now();
         const res = await fetch(`${getApiUrl()}/api/time`);
         const after = Date.now();
         if (res.ok) {
-            const { serverTime } = await res.json();
+            const data = await res.json();
+            const serverTime = data.serverTime ?? data.time;
+            if (typeof serverTime !== 'number') return;
             const roundTrip = after - before;
             _serverTimeOffset = serverTime - (before + roundTrip / 2);
         }
@@ -94,8 +107,7 @@ export const getTournamentMatches = async (tournamentId: string): Promise<Tourna
 // Delegate tournament creation to the server API (admin-only).
 export const createTournament = async (data: Omit<Tournament, 'id'>) => {
     const SOCKET_URL = getApiUrl();
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error('Not authenticated');
+    const token = await getAuthToken();
     const res = await fetch(`${SOCKET_URL}/api/tournaments/create`, {
         method: 'POST',
         headers: {
@@ -105,79 +117,84 @@ export const createTournament = async (data: Omit<Tournament, 'id'>) => {
         body: JSON.stringify(data)
     });
     if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to create tournament');
+        throw await parseApiError(res, 'Failed to create tournament');
     }
     return res.json();
 };
 
 export const deleteTournament = async (tournamentId: string) => {
     const SOCKET_URL = getApiUrl();
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error('Not authenticated');
+    const token = await getAuthToken();
     const res = await fetch(`${SOCKET_URL}/api/tournaments/${tournamentId}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
     });
     if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to delete tournament');
+        throw await parseApiError(res, 'Failed to delete tournament');
     }
 };
 
-export const updateTournamentStatus = async (tournamentId: string, status: 'active' | 'completed' | 'registration') => {
-    await updateDoc(doc(db, "tournaments", tournamentId), { status });
+export const updateTournamentStatus = async (tournamentId: string, status: 'active' | 'completed' | 'registration' | 'cancelled') => {
+    const token = await getAuthToken();
+    const res = await fetch(`${getApiUrl()}/api/tournaments/update-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ tournamentId, status })
+    });
+    if (!res.ok) throw await parseApiError(res, 'Failed to update tournament status');
 };
 
 // Delegate tournament start to the server API (admin-only).
 export const startTournament = async (tournamentId: string) => {
     const SOCKET_URL = getApiUrl();
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error('Not authenticated');
+    const token = await getAuthToken();
     const res = await fetch(`${SOCKET_URL}/api/tournaments/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ tournamentId })
     });
     if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to start tournament');
+        throw await parseApiError(res, 'Failed to start tournament');
     }
 };
 
 export const setTournamentMatchActive = async (matchId: string) => {
-    await updateDoc(doc(db, "tournament_matches", matchId), { status: 'active' });
+    const token = await getAuthToken();
+    const res = await fetch(`${getApiUrl()}/api/tournaments/match-activate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ matchId })
+    });
+    if (!res.ok) throw await parseApiError(res, 'Failed to activate tournament match');
 };
 
 export const setTournamentMatchCheckedIn = async (matchId: string, userId: string) => {
-    const matchRef = doc(db, "tournament_matches", matchId);
-    const matchSnap = await getDoc(matchRef);
-    if (!matchSnap.exists()) return;
-    const existing = matchSnap.data().checkedIn || [];
-    if (!existing.includes(userId)) {
-        await updateDoc(matchRef, { checkedIn: [...existing, userId] });
-    }
+    const token = await getAuthToken();
+    const res = await fetch(`${getApiUrl()}/api/tournaments/match-check-in`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ matchId, userId })
+    });
+    if (!res.ok) throw await parseApiError(res, 'Failed to check in for tournament match');
 };
 
 // Delegate result reporting to the server API (handles bracket advancement atomically).
 export const reportTournamentMatchResult = async (matchId: string, winnerId: string) => {
     const SOCKET_URL = getApiUrl();
-    const token = await auth.currentUser?.getIdToken();
-    if (!token) throw new Error('Not authenticated');
+    const token = await getAuthToken();
     const res = await fetch(`${SOCKET_URL}/api/tournaments/force-result`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ matchId, winnerId })
     });
     if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || 'Failed to report match result');
+        throw await parseApiError(res, 'Failed to report match result');
     }
 };
 
 export const registerForTournament = async (tournamentId: string, user: { id: string }) => {
     try {
-        const token = await auth.currentUser?.getIdToken();
+        const token = await getAuthToken();
         const response = await fetch(`${getApiUrl()}/api/tournaments/register`, {
             method: 'POST',
             headers: {

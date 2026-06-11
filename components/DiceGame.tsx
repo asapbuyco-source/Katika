@@ -382,7 +382,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
     const hasRolledServer = isP2P && socketGame?.gameState?.roundRolls?.[user.id];
 
     return (
-        <div className="h-[100dvh] bg-royal-950 flex flex-col items-center justify-between p-4 relative overflow-hidden">
+        <div className="h-[100dvh] bg-royal-950 flex flex-col items-center justify-start gap-2 p-3 sm:p-4 relative overflow-hidden">
             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-10 pointer-events-none"></div>
             <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-transparent to-black/60 pointer-events-none"></div>
 
@@ -466,7 +466,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             </AnimatePresence>
 
             {/* --- HEADER --- */}
-            <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-2">
+            <div className="w-full max-w-2xl flex justify-between items-start relative z-10 pt-1 sm:pt-2 shrink-0">
                 <div className="flex items-center gap-2">
                     <div className="mr-2"><NetworkSignalIndicator /></div>
                     <button onClick={() => setShowForfeitModal(true)} className="p-2 bg-white/5 rounded-xl border border-white/10 text-slate-400 hover:text-white">
@@ -498,7 +498,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             </div>
 
             {/* --- TURN INDICATOR --- */}
-            <div className="mt-6 flex justify-center w-full relative z-20">
+            <div className="mt-3 sm:mt-6 flex justify-center w-full relative z-20 shrink-0">
                 <motion.div
                     initial={{ scale: 0.9, opacity: 0 }}
                     animate={{ scale: 1, opacity: 1 }}
@@ -514,22 +514,22 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 </motion.div>
             </div>
 
-            <div className="mt-3 w-full max-w-lg relative z-20 grid grid-cols-2 gap-2 text-[10px] font-bold uppercase tracking-wider">
-                <div className="rounded-xl border border-green-500/20 bg-green-500/10 px-3 py-2 text-green-300 flex items-center justify-center gap-1.5 text-center">
+            <div className="mt-2 sm:mt-3 w-full max-w-lg relative z-20 grid grid-cols-2 gap-2 text-[10px] font-bold uppercase tracking-wider shrink-0">
+                <div className="rounded-xl border border-green-500/20 bg-green-500/10 px-2 sm:px-3 py-1.5 sm:py-2 text-green-300 flex items-center justify-center gap-1.5 text-center min-h-11">
                     <CheckCircle2 size={13} /> Server roll verified
                 </div>
-                <div className="rounded-xl border border-gold-500/20 bg-gold-500/10 px-3 py-2 text-gold-300 flex items-center justify-center gap-1.5 text-center">
+                <div className="rounded-xl border border-gold-500/20 bg-gold-500/10 px-2 sm:px-3 py-1.5 sm:py-2 text-gold-300 flex items-center justify-center gap-1.5 text-center min-h-11">
                     <Box size={13} /> {table.stake > 0 ? `${table.stake.toLocaleString()} FCFA escrow` : 'Practice round'}
                 </div>
             </div>
 
             {/* --- ARENA --- */}
-            <div className="flex-1 w-full max-w-lg flex flex-col justify-center relative z-10 my-3 gap-6">
+            <div className="flex-1 min-h-0 w-full max-w-lg flex flex-col justify-center relative z-10 my-1 sm:my-3 gap-3 sm:gap-6">
                 <div className="relative">
-                    <div className={`flex flex-col items-center gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-105 z-20' : 'scale-95 opacity-60'}`}>
+                    <div className={`flex flex-col items-center gap-2 sm:gap-4 transition-all duration-500 ${!isMyTurn ? 'scale-100 sm:scale-105 z-20' : 'scale-95 opacity-60'}`}>
                         <div className="flex items-center gap-3">
                             <div className={`relative ${!isMyTurn ? 'ring-4 ring-red-500/50 rounded-full' : ''}`}>
-                                <img src={opponentAvatar} className="w-12 h-12 rounded-full border-2 border-red-500" alt={opponentName} />
+                                <img src={opponentAvatar} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-red-500" alt={opponentName} />
                                 {!isMyTurn && phase === 'rolling' && (
                                     <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
                                 )}
@@ -537,8 +537,8 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                             <div className="text-red-200 font-bold text-sm">{opponentName}</div>
                         </div>
 
-                        <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
-                            <div className="flex justify-center gap-6">
+                        <div className="relative bg-black/20 rounded-3xl p-4 sm:p-6 border border-white/5 w-full">
+                            <div className="flex justify-center gap-4 sm:gap-6">
                                 <Die2D value={oppDice[0]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
                                 <Die2D value={oppDice[1]} rolling={!isMyTurn && phase === 'rolling'} isMe={false} />
                             </div>
@@ -557,7 +557,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                 </div>
 
                 <motion.div
-                    className={`flex flex-col items-center gap-4 transition-all duration-500 ${isMyTurn ? 'scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
+                    className={`flex flex-col items-center gap-2 sm:gap-4 transition-all duration-500 ${isMyTurn ? 'scale-100 sm:scale-105 z-20 cursor-grab active:cursor-grabbing' : 'scale-95 opacity-60'}`}
                     onPanEnd={handleSwipe}
                     onTouchStart={(e: React.TouchEvent) => {
                         (window as any).diceTouchStart = e.touches[0].clientY;
@@ -572,7 +572,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                         }
                     }}
                 >
-                    <div className="relative bg-black/20 rounded-3xl p-6 border border-white/5 w-full">
+                    <div className="relative bg-black/20 rounded-3xl p-4 sm:p-6 border border-white/5 w-full">
                         {isMyTurn && phase === 'waiting' && !hasRolledServer && (
                             <motion.div
                                 initial={{ opacity: 0, y: 10 }}
@@ -584,7 +584,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
                             </motion.div>
                         )}
 
-                        <div className="flex justify-center gap-6">
+                        <div className="flex justify-center gap-4 sm:gap-6">
                             <Die2D value={myDice[0]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
                             <Die2D value={myDice[1]} rolling={isMyTurn && phase === 'rolling'} isMe={true} />
                         </div>
@@ -604,7 +604,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
 
                     <div className="flex items-center gap-3">
                         <div className={`relative ${isMyTurn ? 'ring-4 ring-gold-500/50 rounded-full' : ''}`}>
-                            <img src={user.avatar} className="w-12 h-12 rounded-full border-2 border-gold-500" alt="Your avatar" />
+                            <img src={user.avatar} className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border-2 border-gold-500" alt="Your avatar" />
                             {isMyTurn && phase === 'rolling' && (
                                 <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gold-500 text-royal-950 text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">Rolling...</div>
                             )}
@@ -615,7 +615,7 @@ export const DiceGame: React.FC<DiceGameProps> = ({ table, user, onGameEnd, sock
             </div>
 
             {/* --- CONTROLS --- */}
-            <div className="w-full max-w-md pb-6 relative z-20 h-24 flex items-end justify-center">
+            <div className="w-full max-w-md relative z-20 min-h-[76px] sm:min-h-[96px] pb-[max(1rem,env(safe-area-inset-bottom))] flex items-start justify-center shrink-0">
                 <AnimatePresence mode="wait">
                     {phase === 'waiting' && isMyTurn && !hasRolledServer ? (
                         <motion.button

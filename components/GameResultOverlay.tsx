@@ -14,7 +14,7 @@ interface GameResultOverlayProps {
     onContinue: () => void;
     // Rematch Props
     onRematch?: () => void;
-    rematchStatus?: 'idle' | 'requested' | 'opponent_requested' | 'declined';
+    rematchStatus?: 'idle' | 'requested' | 'opponent_requested' | 'declined' | 'failed';
     stake?: number;
     userBalance?: number;
     isTournament?: boolean; // New Prop
@@ -208,17 +208,21 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                                         <div className="text-red-400 text-xs font-bold bg-red-500/10 p-2 rounded-lg mb-2 border border-red-500/20">
                                             Opponent Declined Rematch
                                         </div>
+                                    ) : rematchStatus === 'failed' ? (
+                                        <div className="text-amber-300 text-xs font-bold bg-amber-500/10 p-2 rounded-lg mb-2 border border-amber-500/20">
+                                            Rematch unavailable. Start a new match.
+                                        </div>
                                     ) : null}
 
                                     <button
                                         onClick={onRematch}
-                                        disabled={rematchStatus === 'requested' || rematchStatus === 'declined'}
+                                        disabled={rematchStatus === 'requested' || rematchStatus === 'declined' || rematchStatus === 'failed'}
                                         className={`
                                     w-full py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95 border
                                     ${rematchStatus === 'opponent_requested'
                                                 ? 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white shadow-lg shadow-purple-500/30 border-transparent animate-pulse'
                                                 : 'bg-white/5 text-gold-400 border-gold-500/30 hover:bg-gold-500/10'}
-                                    ${rematchStatus === 'requested' ? 'opacity-70 cursor-not-allowed' : ''}
+                                    ${rematchStatus === 'requested' || rematchStatus === 'failed' ? 'opacity-70 cursor-not-allowed' : ''}
                                 `}
                                     >
                                         {rematchStatus === 'requested' ? (

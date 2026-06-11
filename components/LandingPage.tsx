@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { motion } from 'framer-motion';
-import { ChevronRight, ShieldCheck, Zap, Globe, Smartphone, Lock, PlayCircle, Dice5, Brain, Target, X, Layers, Grid3x3 } from 'lucide-react';
+import { ChevronRight, ShieldCheck, Zap, Globe, Smartphone, Lock, PlayCircle, Dice5, Brain, Target, X, Layers, Grid3x3, Disc } from 'lucide-react';
 import { ViewState } from '../types';
 
 interface LandingPageProps {
@@ -30,7 +30,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
   ];
 
   const launchScope = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
+    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice,Pool')
       .split(',')
       .map((game: string) => game.trim())
       .filter(Boolean)
@@ -41,6 +41,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
     { id: 'Dice', name: "Dice Duel", icon: Dice5, color: "text-gold-400", border: "border-gold-500/20", bg: "bg-gold-500/10", desc: "Predict, roll, and win." },
     { id: 'Chess', name: "Master Chess", icon: Brain, color: "text-purple-400", border: "border-purple-500/20", bg: "bg-purple-500/10", desc: "Pure strategy & skill." },
     { id: 'Checkers', name: "Checkers Pro", icon: Target, color: "text-orange-400", border: "border-orange-500/20", bg: "bg-orange-500/10", desc: "Jump your way to victory." },
+    { id: 'Pool', name: "8-Ball Pool", icon: Disc, color: "text-emerald-400", border: "border-emerald-500/20", bg: "bg-emerald-500/10", desc: "Line up clean shots." },
     { id: 'TicTacToe', name: "XO Clash", icon: X, color: "text-blue-400", border: "border-blue-500/20", bg: "bg-blue-500/10", desc: "Fast-paced logic battle." },
     { id: 'Cards', name: "Kmer Cards", icon: Layers, color: "text-pink-400", border: "border-pink-500/20", bg: "bg-pink-500/10", desc: "Local favorites (Whot/Kmer)." },
   ].filter((game) => launchScope.has(game.id));
@@ -134,7 +135,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
               </h1>
 
               <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-                  The first premium P2P gaming platform. Challenge real players in Chess, Checkers, and Dice. Secure withdrawals to MoMo.
+                  The first premium P2P gaming platform. Challenge real players in Chess, Checkers, Dice, and Pool. Secure withdrawals to MoMo.
               </p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -169,7 +170,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                 variants={containerVariants}
                 initial="hidden"
                 animate="visible"
-                className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4"
+                className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto"
               >
                   {games.map((game) => (
                       <motion.div

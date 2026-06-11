@@ -33,7 +33,7 @@ export interface AppState {
     } | null;
 
     // Rematch
-    rematchStatus: 'idle' | 'requested' | 'opponent_requested' | 'declined';
+    rematchStatus: 'idle' | 'requested' | 'opponent_requested' | 'declined' | 'failed';
 
     // Disconnection
     opponentDisconnected: boolean;

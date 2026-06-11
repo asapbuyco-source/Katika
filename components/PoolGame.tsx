@@ -8,7 +8,7 @@ import {
     FIELD_LEFT, FIELD_TOP, FIELD_RIGHT, FIELD_BOTTOM,
     TABLE_WIDTH, TABLE_HEIGHT, CUSHION_THICKNESS,
 } from '../game-graphics/constants';
-import { Table, User } from '../types';
+import { SocketGameState, Table, User } from '../types';
 import { Socket } from 'socket.io-client';
 import { playSFX, playPoolSound } from '../services/sound';
 
@@ -29,6 +29,7 @@ interface PoolGameProps {
     user: User;
     onGameEnd: (result: 'win' | 'loss' | 'quit' | 'draw') => void;
     socket?: Socket | null;
+    socketGame?: SocketGameState | null;
     isBotMode?: boolean;
     botDifficulty?: 'easy' | 'medium' | 'hard';
 }
@@ -62,9 +63,12 @@ interface FullGameState {
     firstHit: number | null;
     foul: boolean;
     winner: string | null;
+    ballInHand: boolean;
 }
 
-export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, socket, isBotMode, botDifficulty = 'medium' }) => {
+type PoolSyncEvent = 'state' | 'shot' | 'placeCue';
+
+export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, socket, socketGame, isBotMode, botDifficulty = 'medium' }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const ballsRef = useRef<Ball[]>(rackBalls());
     const tableGfxRef = useRef<HTMLCanvasElement | null>(null);
@@ -92,6 +96,10 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const gameOverCalledRef = useRef(false); // Z3 fix
     const foulRef = useRef(false);
     const winnerRef = useRef<string | null>(null);
+    const p2pActiveRef = useRef(false);
+    const emitStateRef = useRef<(poolEvent?: PoolSyncEvent) => void>(() => {});
+    const emitGameOverRef = useRef<(won: boolean) => void>(() => {});
+    const socketGameKeyRef = useRef<string | null>(null);
 
     // S1 fix: refs for values that were stale in shoot()
     const aimAngleRef = useRef(0);
@@ -236,90 +244,102 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     useEffect(() => { powerRef.current = power; }, [power]);
     useEffect(() => { pullbackRef.current = pullback; }, [pullback]);
     useEffect(() => { showAimRef.current = showAim; }, [showAim]);
+    useEffect(() => { p2pActiveRef.current = !!socket && !isBotMode; }, [socket, isBotMode]);
+
+    const syncRoomState = useCallback((room: any, resetMatch = false) => {
+        if (!room?.players || !Array.isArray(room.players) || !user?.id) return;
+        const playerIndex = room.players.indexOf(user.id);
+        if (playerIndex < 0) return;
+
+        const gs = room.gameState || {};
+        const myIdx = (playerIndex === 1 ? 1 : 0) as 0 | 1;
+        myIdxRef.current = myIdx;
+
+        if (resetMatch) {
+            breakDoneRef.current = false;
+            gameOverCalledRef.current = false;
+            pocketedThisTurnRef.current = new Set();
+            firstHitRef.current = null;
+            foulRef.current = false;
+            winnerRef.current = null;
+            setWinner(null);
+        }
+
+        if (Array.isArray(gs.balls) && gs.balls.length > 0) {
+            ballsRef.current = gs.balls as Ball[];
+            setBalls(ballsRef.current.slice());
+        }
+
+        const makePlayer = (idx: 0 | 1): PlayerState => {
+            const id = room.players[idx] || '';
+            const profile = room.profiles?.[id] || {};
+            const statePlayer = Array.isArray(gs.players) ? (gs.players[idx] || {}) : {};
+            const group = statePlayer.group === 'solids' || statePlayer.group === 'stripes' ? statePlayer.group : null;
+            return {
+                name: statePlayer.name || profile.name || `Player ${idx + 1}`,
+                group,
+                ballsPocketed: Array.isArray(statePlayer.ballsPocketed) ? statePlayer.ballsPocketed : [],
+                id,
+                elo: Number(statePlayer.elo ?? profile.elo ?? 0),
+                avatar: statePlayer.avatar || profile.avatar || '',
+            };
+        };
+        const nextPlayers: [PlayerState, PlayerState] = [makePlayer(0), makePlayer(1)];
+        playersRef.current = nextPlayers;
+        setPlayers(nextPlayers);
+
+        const rawTurn = typeof room.turn === 'string'
+            ? room.players.indexOf(room.turn)
+            : typeof gs.turn === 'number'
+                ? gs.turn
+                : typeof room.turn === 'number'
+                    ? room.turn
+                    : 0;
+        const nextTurn = (rawTurn === 1 ? 1 : 0) as 0 | 1;
+        turnRef.current = nextTurn;
+        setTurn(nextTurn);
+        isMyTurnRef.current = nextTurn === myIdxRef.current;
+        setIsMyTurnState(isMyTurnRef.current);
+
+        if (typeof gs.shotCount === 'number') {
+            shotCountRef.current = gs.shotCount;
+            setShotCount(gs.shotCount);
+        }
+        if (gs.firstHit !== undefined) firstHitRef.current = gs.firstHit as number | null;
+        if (typeof gs.foul === 'boolean') foulRef.current = gs.foul;
+        if (typeof gs.winner === 'string') {
+            winnerRef.current = gs.winner;
+            setWinner(gs.winner === user.id ? 'You' : 'Opponent');
+        }
+
+        const nextPhase = (gs.phase || 'aiming') as GamePhase;
+        phaseRef.current = nextPhase;
+        setPhase(nextPhase);
+
+        if (nextPhase === 'game_over') {
+            messageRef.current = winnerRef.current === user.id ? 'You Win!' : 'You Lose';
+        } else if (nextPhase === 'place_cue') {
+            messageRef.current = isMyTurnRef.current ? 'Ball in hand! Place cue ball' : 'Opponent placing cue ball...';
+        } else if (resetMatch && shotCountRef.current === 0) {
+            messageRef.current = isMyTurnRef.current ? 'Your turn - Break!' : "Opponent's turn";
+        } else {
+            messageRef.current = isMyTurnRef.current ? 'Your turn' : "Opponent's turn";
+        }
+        setMessage(messageRef.current);
+    }, [user?.id]);
 
     // ── Socket setup (S3 fix: full state sync) ────────────────────────────────
     useEffect(() => {
         if (!socket) return;
-        socket.on('connect', () => setMessage('Connected!'));
-        socket.on('match_found', (room: any) => {
-            const myIdx = Math.max(0, room.players.indexOf(user?.id)) as 0 | 1;
-            myIdxRef.current = myIdx;
-            isMyTurnRef.current = myIdx === 0;
-            setIsMyTurnState(myIdx === 0);
-            turnRef.current = myIdx;
-            setTurn(myIdx);
-            phaseRef.current = 'aiming';
-            setPhase('aiming');
-            messageRef.current = isMyTurnRef.current ? 'Your turn - Break!' : "Opponent's turn";
-            setMessage(messageRef.current);
-            breakDoneRef.current = false;
-            gameOverCalledRef.current = false;
-            if (room.gameState?.balls) {
-                ballsRef.current = room.gameState.balls;
-                setBalls(room.gameState.balls.slice());
-            }
-            const p1: PlayerState = {
-                name: room.profiles?.[room.players[0]]?.name || 'Player 1',
-                group: room.gameState?.players?.[0]?.group ?? null,
-                ballsPocketed: room.gameState?.players?.[0]?.ballsPocketed ?? [],
-                id: room.players[0],
-                elo: room.profiles?.[room.players[0]]?.elo ?? 0,
-                avatar: room.profiles?.[room.players[0]]?.avatar ?? '',
-            };
-            const p2: PlayerState = {
-                name: room.profiles?.[room.players[1]]?.name || 'Player 2',
-                group: room.gameState?.players?.[1]?.group ?? null,
-                ballsPocketed: room.gameState?.players?.[1]?.ballsPocketed ?? [],
-                id: room.players[1],
-                elo: room.profiles?.[room.players[1]]?.elo ?? 0,
-                avatar: room.profiles?.[room.players[1]]?.avatar ?? '',
-            };
-            playersRef.current = [p1, p2];
-            setPlayers([p1, p2]);
-            pocketedThisTurnRef.current = new Set();
-            firstHitRef.current = null;
-        });
 
-        socket.on('game_update', (room: any) => {
-            // S3 + C4 fix: sync full game state
-            if (room.gameState) {
-                const gs = room.gameState;
-                if (gs.balls) {
-                    // S4: animate remote shots
-                    if (!isMyTurnRef.current && gs.phase === 'shooting') {
-                        remoteTargetBalls.current = gs.balls;
-                        remoteAnimStart.current = performance.now();
-                    } else {
-                        ballsRef.current = gs.balls;
-                        setBalls(gs.balls.slice());
-                    }
-                    runningRef.current = false;
-                    if (frameRef.current) cancelAnimationFrame(frameRef.current);
-                }
-                if (gs.players) {
-                    playersRef.current = gs.players as [PlayerState, PlayerState];
-                    setPlayers(gs.players);
-                }
-                if (gs.phase) {
-                    phaseRef.current = gs.phase;
-                    setPhase(gs.phase);
-                }
-                if (gs.firstHit !== undefined) {
-                    firstHitRef.current = gs.firstHit;
-                }
-            }
-            if (room.turn) {
-                const newTurn = room.players.indexOf(room.turn) as 0 | 1;
-                turnRef.current = newTurn;
-                setTurn(newTurn);
-                isMyTurnRef.current = newTurn === myIdxRef.current;
-                setIsMyTurnState(isMyTurnRef.current);
-                messageRef.current = isMyTurnRef.current ? 'Your turn' : "Opponent's turn";
-                setMessage(messageRef.current);
-            }
-        });
-
-        socket.on('game_over', (data: any) => {
+        const handleConnect = () => setMessage('Connected!');
+        const handleMatchFound = (room: any) => syncRoomState(room, true);
+        const handleGameUpdate = (room: any) => {
+            runningRef.current = false;
+            if (frameRef.current) cancelAnimationFrame(frameRef.current);
+            syncRoomState(room, false);
+        };
+        const handleGameOver = (data: any) => {
             phaseRef.current = 'game_over';
             setPhase('game_over');
             const won = data.winner === user?.id;
@@ -332,15 +352,29 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 gameOverCalledRef.current = true;
                 onGameEnd(won ? 'win' : 'loss');
             }
-        });
+        };
+
+        socket.on('connect', handleConnect);
+        socket.on('match_found', handleMatchFound);
+        socket.on('game_update', handleGameUpdate);
+        socket.on('game_over', handleGameOver);
 
         return () => {
-            socket.off('connect');
-            socket.off('match_found');
-            socket.off('game_update');
-            socket.off('game_over');
+            socket.off('connect', handleConnect);
+            socket.off('match_found', handleMatchFound);
+            socket.off('game_update', handleGameUpdate);
+            socket.off('game_over', handleGameOver);
         };
-    }, [socket, user, table.id, onGameEnd]);
+    }, [socket, user?.id, onGameEnd, syncRoomState]);
+
+    useEffect(() => {
+        if (!socketGame) return;
+        const gameState = socketGame.gameState as { startTime?: number } | undefined;
+        const key = `${socketGame.roomId}:${gameState?.startTime || 0}`;
+        const isNewMatch = socketGameKeyRef.current !== key;
+        socketGameKeyRef.current = key;
+        syncRoomState(socketGame, isNewMatch);
+    }, [socketGame, syncRoomState]);
 
     // ── Remote shot animation render loop (S4 fix) ───────────────────────────
     useEffect(() => {
@@ -460,8 +494,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 messageRef.current = 'Scratched on 8-ball! You Lose';
                 setMessage(messageRef.current);
                 playSFX('loss');
-                if (!gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('loss'); }
-                emitGameOver(false);
+                if (!p2pActiveRef.current && !gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('loss'); }
+                emitGameOverRef.current(false);
                 return;
             }
 
@@ -471,16 +505,16 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 messageRef.current = '8-Ball Pocketed! Victory!';
                 setMessage(messageRef.current);
                 playSFX('win');
-                if (!gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('win'); }
-                emitGameOver(true);
+                if (!p2pActiveRef.current && !gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('win'); }
+                emitGameOverRef.current(true);
             } else {
                 setWinner('Opponent');
                 winnerRef.current = playersRef.current[turn === 0 ? 1 : 0].id;
                 messageRef.current = '8-Ball Foul! You Lose';
                 setMessage(messageRef.current);
                 playSFX('loss');
-                if (!gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('loss'); }
-                emitGameOver(false);
+                if (!p2pActiveRef.current && !gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('loss'); }
+                emitGameOverRef.current(false);
             }
             return;
         }
@@ -506,7 +540,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             pocketedThisTurnRef.current = new Set();
             firstHitRef.current = null;
             setBalls(ballsRef.current.slice());
-            emitState();
+            emitStateRef.current('shot');
             return;
         }
 
@@ -568,13 +602,14 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             setPhase('aiming');
             pocketedThisTurnRef.current = new Set();
             firstHitRef.current = null;
-            emitState();
+            emitStateRef.current('shot');
             return;
         }
 
+        const activeGroup = nextPlayers[turn].group;
         const ownPocketed = pocketed.filter(b => {
             const g = getGroup(b.id);
-            return g && g === turnPlayer.group;
+            return g && g === activeGroup;
         });
 
         if (ownPocketed.length > 0) {
@@ -595,7 +630,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         firstHitRef.current = null;
         railHitRef.current = false;
         if (shotCountRef.current === 1) breakDoneRef.current = true;
-        emitState();
+        emitStateRef.current('shot');
     }, []);
 
     const gameLoop = useCallback(() => {
@@ -647,8 +682,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         frameRef.current = requestAnimationFrame(gameLoop);
     }, [gameLoop]);
 
-    const emitState = useCallback(() => {
-        if (!socket && !isBotMode) return;
+    const emitState = useCallback((poolEvent: PoolSyncEvent = 'state') => {
+        if (!socket || isBotMode) return;
         const gs: FullGameState = {
             balls: ballsRef.current,
             turn: turnRef.current,
@@ -658,26 +693,47 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
             firstHit: firstHitRef.current,
             foul: foulRef.current,
             winner: winnerRef.current,
+            ballInHand: phaseRef.current === 'place_cue',
         };
-        if (socket) {
-            socket.emit('game_action', {
-                roomId: table.id,
+        socket.emit('game_action', {
+            roomId: table.id,
+            action: {
+                type: 'MOVE',
                 newState: gs,
+                poolEvent,
                 lastMoveTime: Date.now(),
-            });
-        }
+            },
+        });
     }, [socket, table.id, isBotMode]);
+    emitStateRef.current = emitState;
 
     const emitGameOver = useCallback((won: boolean) => {
         if (isBotMode) return; // bot mode has no socket
         if (!socket) return;
+        const gs: FullGameState = {
+            balls: ballsRef.current,
+            turn: turnRef.current,
+            players: playersRef.current,
+            phase: 'game_over',
+            shotCount: shotCountRef.current,
+            firstHit: firstHitRef.current,
+            foul: foulRef.current,
+            winner: winnerRef.current,
+            ballInHand: false,
+        };
         socket.emit('game_action', {
             roomId: table.id,
-            gameOver: true,
-            winner: user?.id,
-            won,
+            action: {
+                type: 'MOVE',
+                newState: gs,
+                poolEvent: 'shot',
+                gameOver: true,
+                won,
+                lastMoveTime: Date.now(),
+            },
         });
-    }, [socket, table.id, user, isBotMode]);
+    }, [socket, table.id, isBotMode]);
+    emitGameOverRef.current = emitGameOver;
 
     // ── Coordinate conversion ───────────────────────────────────────────────
     const canvasToTable = useCallback((cx: number, cy: number) => {
@@ -765,7 +821,7 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                 setPhase('aiming');
                 messageRef.current = isMyTurnRef.current ? 'Your turn' : "Opponent's turn";
                 setMessage(messageRef.current);
-                emitState();
+                emitState('placeCue');
             }
         }
     }, [canvasToTable, emitState]);
