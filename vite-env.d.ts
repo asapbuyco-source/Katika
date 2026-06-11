@@ -17,6 +17,7 @@ interface ImportMetaEnv {
 
   // Socket.IO Backend
   readonly VITE_SOCKET_URL: string;
+  readonly VITE_LAUNCH_GAMES: string;
 }
 
 interface ImportMeta {

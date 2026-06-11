@@ -3,6 +3,7 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { ChevronRight, ShieldCheck, Zap, Globe, Smartphone, Lock, PlayCircle, Dice5, Brain, Target, X, Layers, Grid3x3, Disc } from 'lucide-react';
 import { ViewState } from '../types';
+import { getLaunchGameScope } from '../services/launchScope';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -29,12 +30,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
     }
   ];
 
-  const launchScope = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice,Pool')
-      .split(',')
-      .map((game: string) => game.trim())
-      .filter(Boolean)
-  );
+  const launchScope = getLaunchGameScope();
 
   const games = [
     { id: 'Ludo', name: "Ludo King", icon: Grid3x3, color: "text-red-400", border: "border-red-500/20", bg: "bg-red-500/10", desc: "The classic race to home." },

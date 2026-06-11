@@ -201,11 +201,37 @@ const SOCKET_AUTH_MODE = misconfiguredSocketAuth ? 'log' : (process.env.SOCKET_A
 // P1-1: Launch scope lock — only these game types are shown in the UI during launch.
 // Format: comma-separated game type IDs. Defaults to 'Chess,Checkers,Dice' for launch.
 // Set LAUNCH_GAMES='Chess,Checkers,Dice,Ludo,TicTacToe,Pool,Cards' to open all.
-const LAUNCH_GAMES = (process.env.LAUNCH_GAMES || 'Chess,Checkers,Dice')
-    .split(',').map(g => g.trim()).filter(Boolean);
+const DEFAULT_LAUNCH_GAMES = ['Chess', 'Checkers', 'Dice', 'Pool'];
+const LAUNCH_GAME_ALIASES = {
+    chess: 'Chess',
+    checkers: 'Checkers',
+    draughts: 'Checkers',
+    dice: 'Dice',
+    pool: 'Pool',
+    '8ballpool': 'Pool',
+    ballpool: 'Pool',
+    ludo: 'Ludo',
+    tictactoe: 'TicTacToe',
+    xo: 'TicTacToe',
+    cards: 'Cards',
+    whot: 'Cards'
+};
+const normalizeLaunchGameId = (value) => {
+    const key = String(value || '')
+        .trim()
+        .replace(/^['"]+|['"]+$/g, '')
+        .replace(/[\s_-]+/g, '')
+        .toLowerCase();
+    return LAUNCH_GAME_ALIASES[key] || null;
+};
+const parseLaunchGames = (raw) => {
+    const source = raw && String(raw).trim() ? String(raw) : DEFAULT_LAUNCH_GAMES.join(',');
+    return new Set(source.split(',').map(normalizeLaunchGameId).filter(Boolean));
+};
+const LAUNCH_GAMES = parseLaunchGames(process.env.LAUNCH_GAMES);
 
 const IMPLEMENTED_P2P_GAMES = new Set(['Chess', 'Checkers', 'Dice', 'TicTacToe', 'Ludo', 'Pool']);
-const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.includes(gameType) && IMPLEMENTED_P2P_GAMES.has(gameType);
+const isGameInLaunchScope = (gameType) => LAUNCH_GAMES.has(gameType) && IMPLEMENTED_P2P_GAMES.has(gameType);
 
 // --- FIREBASE ADMIN INITIALIZATION ---
 try {

@@ -8,6 +8,7 @@ import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus,
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 import { useToast } from '../services/toast';
+import { getLaunchGameScope } from '../services/launchScope';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -39,10 +40,7 @@ const STATIC_GAME_LIST = [
 
 // P1-1: Scope lock — build-time constant (Vite define). Cannot be overridden at runtime.
 // Games not in this list are hidden from the lobby even if their admin status is 'active'.
-const LAUNCH_GAME_SCOPE = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
-        .split(',').map((g: string) => g.trim()).filter(Boolean)
-);
+const LAUNCH_GAME_SCOPE = getLaunchGameScope();
 
 export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initialGameId, onClearInitialGame }) => {
     const { t } = useLanguage();

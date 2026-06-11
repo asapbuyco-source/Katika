@@ -8,6 +8,7 @@ import { useLanguage } from '../services/i18n';
 import { BalanceCounter } from './BalanceCounter';
 import { StreakBadge } from './StreakBadge';
 import { NetworkSignalIndicator } from './NetworkSignalIndicator';
+import { getLaunchGameScope } from '../services/launchScope';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -63,10 +64,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   }, [winners]);
 
   // P1-1: Build-time scope lock — only show launch-scope games on the dashboard.
-  const LAUNCH_GAME_SCOPE = new Set(
-    (import.meta.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
-      .split(',').map((g: string) => g.trim()).filter(Boolean)
-  );
+  const LAUNCH_GAME_SCOPE = getLaunchGameScope();
 
   const games = [
     { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', defaultStatus: 'active' },
