@@ -101,13 +101,25 @@ export const useGameController = () => {
         try {
             const { gameId } = await respondToChallenge(incomingChallenge.id, 'accepted');
             if (!gameId) throw new Error('Challenge accepted without a private room id.');
-            startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
+            await startMatchmaking(incomingChallenge.stake, incomingChallenge.gameType, gameId);
+            dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
         } catch (e) {
             console.error('[App] Failed to create challenge game:', e);
             toast.error('Could not accept challenge. Please try again.');
         }
-        dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: null });
     }, [incomingChallenge, user, startMatchmaking, dispatch, toast]);
+
+    useEffect(() => {
+        if (!socket) return;
+        const onChallengeAccepted = ({ gameId, gameType, stake }: { gameId: string, gameType: string, stake: number }) => {
+            // Sender receives this notification when recipient accepts
+            startMatchmaking(stake, gameType, gameId);
+        };
+        socket.on('challenge_accepted', onChallengeAccepted);
+        return () => {
+            socket.off('challenge_accepted', onChallengeAccepted);
+        };
+    }, [socket, startMatchmaking]);
 
     const handleMatchFound = useCallback((table: Table) => {
         // FIX: Reset the transitioning guard so that the new game (or rematch)

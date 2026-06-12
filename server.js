@@ -2688,6 +2688,7 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         const gameId = `challenge_${challengeId}`;
         if (!senderId || typeof senderId !== 'string') return res.status(400).json({ error: 'Invalid challenge sender.' });
 
+        let gameType, stake;
         await db.runTransaction(async (tx) => {
             const freshChallengeSnap = await tx.get(challengeRef);
             if (!freshChallengeSnap.exists) throw new Error('CHALLENGE_NOT_FOUND');
@@ -2708,12 +2709,18 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
             if (receiverAvailable < freshChallenge.stake) throw new Error('RECEIVER_INSUFFICIENT_FUNDS');
             if (senderAvailable < freshChallenge.stake) throw new Error('SENDER_INSUFFICIENT_FUNDS');
 
+            gameType = freshChallenge.gameType;
+            stake = freshChallenge.stake;
+
             tx.update(challengeRef, {
                 status: 'accepted',
                 gameId,
                 respondedAt: admin.firestore.FieldValue.serverTimestamp()
             });
         });
+
+        // AUDIT FIX: Notify sender via socket to join the private room queue immediately
+        emitToUser(senderId, 'challenge_accepted', { gameId, gameType, stake });
 
         res.status(200).json({ ok: true, gameId });
     } catch (err) {
