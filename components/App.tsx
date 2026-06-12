@@ -3,7 +3,7 @@ import React, { useEffect, useRef, ReactNode, ErrorInfo, Component, lazy, Suspen
 import { ViewState, Table, SocketGameState, GameAction } from '../types';
 import { Navigation } from './Navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Loader2, AlertTriangle, RefreshCw, WifiOff, X } from 'lucide-react';
+import { Loader2, AlertTriangle, RefreshCw, WifiOff, X, Smartphone, ChevronRight } from 'lucide-react';
 import { LanguageProvider } from '../services/i18n';
 import { ThemeProvider, useTheme } from '../services/theme';
 import { AppStateProvider, useAppState } from '../services/AppContext';
@@ -269,6 +269,135 @@ const MV = ({ children, k }: { children: ReactNode; k: string }) => (
     </motion.div>
 );
 
+
+// ─── Google New-User Phone Collection Modal ────────────────────────────────────
+// Shown after Google sign-in when no Firestore profile exists yet.
+// Collects a Cameroon phone number so the same device+phone anti-abuse checks
+// used for email signups apply, and the 100 FCFA welcome bonus can be granted.
+interface GooglePhoneModalProps {
+    googleUser: any;
+    onSubmit: (phone: string) => Promise<void>;
+    onSkip: () => Promise<void>;
+    isLoading: boolean;
+    error: string;
+}
+const GooglePhoneModal = ({ googleUser, onSubmit, onSkip, isLoading, error }: GooglePhoneModalProps) => {
+    const [phone, setPhone] = React.useState('');
+    const [localError, setLocalError] = React.useState('');
+
+    const validateAndSubmit = async () => {
+        const raw = phone.trim().replace(/\s+/g, '');
+        const clean = raw.startsWith('+237') ? raw.slice(4) : raw.startsWith('237') ? raw.slice(3) : raw;
+        if (!/^6\d{8}$/.test(clean)) {
+            setLocalError('Enter a valid Cameroon number starting with 6 (e.g. 650 123 456)');
+            return;
+        }
+        setLocalError('');
+        await onSubmit(clean);
+    };
+
+    const displayName = googleUser?.displayName || 'there';
+    const avatarUrl = googleUser?.photoURL || '';
+
+    return (
+        <motion.div
+            key="google-phone-modal"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-black/70 backdrop-blur-md"
+        >
+            <motion.div
+                initial={{ scale: 0.92, y: 20, opacity: 0 }}
+                animate={{ scale: 1, y: 0, opacity: 1 }}
+                exit={{ scale: 0.92, y: 20, opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                className="w-full max-w-sm bg-royal-900 border border-white/10 rounded-3xl shadow-2xl overflow-hidden"
+            >
+                {/* Header */}
+                <div className="relative bg-gradient-to-br from-royal-800 to-royal-900 px-6 pt-8 pb-6 text-center border-b border-white/10">
+                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(212,175,55,0.08),transparent_60%)]" />
+                    {avatarUrl ? (
+                        <img src={avatarUrl} alt={displayName} className="w-16 h-16 rounded-full border-2 border-gold-400/50 mx-auto mb-3 object-cover" />
+                    ) : (
+                        <div className="w-16 h-16 rounded-full bg-royal-800 border-2 border-gold-400/50 mx-auto mb-3 flex items-center justify-center">
+                            <span className="text-2xl font-bold text-gold-400">{displayName.charAt(0).toUpperCase()}</span>
+                        </div>
+                    )}
+                    <h2 className="text-lg font-display font-bold text-white relative">Welcome, {displayName.split(' ')[0]}!</h2>
+                    <p className="text-slate-400 text-xs mt-1 relative">One last step to claim your welcome bonus</p>
+                </div>
+
+                {/* Bonus Banner */}
+                <div className="mx-4 mt-4 bg-gradient-to-r from-gold-500/15 to-yellow-500/10 border border-gold-400/30 rounded-2xl p-3 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-gold-500/20 flex items-center justify-center shrink-0">
+                        <span className="text-xl">🎁</span>
+                    </div>
+                    <div>
+                        <p className="text-gold-300 font-bold text-sm">100 FCFA Welcome Bonus</p>
+                        <p className="text-slate-400 text-xs leading-snug">Add your phone to verify eligibility. One bonus per person.</p>
+                    </div>
+                </div>
+
+                {/* Phone Input */}
+                <div className="px-4 pt-4 pb-2">
+                    <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                        <Smartphone size={11} className="inline mr-1 -mt-0.5" />
+                        Cameroon Phone Number
+                    </label>
+                    <div className="flex items-center bg-white/5 border border-white/10 rounded-xl overflow-hidden focus-within:border-gold-400/50 transition-colors">
+                        <span className="px-3 text-slate-400 text-sm font-mono border-r border-white/10 py-3 bg-white/5 shrink-0">+237</span>
+                        <input
+                            type="tel"
+                            inputMode="numeric"
+                            placeholder="6XX XXX XXX"
+                            value={phone}
+                            onChange={e => { setPhone(e.target.value.replace(/\D/g, '')); setLocalError(''); }}
+                            onKeyDown={e => { if (e.key === 'Enter' && !isLoading) validateAndSubmit(); }}
+                            maxLength={9}
+                            autoFocus
+                            className="flex-1 bg-transparent px-3 py-3 text-white text-sm font-mono placeholder:text-slate-600 outline-none"
+                        />
+                    </div>
+                    {(localError || error) && (
+                        <p className="text-red-400 text-xs mt-2 flex items-start gap-1">
+                            <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                            {localError || error}
+                        </p>
+                    )}
+                </div>
+
+                {/* Actions */}
+                <div className="px-4 pt-3 pb-6 flex flex-col gap-2">
+                    <button
+                        id="google-phone-claim-btn"
+                        onClick={validateAndSubmit}
+                        disabled={isLoading || !phone}
+                        className="w-full py-3 rounded-xl font-bold text-sm tracking-wide transition-all flex items-center justify-center gap-2
+                            bg-gradient-to-r from-gold-500 to-yellow-500 text-royal-950
+                            hover:from-gold-400 hover:to-yellow-400 active:scale-[0.98]
+                            disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                    >
+                        {isLoading ? (
+                            <><Loader2 size={15} className="animate-spin" /> Verifying...</>
+                        ) : (
+                            <><ChevronRight size={15} /> Claim 100 FCFA Bonus</>
+                        )}
+                    </button>
+                    <button
+                        id="google-phone-skip-btn"
+                        onClick={onSkip}
+                        disabled={isLoading}
+                        className="w-full py-2.5 rounded-xl text-slate-500 hover:text-slate-300 text-xs font-medium transition-colors disabled:opacity-50"
+                    >
+                        Skip for now (no bonus)
+                    </button>
+                </div>
+            </motion.div>
+        </motion.div>
+    );
+};
+
 // ─── AppContent — the main routing/logic shell ─────────────────────────────────
 const AppContent = () => {
     const { state, dispatch, viewRef, lastForumMsgId } = useAppState();
@@ -298,6 +427,11 @@ const AppContent = () => {
     const [isRejoining, setIsRejoining] = React.useState(false);
     const [rejoinFailed, setRejoinFailed] = React.useState(false);
 
+    // Google new-user phone collection — holds the Firebase user until phone is submitted
+    const [pendingGoogleAuth, setPendingGoogleAuth] = useState<any>(null);
+    const [googlePhoneLoading, setGooglePhoneLoading] = useState(false);
+    const [googlePhoneError, setGooglePhoneError] = useState('');
+
     // Grace delay before showing "Connecting…" badge.
     // Only shown when a logged-in user hasn't connected yet after 5s.
     // Does NOT block navigation — it's a non-intrusive top badge.
@@ -313,6 +447,102 @@ const AppContent = () => {
         return () => { if (badgeTimerRef.current) clearTimeout(badgeTimerRef.current); };
     }, [isConnected, hasConnectedOnce, user, bypassConnection]);
 
+    // ── Complete Google sign-up after phone is collected ──────────────────
+    // Stores phone in sessionStorage (where syncUserProfile reads it from),
+    // then runs the normal profile-sync + subscription setup. The existing
+    // /api/auth/sync-profile endpoint applies all device+phone uniqueness checks.
+    const completeGoogleSignup = useCallback(async (phone: string) => {
+        if (!pendingGoogleAuth) return;
+        setGooglePhoneLoading(true);
+        setGooglePhoneError('');
+        try {
+            // Store phone so syncUserProfile picks it up (same path as email signup)
+            sessionStorage.setItem('pendingSignupPhone', phone);
+            const appUser = await syncUserProfile(pendingGoogleAuth);
+            dispatch({ type: 'SET_USER', payload: appUser });
+            prevUserIdRef.current = appUser.id;
+
+            // Show bonus notification
+            if (appUser.welcomeBonusStatus === 'granted') {
+                toast.success('Welcome bonus added: 100 FCFA! 🎉');
+            } else if (appUser.welcomeBonusStatus === 'device_already_claimed') {
+                toast.info('This device has already received the 100 FCFA bonus on another account.', { duration: 10000 });
+            } else if (appUser.welcomeBonusStatus === 'phone_already_claimed') {
+                toast.info('This phone number has already received the 100 FCFA bonus on another account.', { duration: 10000 });
+            }
+
+            // Device verification (fire-and-forget, same as normal flow)
+            let deviceId = localStorage.getItem('vantage_device_id');
+            if (!deviceId) { deviceId = crypto.randomUUID(); localStorage.setItem('vantage_device_id', deviceId); }
+            pendingGoogleAuth.getIdToken().then((token: string) => {
+                fetch(`${getApiUrl()}/api/auth/verify-device`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                    body: JSON.stringify({ userId: appUser.id, deviceId })
+                }).then(async r => {
+                    if (!r.ok) return null;
+                    const ct = r.headers.get('content-type') || '';
+                    return ct.includes('application/json') ? r.json() : null;
+                }).then(data => {
+                    if (data?.status === 'warning') toast.warning(data.message, { duration: 10000 });
+                    if (data?.status === 'banned') toast.error(data.message, { duration: 10000 });
+                }).catch(console.error);
+            });
+
+            // Start Firestore subscriptions
+            firestoreUnsubRef.current.user = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));
+            setTimeout(() => {
+                if (prevUserIdRef.current === appUser.id)
+                    firestoreUnsubRef.current.challenges = subscribeToIncomingChallenges(appUser.id, c => dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: c }));
+            }, 200);
+            setTimeout(() => {
+                if (prevUserIdRef.current === appUser.id)
+                    firestoreUnsubRef.current.forum = subscribeToForum(posts => {
+                        if (posts.length > 0) {
+                            const lid = posts[0].id;
+                            if (lastForumMsgId.current && lastForumMsgId.current !== lid && viewRef.current !== 'forum') {
+                                dispatch({ type: 'SET_UNREAD_FORUM', payload: true });
+                                playSFX('notification');
+                            }
+                            lastForumMsgId.current = lid;
+                        }
+                    });
+            }, 500);
+
+            setPendingGoogleAuth(null);
+        } catch (err: any) {
+            console.error('[Auth] Google phone signup failed:', err);
+            setGooglePhoneError(err.message || 'Could not complete sign-up. Please try again.');
+            sessionStorage.removeItem('pendingSignupPhone');
+        } finally {
+            setGooglePhoneLoading(false);
+        }
+    }, [pendingGoogleAuth, dispatch, toast, lastForumMsgId, viewRef]);
+
+    // Skip phone — proceed without bonus (user gets balance:0, can add phone later via profile)
+    const skipGooglePhone = useCallback(async () => {
+        if (!pendingGoogleAuth) return;
+        setGooglePhoneLoading(true);
+        try {
+            // No phone stored — syncUserProfile sends phone:'' → server gives welcomeBonusStatus:'not_granted'
+            const appUser = await syncUserProfile(pendingGoogleAuth);
+            dispatch({ type: 'SET_USER', payload: appUser });
+            prevUserIdRef.current = appUser.id;
+            let deviceId = localStorage.getItem('vantage_device_id');
+            if (!deviceId) { deviceId = crypto.randomUUID(); localStorage.setItem('vantage_device_id', deviceId); }
+            firestoreUnsubRef.current.user = subscribeToUser(appUser.id, updated => dispatch({ type: 'SET_USER', payload: updated }));
+            setTimeout(() => {
+                if (prevUserIdRef.current === appUser.id)
+                    firestoreUnsubRef.current.challenges = subscribeToIncomingChallenges(appUser.id, c => dispatch({ type: 'SET_INCOMING_CHALLENGE', payload: c }));
+            }, 200);
+            setPendingGoogleAuth(null);
+        } catch (err: any) {
+            console.error('[Auth] Google skip phone failed:', err);
+            setGooglePhoneError(err.message || 'Could not complete sign-up. Please try again.');
+        } finally {
+            setGooglePhoneLoading(false);
+        }
+    }, [pendingGoogleAuth, dispatch]);
 
     useEffect(() => {
         const storedRoom = sessionStorage.getItem('vantage_active_room');
@@ -422,6 +652,23 @@ const AppContent = () => {
 
             if (firebaseUser) {
                 try {
+                    // ── Google new-user intercept ─────────────────────────────────────
+                    // For new Google sign-ups: collect phone BEFORE creating the profile
+                    // so the same device+phone anti-abuse checks apply (same as email).
+                    // We use Firestore existence as the reliable new-user signal.
+                    const isGoogleProvider = firebaseUser.providerData?.[0]?.providerId === 'google.com';
+                    const phoneAlreadyPending = !!sessionStorage.getItem('pendingSignupPhone');
+                    if (isGoogleProvider && !phoneAlreadyPending) {
+                        const userSnap = await getDoc(doc(db, 'users', firebaseUser.uid));
+                        if (!userSnap.exists()) {
+                            // New Google user — show phone modal; don't create profile yet
+                            setPendingGoogleAuth(firebaseUser);
+                            prevUserIdRef.current = firebaseUser.uid; // prevent re-trigger on token refresh
+                            dispatch({ type: 'SET_AUTH_LOADING', payload: false });
+                            return;
+                        }
+                    }
+                    // ── Normal profile sync (email users + returning Google users) ────
                     const appUser = await syncUserProfile(firebaseUser);
                     dispatch({ type: 'SET_USER', payload: appUser });
                     prevUserIdRef.current = appUser.id;
@@ -505,7 +752,7 @@ const AppContent = () => {
 
     // ── Auth-based navigation ─────────────────────────────────────────────────
     useEffect(() => {
-        if (authLoading) return;
+        if (authLoading || pendingGoogleAuth) return;
         if (user) {
             // FIX M2 + M5: Check if user was in an active game before page refresh
             const activeTournamentMatch = localStorage.getItem('vantage_active_tournament_match');
@@ -524,7 +771,7 @@ const AppContent = () => {
             const publicViews: ViewState[] = ['landing', 'auth', 'how-it-works', 'terms', 'privacy', 'help-center', 'report-bug'];
             if (!publicViews.includes(currentView)) dispatch({ type: 'SET_VIEW', payload: 'landing' });
         }
-    }, [user, currentView, authLoading, dispatch]);
+    }, [user, currentView, authLoading, dispatch, pendingGoogleAuth]);
 
     // ── Warn before closing mid-game ────────────────────────────────────────
     useEffect(() => {
@@ -708,15 +955,12 @@ const AppContent = () => {
                 {user && !isConnected && hasConnectedOnce && currentView !== 'game' && (
                     <WeakNetworkBanner onReconnect={() => socket?.connect()} />
                 )}
-
-                {opponentDisconnected && <ReconnectionModal timeout={opponentTimeout} opponent={opponentProfile} />}
                 {gameResult && (
                     <GameResultOverlay
                         result={gameResult.result}
                         amount={gameResult.amount}
                         financials={gameResult.financials}
                         onContinue={finalizeGameEnd}
-                        // No rematch for tournament games — bracket advances automatically
                         onRematch={socketGame && isConnected && !activeGameTable?.tournamentMatchId ? handleRematchRequest : undefined}
                         rematchStatus={rematchStatus}
                         stake={socketGame?.stake}
@@ -739,7 +983,6 @@ const AppContent = () => {
         </div>
     );
 };
-
 // ─── Root export — full provider stack ────────────────────────────────────────
 export default function App() {
     return (

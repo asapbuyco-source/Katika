@@ -280,7 +280,13 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 setMustJumpFrom(socketGame.gameState.mustJumpFrom);
             }
 
-            if ((socketGame.status === 'completed' || socketGame.winner !== undefined) && !p2pGameOverHandledRef.current) {
+            // FIX: Only trigger game-end when status is definitively 'completed'.
+            // Previously used `socketGame.winner !== undefined` which is true for
+            // `null` — and every game_update carries winner:null for active games
+            // (sanitizeRoomForClient converts undefined→null). That caused an
+            // immediate false draw on the very first game_update at match start.
+            // The socket.on('game_over') handler below owns winner/draw/loss routing.
+            if (socketGame.status === 'completed' && !p2pGameOverHandledRef.current) {
                 p2pGameOverHandledRef.current = true;
                 setIsGameOver(true);
                 if (socketGame.winner === user.id) onGameEnd('win');
@@ -338,7 +344,9 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     useEffect(() => { onGameEndRef.current = onGameEnd; }, [onGameEnd]);
 
     useEffect(() => {
-        if (socketGame?.status === 'completed' || socketGame?.winner !== undefined) return;
+        // FIX: Same null vs undefined trap. winner is always null on active game_updates;
+        // only gate the reset on actual completion status.
+        if (socketGame?.status === 'completed') return;
         p2pGameOverHandledRef.current = false;
         setIsGameOver(false);
     }, [socketGame?.roomId, socketGame?.gameState?.startTime]);
