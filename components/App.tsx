@@ -790,10 +790,10 @@ const AppContent = () => {
     // ── Safety guard: if view is 'game' but no table exists (e.g. after page
     // refresh or stale state), redirect to lobby immediately ───────────────
     useEffect(() => {
-        if (isTransitioningRef.current) return;
         // UX-2 Fix: Auto-redirect from ghost "Finalizing" state after 3s if no result appears
         if (currentView === 'game' && !activeGameTable && !gameResult) {
             const timer = setTimeout(() => {
+                isTransitioningRef.current = false;
                 dispatch({ type: 'SET_VIEW', payload: 'lobby' });
             }, 3000);
             return () => clearTimeout(timer);

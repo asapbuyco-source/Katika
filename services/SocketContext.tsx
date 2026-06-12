@@ -231,7 +231,16 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (!socket || !isConnected || !state.user) return;
 
         const storedRoom = sessionStorage.getItem('vantage_active_room');
-        if (storedRoom) {
+        // LOSER-REDIRECT FIX: Only attempt rejoin if we are actually in a game
+        // context (view is 'game' or there's an active socketGame). Never attempt
+        // rejoin when the user has already navigated to lobby/elsewhere — this
+        // prevents a reconnect-triggered match_found from pulling them back in.
+        const currentView = viewRef.current;
+        const shouldRejoin =
+            storedRoom &&
+            (currentView === 'game' || currentView === 'matchmaking' || !!socketGameRef.current);
+
+        if (shouldRejoin) {
             console.log(`[Socket] Attempting re-entry for room: ${storedRoom}`);
             socket.emit('rejoin_game', { userProfile: state.user }, (ack: any) => {
                 if (!ack || !ack.success) {
@@ -247,6 +256,23 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         if (!socket) return;
 
         const handleMatchFound = (gameState: SocketGameState) => {
+            // LOSER-REDIRECT FIX: If the user already navigated away from the game
+            // (e.g. clicked "Return to Lobby" and finalizeGameEnd ran), do NOT
+            // pull them back in. Only accept match_found when we're actively
+            // looking for / playing a match.
+            const currentView = viewRef.current;
+            const isExpectedState = currentView === 'game' || currentView === 'matchmaking';
+            // Also accept when sessionStorage still has this specific room (reconnect/rejoin)
+            const storedRoom = sessionStorage.getItem('vantage_active_room');
+            const isRejoin = storedRoom && storedRoom === gameState.roomId;
+
+            if (!isExpectedState && !isRejoin) {
+                console.warn(
+                    `[Socket] Ignored match_found for room ${gameState.roomId} — view is '${currentView}', not in game/matchmaking.`
+                );
+                return;
+            }
+
             if (gameState.tournamentMatchId) {
                 setTournamentMatchActive(gameState.tournamentMatchId)
                     .catch(e => console.error('Failed to activate tournament match:', e));
@@ -358,17 +384,6 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         };
     }, [socket, dispatch, viewRef, toast]);
 
-    // Rejoin on reconnect (only when there's an active game to rejoin)
-    useEffect(() => {
-        if (socket && isConnected && state.user && socketGameRef.current && viewRef.current === 'game') {
-            socket.emit('rejoin_game', { userProfile: state.user }, (ack: any) => {
-                if (!ack || !ack.success) {
-                    sessionStorage.removeItem('vantage_active_room');
-                }
-            });
-        }
-    }, [socket, isConnected, state.user, viewRef]);
-
     // Token refresh: keep socket auth valid for long-lived connections,
     // and authenticate the socket when the user first logs in on a guest connection.
     useEffect(() => {
@@ -408,7 +423,6 @@ export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         socket.on('auth_required', handleAuthRequired);
         return () => { socket.off('auth_required', handleAuthRequired); };
     }, [socket, getIdTokenWithRetry]);
-
 
     // Auto-bypass if connection takes too long
     useEffect(() => {

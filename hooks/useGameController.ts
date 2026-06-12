@@ -196,49 +196,53 @@ export const useGameController = () => {
     }, [socketGame]);
 
     const finalizeGameEnd = useCallback(() => {
-        // Prevent the App.tsx safety-guard effect (currentView='game', no table,
-        // no result → lobby after 3s) from racing with our navigation below.
-        isTransitioningRef.current = true;
+        try {
+            isTransitioningRef.current = true;
 
-        if (socket && socketGame) {
-            socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
-        }
+            if (socket && socketGame) {
+                socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
+            }
 
-        // FIX: Derive tournament ID from socketGame FIRST (still available before
-        // setSocketGame(null) is called below), then fall back to the ref.
-        // Background: activeTournamentMatchIdRef is set inside handleGameEnd, but
-        // handleGameEnd is never called for P2P games other than Checkers (the
-        // server emits game_over → SocketContext dispatches SET_GAME_RESULT
-        // directly, bypassing handleGameEnd entirely). This caused ALL tournament
-        // losers to be redirected to 'lobby' instead of 'tournaments' because
-        // the ref was null. Reading socketGame.tournamentMatchId directly here
-        // ensures the correct destination for every game type.
-        const socketTournamentMatchId = socketGame?.tournamentMatchId || socketGame?.privateRoomId || null;
-        const tournamentMatchId = socketTournamentMatchId || activeTournamentMatchIdRef.current;
-        const isTournament = !!tournamentMatchId;
+            const socketTournamentMatchId = socketGame?.tournamentMatchId || socketGame?.privateRoomId || null;
+            const tournamentMatchId = socketTournamentMatchId || activeTournamentMatchIdRef.current;
+            const isTournament = !!tournamentMatchId;
 
-        let pendingTournamentId: string | null = null;
-        if (tournamentMatchId) {
-            const parts = tournamentMatchId.split('-');
-            if (parts.length > 1) pendingTournamentId = parts[1];
-        }
+            let pendingTournamentId: string | null = null;
+            if (tournamentMatchId) {
+                const parts = tournamentMatchId.split('-');
+                if (parts.length > 1) pendingTournamentId = parts[1];
+            }
 
-        setSocketGame(null);
-        dispatch({ type: 'SET_OFFLINE_TABLE', payload: null });
-        dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
-        dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
-        dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
+            setSocketGame(null);
+            dispatch({ type: 'SET_OFFLINE_TABLE', payload: null });
+            dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
+            dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
+            dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
 
-        if (isTournament) {
-            dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: pendingTournamentId });
-            dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
-        } else {
+            if (isTournament) {
+                dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: pendingTournamentId });
+                dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
+            } else {
+                dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+            }
+
+            dispatch({ type: 'SET_GAME_RESULT', payload: null });
+            localStorage.removeItem('vantage_active_tournament_match');
+            activeTournamentMatchIdRef.current = null;
+            
+            // Absolute fallback to ensure UI state is flushed
+            setTimeout(() => {
+                dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
+                dispatch({ type: 'SET_GAME_RESULT', payload: null });
+                isTransitioningRef.current = false;
+            }, 100);
+        } catch (err) {
+            console.error('[GameController] finalizeGameEnd error:', err);
             dispatch({ type: 'SET_VIEW', payload: 'lobby' });
+            dispatch({ type: 'SET_GAME_RESULT', payload: null });
+            setSocketGame(null);
+            isTransitioningRef.current = false;
         }
-
-        dispatch({ type: 'SET_GAME_RESULT', payload: null });
-        localStorage.removeItem('vantage_active_tournament_match');
-        activeTournamentMatchIdRef.current = null;
     }, [socket, socketGame, setSocketGame, dispatch]);
 
     const handleRematchRequest = useCallback(() => {
