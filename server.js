@@ -3339,6 +3339,7 @@ case 'Ludo':
         case 'Checkers':
             return {
                 ...common,
+                timers: { [p1]: 120, [p2]: 120 },
                 pieces: [
                     ...Array.from({ length: 4 }, (_, r) =>
                         Array.from({ length: 10 }, (_, c) =>
@@ -3356,6 +3357,7 @@ case 'Ludo':
 case 'Chess':
             return {
                 ...common,
+                timers: { [p1]: 120, [p2]: 120 },
                 fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
                 pgn: '',
                 turn: p1
@@ -3399,6 +3401,7 @@ io.on('connection', (socket) => {
         try {
             const decoded = await admin.auth().verifyIdToken(token);
             socket.user = decoded;
+            addUserSocket(decoded.uid, socket.id); // Register socket so emitToUser works before join_game
             clearTimeout(tokenExpiryTimer);
             tokenExpiryTimer = setTimeout(() => {
                 console.warn(`[Auth] Forcing disconnect for ${socket.id} due to token expiry (55m)`);

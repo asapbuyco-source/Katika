@@ -7,8 +7,8 @@ export const validateWithdrawalRequest = (body, authenticatedUserId) => {
     if (amount <= 0) {
         return { valid: false, status: 400, error: 'Amount must be positive.' };
     }
-    if (amount < 1000) {
-        return { valid: false, status: 400, error: 'Minimum withdrawal is 1,000 FCFA.' };
+    if (amount < 600) {
+        return { valid: false, status: 400, error: 'Minimum withdrawal is 600 FCFA.' };
     }
     if (amount > 500_000) {
         return { valid: false, status: 400, error: 'Maximum withdrawal is 500,000 FCFA per transaction.' };

@@ -233,7 +233,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                 if (data.status === 'accepted' && data.gameId) {
                     playSFX('win');
                     setShowChallengeModal(false);
-                    onQuickMatch(challengeStake, challengeGame, data.gameId);
+                    // Rely on useGameController's socket 'challenge_accepted' listener to call startMatchmaking
                     setActiveChallengeId(null);
                     if (challengeUnsubscribeRef.current) {
                         challengeUnsubscribeRef.current();

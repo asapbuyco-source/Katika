@@ -178,8 +178,8 @@ const handleWithdraw = async () => {
 
         if (!amount || !phone || !momoName.trim()) { setErrorMsg('Please fill in the amount, phone number, and MoMo account name.'); withdrawingRef.current = false; return; }
         const withdrawAmount = parseInt(amount);
-        if (isNaN(withdrawAmount) || withdrawAmount < 1000) {
-            setErrorMsg('Minimum withdrawal is 1,000FCFA.');
+        if (isNaN(withdrawAmount) || withdrawAmount < 600) {
+            setErrorMsg('Minimum withdrawal is 600FCFA.');
             withdrawingRef.current = false;
             return;
         }
@@ -531,7 +531,7 @@ const handleWithdraw = async () => {
                                             value={amount}
                                             onChange={(e) => setAmount(e.target.value)}
                                             className="w-full bg-royal-950 border border-white/10 rounded-xl py-4 pl-4 text-white font-mono font-bold text-xl focus:border-red-500 transition-colors"
-                                            placeholder="Min 1000"
+                                            placeholder="Min 600"
                                         />
                                         <div className="text-right mt-1">
                                             <button onClick={() => setAmount(user.balance.toString())} className="text-xs text-gold-400 hover:text-white font-bold uppercase">Max: {user.balance}</button>
