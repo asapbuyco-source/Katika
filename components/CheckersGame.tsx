@@ -56,6 +56,19 @@ interface Move {
     jumpId?: string;
 }
 
+const arePieceArraysEqual = (a: Piece[], b: Piece[]) => {
+    if (a.length !== b.length) return false;
+    const byId = new Map(a.map(piece => [piece.id, piece]));
+    return b.every(piece => {
+        const prev = byId.get(piece.id);
+        return !!prev &&
+            prev.player === piece.player &&
+            prev.isKing === piece.isKing &&
+            prev.r === piece.r &&
+            prev.c === piece.c;
+    });
+};
+
 const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
@@ -239,10 +252,11 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 const serverTurn = socketGame.turn ?? socketGame.gameState?.turn;
                 const isMyTurnNow = serverTurn === user.id;
 
-                if (isMyTurnNow && pieces.length > 0) {
-                    const piecesCountDiff = pieces.length - mappedPieces.length;
+                const previousPieces = stateRef.current.pieces;
+                if (isMyTurnNow && previousPieces.length > 0) {
+                    const piecesCountDiff = previousPieces.length - mappedPieces.length;
                     const positionChanged = mappedPieces.some((np: any) => {
-                        const op = pieces.find(p => p.id === np.id);
+                        const op = previousPieces.find(p => p.id === np.id);
                         return op && (op.r !== np.r || op.c !== np.c);
                     });
 
@@ -253,7 +267,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                     }
                 }
 
-                setPieces(mappedPieces);
+                setPieces(prev => arePieceArraysEqual(prev, mappedPieces) ? prev : mappedPieces);
             }
 
             // The server sends `turn` at the ROOM level (socketGame.turn),
@@ -266,7 +280,8 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 setMustJumpFrom(socketGame.gameState.mustJumpFrom);
             }
 
-            if (socketGame.winner) {
+            if ((socketGame.status === 'completed' || socketGame.winner !== undefined) && !p2pGameOverHandledRef.current) {
+                p2pGameOverHandledRef.current = true;
                 setIsGameOver(true);
                 if (socketGame.winner === user.id) onGameEnd('win');
                 else if (socketGame.winner === 'draw' || socketGame.winner === null) onGameEnd('draw');
@@ -319,12 +334,22 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     // dispatches SET_GAME_RESULT so the result overlay can appear over the
     // correct view. Without this call, the game freezes at the final move.
     const onGameEndRef = useRef(onGameEnd);
+    const p2pGameOverHandledRef = useRef(false);
     useEffect(() => { onGameEndRef.current = onGameEnd; }, [onGameEnd]);
+
+    useEffect(() => {
+        if (socketGame?.status === 'completed' || socketGame?.winner !== undefined) return;
+        p2pGameOverHandledRef.current = false;
+        setIsGameOver(false);
+    }, [socketGame?.roomId, socketGame?.gameState?.startTime]);
 
     useEffect(() => {
         if (!isP2P || !socket) return;
 
         const handleGameOver = (data: { winner?: string; roomId?: string }) => {
+            if (data.roomId && socketGame?.roomId && data.roomId !== socketGame.roomId) return;
+            if (p2pGameOverHandledRef.current) return;
+            p2pGameOverHandledRef.current = true;
             setIsGameOver(true);
             const result = !data.winner
                 ? 'draw'
@@ -338,7 +363,7 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
         return () => {
             socket.off('game_over', handleGameOver);
         };
-    }, [isP2P, socket, user.id]);
+    }, [isP2P, socket, socketGame?.roomId, user.id]);
 
     // --- Task 8 Fix: Lidraughts Polling — Stop on Game Over ---
     const lidraughtsActiveRef = useRef(true);
@@ -643,20 +668,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
 
         setMustJumpFrom(nextMustJump);
 
-        const { moves: oppMoves } = getGlobalValidMoves(nextTurn, nextPieces);
-        const oppPieces = nextPieces.filter(p => p.player === nextTurn);
-
-        if (oppPieces.length === 0 || oppMoves.length === 0) {
-            setIsGameOver(true);
-            if (!isP2P) onGameEnd(turn === 'me' ? 'win' : 'loss');
-            return;
-        }
-
         if (isP2P && socket && socketGame) {
-            // Task 2 Fix: Strip newState from Checkers MOVE emission for P2P
-            // Server computes everything independently
+            // P2P games are settled server-side. Emit the move before any local
+            // terminal-state checks so the final capture/no-move position cannot
+            // freeze on the client without a server game_over.
             socket.emit('game_action', {
-                roomId: socketGame.roomId,
+                roomId: socketGame.roomId || table.id,
                 action: {
                     type: 'MOVE',
                     fromR: move.fromR,
@@ -668,7 +685,16 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
             });
             setSelectedPieceId(null);
             setValidMoves([]);
-            return; // Wait for server game_update for P2P
+            return; // Wait for server game_update/game_over for P2P
+        }
+
+        const { moves: oppMoves } = getGlobalValidMoves(nextTurn, nextPieces);
+        const oppPieces = nextPieces.filter(p => p.player === nextTurn);
+
+        if (oppPieces.length === 0 || oppMoves.length === 0) {
+            setIsGameOver(true);
+            if (!isP2P) onGameEnd(turn === 'me' ? 'win' : 'loss');
+            return;
         }
 
         // Only apply local multi-jump logic for bot/practice games

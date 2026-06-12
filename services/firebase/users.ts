@@ -2,38 +2,47 @@
 // Does NOT import Firebase SDK directly; uses db from init.ts.
 import type { User as FirebaseUser } from "firebase/auth";
 import { PlayerProfile, User } from "../../types";
-import { doc, getDoc, setDoc, collection, query, where, orderBy, limit, startAfter, getDocs, onSnapshot, serverTimestamp } from "firebase/firestore";
-import { db } from './init';
+import { doc, getDoc, collection, query, where, orderBy, limit, startAfter, getDocs, onSnapshot } from "firebase/firestore";
+import { db, getApiUrl } from './init';
+
+const getOrCreateDeviceId = () => {
+    let deviceId = localStorage.getItem('vantage_device_id');
+    if (!deviceId) {
+        deviceId = crypto.randomUUID();
+        localStorage.setItem('vantage_device_id', deviceId);
+    }
+    return deviceId;
+};
 
 export const syncUserProfile = async (firebaseUser: FirebaseUser): Promise<User> => {
-    // SECURITY: Admin authority is server-only via ADMIN_EMAILS env var.
-    // Client trusts only the isAdmin field from Firestore (populated by server.js during creation).
-    const userRef = doc(db, "users", firebaseUser.uid);
-    const userSnap = await getDoc(userRef);
+    const token = await firebaseUser.getIdToken();
+    const deviceId = getOrCreateDeviceId();
+    const storedReferral = sessionStorage.getItem('pendingReferral') || '';
+    const signupPhone = sessionStorage.getItem('pendingSignupPhone') || '';
 
-    if (userSnap.exists()) {
-        return userSnap.data() as User;
-    } else {
-        const newUser: User = {
-            id: firebaseUser.uid,
-            name: firebaseUser.displayName || `Player-${firebaseUser.uid.slice(0, 4)}`,
-            avatar: firebaseUser.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`,
-            balance: 100,
-            elo: 1000,
-            rankTier: 'Bronze',
-            isAdmin: false,
-            isBanned: false,
-            hasSeenOnboarding: firebaseUser.isAnonymous ? true : false,
-        };
+    const response = await fetch(`${getApiUrl()}/api/auth/sync-profile`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({
+            deviceId,
+            phone: signupPhone,
+            referralCode: storedReferral
+        })
+    });
 
-        const storedReferral = sessionStorage.getItem('pendingReferral');
-        if (storedReferral && !firebaseUser.isAnonymous) {
-            newUser.referredBy = storedReferral;
-        }
-
-        await setDoc(userRef, newUser);
-        return newUser;
+    const contentType = response.headers.get('content-type') || '';
+    const data = contentType.includes('application/json') ? await response.json() : null;
+    if (!response.ok) {
+        throw new Error(data?.error || 'Could not create your profile. Please try again.');
     }
+
+    sessionStorage.removeItem('pendingReferral');
+    sessionStorage.removeItem('pendingSignupPhone');
+
+    return data.user as User;
 };
 
 export const subscribeToUser = (uid: string, callback: (user: User) => void) => {

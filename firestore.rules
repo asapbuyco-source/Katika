@@ -33,14 +33,9 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if isAuth();
 
-      // New user profile creation: owner only.
-      // Balance is locked to 100 (starter amount); cannot self-assign admin/banned.
-      // noFinancialEscalation is skipped on create because resource.data is null.
-      allow create: if isOwner(uid)
-                    && request.resource.data.get('isAdmin', false) == false
-                    && request.resource.data.get('isBanned', false) == false
-                    && request.resource.data.get('balance', 100) <= 100
-                    && request.resource.data.get('promoBalance', 0) == 0;
+      // New profiles are created by the server so the welcome bonus can be
+      // checked against device/phone claim records before any balance is added.
+      allow create: if false;
 
       // Profile updates: own doc only, cannot self-escalate financials or admin
       allow update: if isOwner(uid) && noAdminEscalation() && noFinancialEscalation();

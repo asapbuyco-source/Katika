@@ -65,6 +65,9 @@ export interface User {
   referralBonusPaid?: boolean;
   promoBalance?: number;
   winStreak?: number;
+  welcomeBonusAmount?: number;
+  welcomeBonusStatus?: 'granted' | 'device_already_claimed' | 'phone_already_claimed' | 'not_granted' | 'existing';
+  signupPhoneLast4?: string;
 }
 
 export interface PlayerProfile {
@@ -81,8 +84,10 @@ export interface Challenge {
   targetId?: string; // ID of the player being challenged
   gameType: string;
   stake: number;
-  timestamp: number;
-  status?: 'pending' | 'accepted' | 'declined' | 'expired';
+  timestamp: number | { toMillis?: () => number };
+  createdAt?: number;
+  expiresAt?: number;
+  status?: 'pending' | 'accepted' | 'declined' | 'expired' | 'cancelled';
   gameId?: string; // The game created if accepted
 }
 
@@ -90,7 +95,7 @@ export interface Transaction {
   id: string;
   type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'stake_loss' |
         'tournament_entry' | 'tournament_refund' | 'escrow_lock' | 'escrow_refund' |
-        'streak_bonus' | 'referral_bonus';
+        'streak_bonus' | 'referral_bonus' | 'welcome_bonus';
   amount: number;
   date: string;
   status: 'completed' | 'pending' | 'failed';

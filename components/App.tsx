@@ -425,6 +425,13 @@ const AppContent = () => {
                     const appUser = await syncUserProfile(firebaseUser);
                     dispatch({ type: 'SET_USER', payload: appUser });
                     prevUserIdRef.current = appUser.id;
+                    if (appUser.welcomeBonusStatus === 'granted') {
+                        toast.success('Welcome bonus added: 100 FCFA.');
+                    } else if (appUser.welcomeBonusStatus === 'device_already_claimed') {
+                        toast.info('This device has already received the 100 FCFA new account bonus on another account.', { duration: 10000 });
+                    } else if (appUser.welcomeBonusStatus === 'phone_already_claimed') {
+                        toast.info('This phone number has already received the 100 FCFA new account bonus on another account.', { duration: 10000 });
+                    }
 
                     // --- DEVICE VERIFICATION (Multi-Account check) ---
                     let deviceId = localStorage.getItem('vantage_device_id');

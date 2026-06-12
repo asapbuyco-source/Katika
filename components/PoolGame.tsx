@@ -429,8 +429,8 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
         const tableH = TABLE_HEIGHT + CUSHION_THICKNESS * 2 + 44;
         const scale = Math.min(W / tableW, H / tableH);
         scaleRef.current = scale;
-        const ox = (W - (TABLE_WIDTH + CUSHION_THICKNESS * 2) * scale) / 2;
-        const oy = (H - (TABLE_HEIGHT + CUSHION_THICKNESS * 2) * scale) / 2;
+        const ox = (W - tableW * scale) / 2;
+        const oy = (H - tableH * scale) / 2;
         offsetRef.current = { x: ox, y: oy };
 
         ctx.save();
@@ -994,41 +994,41 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
     const potDisplay = table.stake > 0 ? `${(table.stake * 2).toLocaleString()} FCFA` : 'Practice';
 
     return (
-        <div className="flex flex-col h-full bg-gray-950 text-white select-none overflow-hidden" role="region" aria-label="8-Ball Pool Game">
+        <div className="flex flex-col h-full min-h-0 bg-gray-950 text-white select-none overflow-hidden" role="region" aria-label="8-Ball Pool Game">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-800" aria-live="polite">
-                <div className="flex items-center gap-3">
+            <div className="flex items-center justify-between gap-2 px-3 md:px-4 py-2 bg-gray-900 border-b border-gray-800" aria-live="polite">
+                <div className="flex items-center gap-2 md:gap-3 min-w-0">
                     <div className="hidden md:block"><NetworkSignalIndicator /></div>
                     <div className="text-2xl" aria-hidden="true">🎱</div>
-                    <div>
-                        <h1 className="text-lg font-bold text-yellow-400">8-Ball Pool</h1>
+                    <div className="min-w-0">
+                        <h1 className="text-sm md:text-lg font-bold text-yellow-400 truncate">8-Ball Pool</h1>
                         <p className="text-xs text-gray-400">{potDisplay} · P2P</p>
                     </div>
                 </div>
-                <div className="flex-1 text-center">
-                    <span className="text-sm font-semibold text-white">{message}</span>
+                <div className="flex-1 text-center min-w-0">
+                    <span className="block text-xs md:text-sm font-semibold text-white truncate">{message}</span>
                 </div>
-                <div className="flex items-center gap-3">
-                    <div className="text-sm text-gray-400">Shot #{shotCount}</div>
+                <div className="flex items-center justify-end gap-2 md:gap-3 min-w-0">
+                    <div className="hidden sm:block text-xs md:text-sm text-gray-400">Shot #{shotCount}</div>
                     <button onClick={() => { if (!gameOverCalledRef.current) { gameOverCalledRef.current = true; onGameEnd('quit'); } }} className="text-xs text-gray-500 hover:text-gray-300 underline" aria-label="Forfeit and leave">Forfeit</button>
                 </div>
             </div>
 
             {/* Main: Player 1 | Canvas | Player 2 */}
-            <div className="flex-1 flex relative bg-gray-950 min-h-0">
-                <div className="w-36 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col justify-center p-3 gap-2">
+            <div className="flex-1 flex flex-col md:flex-row relative bg-gray-950 min-h-0">
+                <div className="h-20 md:h-auto md:w-36 shrink-0 bg-gray-900 border-b md:border-b-0 md:border-r border-gray-800 flex flex-row md:flex-col items-center md:items-stretch justify-center p-2 md:p-3 gap-2 overflow-hidden">
                     <PlayerPanelCompact player={players[0]} isActive={phase !== 'game_over' && turn === 0} balls={balls} label="Player 1" />
                 </div>
-                <div className="flex-1 relative min-w-0">
-                    <canvas ref={canvasRef} className="w-full h-full cursor-crosshair" aria-label="Pool table" />
+                <div className="flex-1 relative min-w-0 min-h-[360px] md:min-h-0">
+                    <canvas ref={canvasRef} className="w-full h-full cursor-crosshair touch-none" aria-label="Pool table" />
                     {phase === 'aiming' && isMyTurnActive && (
-                        <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-4 bg-black/70 backdrop-blur rounded-xl px-5 py-2.5 border border-gray-600" role="toolbar" aria-label="Shot controls">
+                        <div className="absolute inset-x-2 bottom-2 md:bottom-3 mx-auto flex max-w-[calc(100%-1rem)] flex-wrap items-center justify-center gap-2 md:gap-4 bg-black/75 backdrop-blur rounded-xl px-3 md:px-5 py-2 border border-gray-600" role="toolbar" aria-label="Shot controls">
                             <button onClick={() => { showAimRef.current = !showAimRef.current; setShowAim(showAimRef.current); }} className={`text-xs px-3 py-1 rounded-lg ${showAim ? 'bg-yellow-500/80 text-gray-900' : 'bg-gray-700'}`} aria-pressed={showAim}>Guide {showAim ? 'ON' : 'OFF'}</button>
                             <div className="flex items-center gap-2" role="group" aria-label="Power">
                                 <span className="text-xs text-gray-400">Power</span>
                                 <div className="flex gap-0.5">
                                     {Array.from({ length: 10 }, (_, i) => (
-                                        <div key={i} onClick={() => { powerRef.current = (i + 1) / 10; setPower(powerRef.current); pullbackRef.current = powerRef.current; setPullback(powerRef.current); }} className="w-3 h-5 rounded-sm cursor-pointer hover:ring-1 ring-white/40" style={{ background: i < Math.round(power * 10) ? i < 4 ? '#22c55e' : i < 7 ? '#eab308' : '#ef4444' : 'rgba(255,255,255,0.1)' }} role="button" aria-label={`Set power to ${(i + 1) * 10}%`} />
+                                        <div key={i} onClick={() => { powerRef.current = (i + 1) / 10; setPower(powerRef.current); pullbackRef.current = powerRef.current; setPullback(powerRef.current); }} className="w-2.5 md:w-3 h-5 rounded-sm cursor-pointer hover:ring-1 ring-white/40" style={{ background: i < Math.round(power * 10) ? i < 4 ? '#22c55e' : i < 7 ? '#eab308' : '#ef4444' : 'rgba(255,255,255,0.1)' }} role="button" aria-label={`Set power to ${(i + 1) * 10}%`} />
                                     ))}
                                 </div>
                                 <span className="text-xs font-bold w-8">{powerPct}%</span>
@@ -1051,11 +1051,11 @@ export const PoolGame: React.FC<PoolGameProps> = ({ table, user, onGameEnd, sock
                         </div>
                     )}
                 </div>
-                <div className="w-36 shrink-0 bg-gray-900 border-l border-gray-800 flex flex-col justify-center p-3 gap-2">
+                <div className="h-20 md:h-auto md:w-36 shrink-0 bg-gray-900 border-t md:border-t-0 md:border-l border-gray-800 flex flex-row md:flex-col items-center md:items-stretch justify-center p-2 md:p-3 gap-2 overflow-hidden">
                     <PlayerPanelCompact player={players[1]} isActive={phase !== 'game_over' && turn === 1} balls={balls} label="Player 2" />
                 </div>
             </div>
-            <div className="flex items-center justify-center gap-6 px-4 py-1.5 bg-gray-900 border-t border-gray-800 text-xs text-gray-500">
+            <div className="hidden md:flex items-center justify-center gap-6 px-4 py-1.5 bg-gray-900 border-t border-gray-800 text-xs text-gray-500">
                 <span>← → Aim</span><span>↑ ↓ Power</span><span>Space Shoot</span><span>G Guide</span>
             </div>
         </div>

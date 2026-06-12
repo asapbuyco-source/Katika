@@ -4,7 +4,7 @@ import { Users, Lock, ChevronRight, LayoutGrid, Brain, Dice5, Wallet, Target, X,
 import { ViewState, User, GameTier, PlayerProfile } from '../types';
 import { initiateFapshiPayment } from '../services/fapshi';
 import { playSFX } from '../services/sound';
-import { searchUsers, createBotMatch, sendChallenge, subscribeToChallengeStatus, subscribeToGameConfigs, subscribeToMaintenanceMode } from '../services/firebase';
+import { searchUsers, createBotMatch, sendChallenge, cancelChallenge, subscribeToChallengeStatus, subscribeToGameConfigs, subscribeToMaintenanceMode } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { useLanguage } from '../services/i18n';
 import { useToast } from '../services/toast';
@@ -215,8 +215,9 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
             return;
         }
 
-        if (user.balance < challengeStake) {
-            setNeededAmount(challengeStake - user.balance);
+        const availableBalance = (user.balance || 0) + (user.promoBalance || 0);
+        if (availableBalance < challengeStake) {
+            setNeededAmount(challengeStake - availableBalance);
             setShowChallengeModal(false);
             setShowDepositModal(true);
             return;
@@ -234,13 +235,24 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                     setShowChallengeModal(false);
                     onQuickMatch(challengeStake, challengeGame, data.gameId);
                     setActiveChallengeId(null);
-                    if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
-                } else if (data.status === 'declined') {
+                    if (challengeUnsubscribeRef.current) {
+                        challengeUnsubscribeRef.current();
+                        challengeUnsubscribeRef.current = null;
+                    }
+                } else if (data.status === 'declined' || data.status === 'expired' || data.status === 'cancelled') {
                     playSFX('error');
-                    toast.info(`${selectedFriend.name} declined the challenge.`);
+                    const statusMessage = data.status === 'declined'
+                        ? `${selectedFriend.name} declined the challenge.`
+                        : data.status === 'expired'
+                            ? 'Challenge expired. Please send a new one.'
+                            : 'Challenge cancelled.';
+                    toast.info(statusMessage);
                     setChallengeStep('search');
                     setActiveChallengeId(null);
-                    if (challengeUnsubscribeRef.current) challengeUnsubscribeRef.current();
+                    if (challengeUnsubscribeRef.current) {
+                        challengeUnsubscribeRef.current();
+                        challengeUnsubscribeRef.current = null;
+                    }
                 }
             });
 
@@ -252,6 +264,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
     };
 
     const handleCancelChallenge = () => {
+        const challengeIdToCancel = activeChallengeId;
         // FIX M4: Ensure challenge listener is properly cleaned up
         if (challengeUnsubscribeRef.current) {
             challengeUnsubscribeRef.current();
@@ -264,6 +277,11 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
         setSelectedFriend(null);
         setSearchQuery('');
         setSearchResults([]);
+        if (challengeIdToCancel) {
+            cancelChallenge(challengeIdToCancel).catch(error => {
+                console.warn('Failed to cancel challenge', error);
+            });
+        }
     };
 
     const activeGameData = STATIC_GAME_LIST.find(g => g.id === selectedGame);

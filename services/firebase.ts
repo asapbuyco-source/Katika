@@ -36,7 +36,7 @@ export {
     createBotMatch, subscribeToGame, getGame,
     updateGameState, updateTurn, updateGameStatus,
     subscribeToGameConfigs, subscribeToIncomingChallenges, subscribeToChallengeStatus,
-    sendChallenge, respondToChallenge,
+    sendChallenge, respondToChallenge, cancelChallenge,
     getActiveGamesCount, getGameActivityStats
 } from './firebase/games';
 

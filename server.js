@@ -490,6 +490,143 @@ const blockGuests = (req, res, next) => {
     next();
 };
 
+const normalizeCameroonPhone = (phone) => {
+    if (!phone || typeof phone !== 'string') return null;
+    let cleaned = phone.replace(/\D/g, '');
+    if (cleaned.startsWith('237')) cleaned = cleaned.slice(3);
+    return /^6\d{8}$/.test(cleaned) ? cleaned : null;
+};
+
+const hashClaimValue = (prefix, value) => {
+    return crypto.createHash('sha256').update(`${prefix}:${value}`).digest('hex');
+};
+
+app.post('/api/auth/sync-profile', verifyAuth, async (req, res) => {
+    try {
+        if (!db) return res.status(503).json({ error: 'Database unavailable.' });
+
+        const { deviceId, phone, referralCode } = req.body || {};
+        const userId = req.user.uid;
+        if (!deviceId || typeof deviceId !== 'string') return res.status(400).json({ error: 'Invalid deviceId.' });
+
+        const cleanDeviceId = deviceId.trim().slice(0, 128);
+        const deviceHash = hashClaimValue('device', cleanDeviceId);
+        const cleanPhone = normalizeCameroonPhone(phone);
+        if (phone && !cleanPhone) return res.status(400).json({ error: 'Enter a valid Cameroon phone number starting with 6.' });
+        const phoneHash = cleanPhone ? hashClaimValue('phone', cleanPhone) : null;
+        const provider = req.user?.firebase?.sign_in_provider || '';
+        const isGuest = provider === 'anonymous';
+
+        const userRef = db.collection('users').doc(userId);
+        const deviceRef = db.collection('device_fingerprints').doc(deviceHash);
+        const deviceClaimRef = db.collection('welcome_bonus_claims').doc(`device_${deviceHash}`);
+        const phoneClaimRef = phoneHash ? db.collection('welcome_bonus_claims').doc(`phone_${phoneHash}`) : null;
+
+        let responsePayload = null;
+
+        await db.runTransaction(async (tx) => {
+            const reads = [
+                tx.get(userRef),
+                tx.get(deviceRef),
+                tx.get(deviceClaimRef),
+            ];
+            if (phoneClaimRef) reads.push(tx.get(phoneClaimRef));
+            const [userSnap, deviceSnap, deviceClaimSnap, phoneClaimSnap] = await Promise.all(reads);
+
+            const existingDeviceUsers = new Set(deviceSnap.exists ? (deviceSnap.data().userIds || []) : []);
+            existingDeviceUsers.add(userId);
+            const deviceClaimedByOther = deviceClaimSnap.exists && deviceClaimSnap.data().userId !== userId;
+            const phoneClaimedByOther = !!(phoneClaimRef && phoneClaimSnap?.exists && phoneClaimSnap.data().userId !== userId);
+
+            tx.set(deviceRef, {
+                userIds: Array.from(existingDeviceUsers).slice(0, 25),
+                lastUserId: userId,
+                lastSeenAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            }, { merge: true });
+
+            if (userSnap.exists) {
+                const existingUser = userSnap.data();
+                tx.set(userRef, {
+                    lastDeviceHash: deviceHash,
+                    lastDeviceVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    ...(phoneHash ? { signupPhoneHash: existingUser.signupPhoneHash || phoneHash, signupPhoneLast4: cleanPhone.slice(-4) } : {})
+                }, { merge: true });
+                responsePayload = { user: { id: userId, ...existingUser }, bonusStatus: existingUser.welcomeBonusStatus || 'existing' };
+                return;
+            }
+
+            const canReceiveWelcomeBonus = !isGuest && !!phoneHash && !deviceClaimSnap.exists && !(phoneClaimRef && phoneClaimSnap?.exists);
+            const displayName = req.user.name || req.user.email?.split('@')[0] || `Player-${userId.slice(0, 4)}`;
+            const avatar = req.user.picture || `https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`;
+            const newUser = {
+                id: userId,
+                name: displayName,
+                avatar,
+                balance: canReceiveWelcomeBonus ? 100 : 0,
+                elo: 1000,
+                rankTier: 'Bronze',
+                isAdmin: false,
+                isBanned: false,
+                hasSeenOnboarding: isGuest,
+                promoBalance: 0,
+                lastDeviceHash: deviceHash,
+                lastDeviceVerifiedAt: admin.firestore.FieldValue.serverTimestamp(),
+                welcomeBonusAmount: canReceiveWelcomeBonus ? 100 : 0,
+                welcomeBonusStatus: canReceiveWelcomeBonus ? 'granted' : (deviceClaimedByOther ? 'device_already_claimed' : phoneClaimedByOther ? 'phone_already_claimed' : 'not_granted'),
+                createdAt: admin.firestore.FieldValue.serverTimestamp(),
+                ...(phoneHash ? { signupPhoneHash: phoneHash, signupPhoneLast4: cleanPhone.slice(-4) } : {}),
+            };
+
+            const cleanReferral = typeof referralCode === 'string' ? referralCode.trim() : '';
+            if (cleanReferral && !isGuest) newUser.referredBy = cleanReferral;
+
+            tx.set(userRef, newUser);
+
+            if (canReceiveWelcomeBonus) {
+                const claimData = {
+                    userId,
+                    amount: 100,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                };
+                tx.set(deviceClaimRef, { ...claimData, type: 'device' });
+                if (phoneClaimRef) tx.set(phoneClaimRef, { ...claimData, type: 'phone' });
+                tx.set(userRef.collection('transactions').doc(), {
+                    type: 'welcome_bonus',
+                    amount: 100,
+                    status: 'completed',
+                    date: new Date().toISOString(),
+                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                    note: 'New account welcome bonus'
+                });
+            }
+
+            const responseUser = {
+                ...newUser,
+                createdAt: new Date().toISOString(),
+                lastDeviceVerifiedAt: new Date().toISOString()
+            };
+
+            responsePayload = {
+                user: responseUser,
+                bonusStatus: newUser.welcomeBonusStatus,
+                message: canReceiveWelcomeBonus
+                    ? 'Welcome bonus added: 100 FCFA.'
+                    : deviceClaimedByOther
+                        ? 'This device has already received the 100 FCFA new account bonus on another account.'
+                        : phoneClaimedByOther
+                            ? 'This phone number has already received the 100 FCFA new account bonus on another account.'
+                            : 'Welcome bonus was not added.'
+            };
+        });
+
+        res.json(responsePayload);
+    } catch (err) {
+        console.error('[Auth] sync-profile error:', err);
+        res.status(500).json({ error: 'Could not sync profile.' });
+    }
+});
+
 // Device verification used by the SPA after Firebase auth. It is intentionally
 // advisory: suspicious device sharing warns the client, while hard account
 // actions remain an ops/admin decision.
@@ -2447,6 +2584,7 @@ app.post('/api/challenges/send', verifyAuth, blockGuests, async (req, res) => {
         if (!targetId || typeof targetId !== 'string') return res.status(400).json({ error: 'Invalid targetId.' });
         if (!gameType || typeof gameType !== 'string') return res.status(400).json({ error: 'Invalid gameType.' });
         if (typeof stake !== 'number' || stake < 0) return res.status(400).json({ error: 'Invalid stake.' });
+        if (!isGameInLaunchScope(gameType)) return res.status(400).json({ error: `${gameType} is not available for challenges yet.` });
 
         if (targetId === senderId) return res.status(400).json({ error: 'Cannot challenge yourself.' });
 
@@ -2515,7 +2653,7 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         const userId = req.user.uid;
 
         if (!challengeId || typeof challengeId !== 'string') return res.status(400).json({ error: 'Invalid challengeId.' });
-        if (!action || !['accept', 'decline'].includes(action)) return res.status(400).json({ error: 'Invalid action.' });
+        if (!action || !['accept', 'decline', 'cancel'].includes(action)) return res.status(400).json({ error: 'Invalid action.' });
 
         if (!db) return res.status(503).json({ error: 'Database unavailable.' });
 
@@ -2525,8 +2663,17 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         if (!challengeSnap.exists) return res.status(404).json({ error: 'Challenge not found.' });
 
         const challenge = challengeSnap.data();
+        const senderId = challenge.sender?.id;
+        if (action === 'cancel') {
+            if (senderId !== userId) return res.status(403).json({ error: 'Only the sender can cancel this challenge.' });
+            if (challenge.status !== 'pending') return res.status(409).json({ error: `Challenge already ${challenge.status}.` });
+            await challengeRef.update({ status: 'cancelled', respondedAt: admin.firestore.FieldValue.serverTimestamp() });
+            return res.status(200).json({ ok: true });
+        }
+
         if (challenge.targetId !== userId) return res.status(403).json({ error: 'Not your challenge.' });
         if (challenge.status !== 'pending') return res.status(409).json({ error: `Challenge already ${challenge.status}.` });
+        if (!isGameInLaunchScope(challenge.gameType)) return res.status(400).json({ error: `${challenge.gameType} is not available for challenges yet.` });
 
         if (challenge.expiresAt && challenge.expiresAt < Date.now()) {
             await challengeRef.update({ status: 'expired', respondedAt: admin.firestore.FieldValue.serverTimestamp() });
@@ -2539,7 +2686,6 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         }
 
         const gameId = `challenge_${challengeId}`;
-        const senderId = challenge.sender?.id;
         if (!senderId || typeof senderId !== 'string') return res.status(400).json({ error: 'Invalid challenge sender.' });
 
         await db.runTransaction(async (tx) => {
@@ -2547,6 +2693,7 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
             if (!freshChallengeSnap.exists) throw new Error('CHALLENGE_NOT_FOUND');
             const freshChallenge = freshChallengeSnap.data();
             if (freshChallenge.status !== 'pending') throw new Error('CHALLENGE_NOT_PENDING');
+            if (!isGameInLaunchScope(freshChallenge.gameType)) throw new Error('CHALLENGE_GAME_UNAVAILABLE');
 
             const receiverRef = db.collection('users').doc(userId);
             const senderRef = db.collection('users').doc(senderId);
@@ -2574,6 +2721,7 @@ app.post('/api/challenges/respond', verifyAuth, blockGuests, async (req, res) =>
         if (err.message === 'CHALLENGE_NOT_PENDING') return res.status(409).json({ error: 'Challenge is no longer pending.' });
         if (err.message === 'RECEIVER_NOT_FOUND') return res.status(404).json({ error: 'Receiver not found.' });
         if (err.message === 'SENDER_NOT_FOUND') return res.status(404).json({ error: 'Challenge sender not found.' });
+        if (err.message === 'CHALLENGE_GAME_UNAVAILABLE') return res.status(400).json({ error: 'Challenge game is not available.' });
         if (err.message === 'RECEIVER_INSUFFICIENT_FUNDS') return res.status(400).json({ error: 'Insufficient funds to accept.' });
         if (err.message === 'SENDER_INSUFFICIENT_FUNDS') return res.status(400).json({ error: 'Challenge sender has insufficient funds.' });
         console.error('[Challenge] respond error:', err);
@@ -3346,6 +3494,43 @@ io.on('connection', (socket) => {
             } catch (e) {
                 console.error(`[Tournament] Join validation failed for ${privateRoomId}:`, e);
                 socket.emit('game_error', { message: 'Could not verify tournament match. Please try again.' });
+                return;
+            }
+        }
+        if (privateRoomId?.startsWith('challenge_')) {
+            if (!db) {
+                socket.emit('game_error', { message: 'Challenge service is temporarily unavailable.' });
+                return;
+            }
+            try {
+                const challengeId = privateRoomId.slice('challenge_'.length);
+                const challengeSnap = await db.collection('challenges').doc(challengeId).get();
+                if (!challengeSnap.exists) {
+                    socket.emit('game_error', { message: 'Challenge was not found.' });
+                    return;
+                }
+                const challengeData = challengeSnap.data() || {};
+                const senderId = challengeData.sender?.id;
+                const targetId = challengeData.targetId;
+                if (challengeData.status !== 'accepted' || challengeData.gameId !== privateRoomId) {
+                    socket.emit('game_error', { message: 'Challenge is not ready to start.' });
+                    return;
+                }
+                if (senderId !== userId && targetId !== userId) {
+                    socket.emit('game_error', { message: 'You are not part of this challenge.' });
+                    return;
+                }
+                if (challengeData.gameType !== gameType || Number(challengeData.stake) !== stake) {
+                    socket.emit('game_error', { message: 'Challenge match details do not match.' });
+                    return;
+                }
+                if (!isGameInLaunchScope(challengeData.gameType)) {
+                    socket.emit('game_error', { message: `${challengeData.gameType} is not available for challenges yet.` });
+                    return;
+                }
+            } catch (e) {
+                console.error(`[Challenge] Join validation failed for ${privateRoomId}:`, e);
+                socket.emit('game_error', { message: 'Could not verify challenge match. Please try again.' });
                 return;
             }
         }
@@ -4277,7 +4462,7 @@ io.on('connection', (socket) => {
                         }
                         const prevCount = serverBalls.filter(b => b.pocketed || b.isPotted).length;
                         const newCount = authBalls.filter(b => b.pocketed || b.isPotted).length;
-                        const maxPocketable = (room.gameState.turnsPlayed || 0) === 0 ? 4 : 2;
+                        const maxPocketable = (room.gameState.turnsPlayed || 0) === 0 ? 6 : 5;
                         if (newCount - prevCount > maxPocketable) {
                             console.warn(`[Pool][${roomId}] Implausible: ${newCount - prevCount} balls pocketed in 1 shot (max allowed: ${maxPocketable}). Rejected.`); return;
                         }
@@ -4322,18 +4507,36 @@ io.on('connection', (socket) => {
                 if (room.gameType === 'Pool' && action.newState.balls && room.gameState.balls) {
                     const prevBalls = room.gameState.balls;
                     const newBalls = action.newState.balls;
+                    const poolEvent = action.poolEvent || 'state';
                     const MAX_VELOCITY = 60; // Max reasonable velocity per frame
-                    const MAX_POSITION_SHIFT = 200; // Max position change per update (covers physics sim)
+                    const MAX_POSITION_SHIFT = 200; // Max position change per update (covers non-shot sync)
+                    const TABLE_MIN_X = 0;
+                    const TABLE_MAX_X = 972;
+                    const TABLE_MIN_Y = 0;
+                    const TABLE_MAX_Y = 522;
 
                     for (const newBall of newBalls) {
                         if (newBall.pocketed || newBall.id === 0) continue; // Skip pocketed & cue (validates separately)
                         const prevBall = prevBalls.find(b => b.id === newBall.id);
                         if (!prevBall) continue; // New ball ID — already rejected by count check above
 
+                        const x = Number(newBall.x);
+                        const y = Number(newBall.y);
+                        const vx = Number(newBall.vx || 0);
+                        const vy = Number(newBall.vy || 0);
+                        if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(vx) || !Number.isFinite(vy)) {
+                            console.warn(`[Pool][${roomId}] Non-finite ball state from ${userId}. Rejected.`);
+                            return;
+                        }
+                        if (x < TABLE_MIN_X || x > TABLE_MAX_X || y < TABLE_MIN_Y || y > TABLE_MAX_Y) {
+                            console.warn(`[Pool][${roomId}] Ball ${newBall.id} outside table bounds from ${userId}: (${x},${y}). Rejected.`);
+                            return;
+                        }
+
                         // Position teleportation check
                         const dx = Math.abs(newBall.x - prevBall.x);
                         const dy = Math.abs(newBall.y - prevBall.y);
-                        if (dx > MAX_POSITION_SHIFT || dy > MAX_POSITION_SHIFT) {
+                        if (poolEvent !== 'shot' && (dx > MAX_POSITION_SHIFT || dy > MAX_POSITION_SHIFT)) {
                             // Only flag if ball was previously not pocketed (pocketed balls can reposition)
                             if (!prevBall.pocketed && !prevBall.isPotted) {
                                 console.warn(`[Pool][${roomId}] Ball ${newBall.id} teleported by ${userId}: (${prevBall.x},${prevBall.y})->(${newBall.x},${newBall.y}). Rejected.`);

@@ -7,12 +7,19 @@ import { playSFX } from '../services/sound';
 
 interface ChallengeRequestModalProps {
   challenge: Challenge;
-  onAccept: () => void;
-  onDecline: () => void;
+  onAccept: () => void | Promise<void>;
+  onDecline: () => void | Promise<void>;
 }
 
 export const ChallengeRequestModal: React.FC<ChallengeRequestModalProps> = ({ challenge, onAccept, onDecline }) => {
   const [timeLeft, setTimeLeft] = useState(15); // 15 seconds to accept
+  const [isResponding, setIsResponding] = useState(false);
+
+  const respondOnce = async (handler: () => void | Promise<void>) => {
+    if (isResponding) return;
+    setIsResponding(true);
+    await handler();
+  };
 
   useEffect(() => {
     playSFX('notification');
@@ -20,7 +27,7 @@ export const ChallengeRequestModal: React.FC<ChallengeRequestModalProps> = ({ ch
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          onDecline();
+          respondOnce(onDecline);
           return 0;
         }
         return prev - 1;
@@ -28,7 +35,7 @@ export const ChallengeRequestModal: React.FC<ChallengeRequestModalProps> = ({ ch
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [onDecline]);
+  }, [onDecline, isResponding]);
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/80 backdrop-blur-sm">
@@ -79,14 +86,16 @@ export const ChallengeRequestModal: React.FC<ChallengeRequestModalProps> = ({ ch
 
                     <div className="flex gap-3">
                         <button 
-                            onClick={onDecline}
-                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-slate-300 font-bold flex items-center justify-center gap-2 transition-colors"
+                            onClick={() => respondOnce(onDecline)}
+                            disabled={isResponding}
+                            className="flex-1 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-slate-300 font-bold flex items-center justify-center gap-2 transition-colors disabled:opacity-60"
                         >
                             <X size={18} /> Decline
                         </button>
                         <button 
-                            onClick={onAccept}
-                            className="flex-1 py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black rounded-xl shadow-lg shadow-gold-500/20 flex items-center justify-center gap-2 transition-colors animate-pulse"
+                            onClick={() => respondOnce(onAccept)}
+                            disabled={isResponding}
+                            className="flex-1 py-3 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black rounded-xl shadow-lg shadow-gold-500/20 flex items-center justify-center gap-2 transition-colors animate-pulse disabled:opacity-60"
                         >
                             <Check size={18} /> ACCEPT
                         </button>

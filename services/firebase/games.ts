@@ -100,13 +100,16 @@ export const subscribeToIncomingChallenges = (userId: string, callback: (challen
     const q = query(collection(db, "challenges"), where("targetId", "==", userId), where("status", "==", "pending"));
     return onSnapshot(q, (snapshot) => {
         if (!snapshot.empty) {
-            const challenges = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Challenge));
+            const now = Date.now();
+            const challenges = snapshot.docs
+                .map(doc => ({ id: doc.id, ...doc.data() } as Challenge))
+                .filter(challenge => !challenge.expiresAt || challenge.expiresAt > now);
             challenges.sort((a, b) => {
                 const tA = (a.timestamp as any)?.toMillis ? (a.timestamp as any).toMillis() : (a.timestamp || 0);
                 const tB = (b.timestamp as any)?.toMillis ? (b.timestamp as any).toMillis() : (b.timestamp || 0);
                 return tB - tA;
             });
-            callback(challenges[0]);
+            callback(challenges[0] || null);
         } else {
             callback(null);
         }
@@ -167,6 +170,25 @@ export const respondToChallenge = async (challengeId: string, status: 'accepted'
         throw new Error(err.error || 'Failed to respond to challenge.');
     }
     return response.json();
+};
+
+export const cancelChallenge = async (challengeId: string): Promise<void> => {
+    const currentUser = auth.currentUser;
+    const token = currentUser ? await currentUser.getIdToken() : null;
+    if (!token) throw new Error('Not authenticated.');
+
+    const response = await fetch(`${getApiUrl()}/api/challenges/respond`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ challengeId, action: 'cancel' })
+    });
+    if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to cancel challenge.');
+    }
 };
 
 export const getActiveGamesCount = async (): Promise<number> => {

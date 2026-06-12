@@ -1,7 +1,7 @@
 
 import React, { useState } from 'react';
 import { motion as originalMotion } from 'framer-motion';
-import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft, KeyRound, CheckCircle } from 'lucide-react';
+import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft, KeyRound, CheckCircle, Smartphone } from 'lucide-react';
 import { signInWithGoogle, registerWithEmail, loginWithEmail, syncUserProfile, triggerPasswordReset } from '../services/firebase';
 import { User as AppUser, ViewState } from '../types';
 
@@ -19,6 +19,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [phone, setPhone] = useState('');
     const [referralCode, setReferralCode] = useState('');
     const [resetEmail, setResetEmail] = useState('');
     const [resetSent, setResetSent] = useState(false);
@@ -94,12 +95,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
             setError('Confirm you are 18+ and located in Cameroon to create an account.');
             return;
         }
+        const cleanPhone = phone.replace(/\D/g, '').replace(/^237/, '');
+        if (isRegistering && !/^6\d{8}$/.test(cleanPhone)) {
+            setError('Enter a valid Cameroon phone number starting with 6 to check welcome bonus eligibility.');
+            return;
+        }
 
         setIsLoading(true);
         setError('');
 
         if (isRegistering && referralCode) {
             sessionStorage.setItem('pendingReferral', referralCode);
+        }
+        if (isRegistering) {
+            sessionStorage.setItem('pendingSignupPhone', cleanPhone);
         }
 
         try {
@@ -263,6 +272,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                         />
                                     </div>
                                 </div>
+
+                                {isRegistering && (
+                                    <div>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">MoMo Phone Number</label>
+                                        <div className="relative">
+                                            <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
+                                            <input
+                                                type="tel"
+                                                inputMode="numeric"
+                                                placeholder="6XXXXXXXX"
+                                                value={phone}
+                                                onChange={(e) => setPhone(e.target.value)}
+                                                className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-12 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-sans"
+                                            />
+                                        </div>
+                                        <p className="mt-1 text-[11px] text-slate-500">Used only to make sure the 100 FCFA new account bonus is claimed once.</p>
+                                    </div>
+                                )}
                                 
                                 {isRegistering && (
                                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
