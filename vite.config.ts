@@ -9,7 +9,7 @@ export default defineConfig({
     // P1-1: Inject launch scope as a build-time constant so it's baked into the
     // production bundle and cannot be manipulated by the client at runtime.
     // Default: Chess + Checkers + Dice. Set VITE_LAUNCH_GAMES env var to adjust.
-    'import.meta.env.VITE_LAUNCH_GAMES': JSON.stringify(process.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice')
+    'import.meta.env.VITE_LAUNCH_GAMES': JSON.stringify(process.env.VITE_LAUNCH_GAMES || 'Chess,Checkers,Dice,Pool')
   },
   plugins: [
     react(),

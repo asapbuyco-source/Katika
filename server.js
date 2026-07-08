@@ -365,7 +365,7 @@ const app = express();
 app.set('trust proxy', 1); // For accurate rate limiting behind Railway's proxy
 
 // Security Headers
-app.use(helmet());
+app.use(helmet({ contentSecurityPolicy: false }));
 
 // [Step 1.1] Apply hash-based CSP from build output
 app.use((req, res, next) => {
@@ -3176,6 +3176,11 @@ const hydrateRoomsFromFirestore = async () => {
                 ? roomData.rematchVotes
                 : Object.keys(roomData.rematchVotes || {}));
             rooms.set(doc.id, roomData);
+            // Reset timestamps so the orphan reaper gives players time to reconnect
+            if (roomData.gameState) {
+                roomData.gameState.startTime = Date.now();
+                roomData.gameState.lastMoveTime = Date.now();
+            }
             console.log(`[Hydrate] Restored room ${doc.id} with ${roomData.players?.length} players`);
         }
         console.log(`[Hydrate] Restored ${activeSnap.size} active rooms from Firestore`);
@@ -3486,7 +3491,7 @@ function processBotAction(roomId, botId, action) {
                     pgnGame.move(action.move);
                     room.gameState.pgn = pgnGame.pgn();
                 } catch (pgnErr) {
-                    const pgnGame = new Chess(room.gameState.fen ? undefined : undefined);
+                    const pgnGame = new Chess();
                     pgnGame.load(validatedMove.newFen);
                     room.gameState.pgn = pgnGame.pgn();
                 }
@@ -3623,7 +3628,7 @@ const endGame = (roomId, winnerId, reason) => {
     const { totalPot, platformFee, winnings } = calculatePayouts(room.stake);
 
     // Settle finances server-side (non-blocking)
-    if (winnerId && room.stake > 0) {
+    if (winnerId) {
         room.settlementPromise = settleGame(roomId, winnerId);
     } else if (!winnerId && room.stake > 0) {
         // Draw: Refund escrows
@@ -3937,12 +3942,20 @@ io.on('connection', (socket) => {
         }
         const roomId = generateRoomId();
         const botId = 'katika_trainer';
+        // Read real ELO from Firestore for accurate difficulty scaling
+        let userDoc = null;
+        if (db) {
+            try { userDoc = await db.collection('users').doc(userId).get(); } catch (_) {}
+        }
+        const userData = userDoc?.exists ? userDoc.data() : {};
         const userProfile = {
             id: userId,
-            name: socket.user.name || 'Player',
-            avatar: socket.user.avatar || '',
-            elo: 1000,
-            rankTier: 'Bronze'
+            name: (userData.name || socket.user.name || 'Player'),
+            avatar: (userData.avatar || socket.user.avatar || ''),
+            elo: userData.elo || 1000,
+            chessElo: userData.chessElo,
+            checkersElo: userData.checkersElo,
+            rankTier: userData.rankTier || 'Bronze'
         };
 
         const room = {
@@ -4392,8 +4405,10 @@ io.on('connection', (socket) => {
                             const hostSnap = await hostRef.get();
                             const hostData = hostSnap.exists ? hostSnap.data() : null;
                             
-                            // Circuit Breaker: house balance > 5000 and stake <= 500
-                            if (hostData && hostData.balance >= 5000 && stake <= 500) {
+                            // Circuit Breaker: configurable via env, defaults: min balance 5000, max stake 500
+                            const minHostBalance = parseInt(process.env.KATIKA_HOST_MIN_BALANCE) || 5000;
+                            const maxHostStake = parseInt(process.env.KATIKA_HOST_MAX_STAKE) || 500;
+                            if (hostData && hostData.balance >= minHostBalance && stake <= maxHostStake) {
                                 const me = currentQueue.splice(myIdx, 1)[0];
                                 const roomId = generateRoomId();
                                 const botId = 'katika_host_account';
@@ -5327,9 +5342,14 @@ io.on('connection', (socket) => {
                 }
 
 
-                // action.newState.winner is a fallback for non-Chess, non-Checkers games (i.e., Pool or Dice).
-                // Chess and Checkers explicitly end parsing earlier.
-                if (action.newState.winner && room.gameType !== 'Chess' && room.gameType !== 'Checkers') {
+                // action.newState.winner is a fallback for Pool only. Chess, Checkers,
+                // TicTacToe, Dice, and Ludo have their own win/draw detection above.
+                if (action.newState.winner
+                    && room.gameType !== 'Chess'
+                    && room.gameType !== 'Checkers'
+                    && room.gameType !== 'TicTacToe'
+                    && room.gameType !== 'Dice'
+                    && room.gameType !== 'Ludo') {
                     endGame(roomId, action.newState.winner, 'Win Condition');
                     return;
                 }
@@ -5782,6 +5802,7 @@ const gracefulShutdown = async (signal) => {
             }
         }
     }
+    await shutdownStockfish().catch(e => console.error('[Shutdown] Stockfish:', e.message));
     httpServer.close(() => {
         console.log('Server closed. Exiting.');
         process.exit(0);

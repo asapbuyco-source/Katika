@@ -37,30 +37,28 @@ async function run() {
     process.exit(failed > 0 ? 1 : 0);
 }
 
-// ─── Test: Skill Level Mapping ───
+// ─── Test: Skill Level Mapping (now dynamic based on ELO) ───
 
-test('Easy maps to Skill 18', async () => {
-    const lvl = mapEloToSkillLevel(500, 'easy');
-    if (lvl !== 18) throw new Error(`Expected 18, got ${lvl}`);
+test('Easy maps to 16 for low ELO, 18 for high ELO', async () => {
+    if (mapEloToSkillLevel(500, 'easy') !== 16) throw new Error(`Expected 16 for ELO 500 easy`);
+    if (mapEloToSkillLevel(1500, 'easy') !== 18) throw new Error(`Expected 18 for ELO 1500 easy`);
 });
 
-test('Medium maps to Skill 19', async () => {
-    const lvl = mapEloToSkillLevel(1000, 'medium');
-    if (lvl !== 19) throw new Error(`Expected 19, got ${lvl}`);
+test('Medium maps to 17 for low ELO, 20 for high ELO', async () => {
+    if (mapEloToSkillLevel(800, 'medium') !== 17) throw new Error(`Expected 17 for ELO 800 medium`);
+    if (mapEloToSkillLevel(1600, 'medium') !== 20) throw new Error(`Expected 20 for ELO 1600 medium`);
 });
 
-test('Hard maps to Skill 20', async () => {
-    const lvl = mapEloToSkillLevel(2000, 'hard');
-    if (lvl !== 20) throw new Error(`Expected 20, got ${lvl}`);
+test('Hard is always 20 for 1200+', async () => {
+    if (mapEloToSkillLevel(1200, 'hard') !== 20) throw new Error(`Expected 20 for ELO 1200 hard`);
+    if (mapEloToSkillLevel(2500, 'hard') !== 20) throw new Error(`Expected 20 for ELO 2500 hard`);
 });
 
-test('Skill level never below 18 (any difficulty)', async () => {
-    for (const diff of ['easy', 'medium', 'hard']) {
-        for (const elo of [500, 1000, 1500, 2000, 2500]) {
-            const lvl = mapEloToSkillLevel(elo, diff);
-            if (lvl < 18) throw new Error(`ELO ${elo}/${diff}: got ${lvl}, expected >= 18`);
-        }
-    }
+test('Skill level scales UP with ELO within each difficulty tier', async () => {
+    // Within easy: 500→16, 1100→17, 1500→18
+    if (mapEloToSkillLevel(500, 'easy') >= mapEloToSkillLevel(1100, 'easy')) throw new Error('Skill should increase with ELO');
+    // Within medium: 800→17, 1100→18, 1300→19, 1600→20
+    if (mapEloToSkillLevel(800, 'medium') >= mapEloToSkillLevel(1300, 'medium')) throw new Error('Skill should increase with ELO');
 });
 
 // ─── Test: Mate in 1 (back rank) ───
