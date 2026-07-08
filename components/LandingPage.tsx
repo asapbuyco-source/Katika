@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { ChevronRight, ShieldCheck, Zap, Globe, Smartphone, Lock, PlayCircle, Dice5, Brain, Target, X, Layers, Grid3x3, Disc } from 'lucide-react';
 import { ViewState } from '../types';
 import { getLaunchGameScope } from '../services/launchScope';
+import { useLanguage } from '../services/i18n';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -11,22 +12,23 @@ interface LandingPageProps {
 }
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate }) => {
+  const { t } = useLanguage();
   
   const features = [
     {
       icon: ShieldCheck,
-      title: "Secure Escrow",
-      desc: "Funds are locked in a vault before the game starts. The winner is paid automatically."
+      title: t('secure_escrow'),
+      desc: t('secure_escrow_desc')
     },
     {
       icon: Zap,
-      title: "Mobile Money Withdrawals",
-      desc: "Withdraw your winnings to MTN Mobile Money or Orange Money with server-side payout tracking."
+      title: t('mobile_money_withdrawals'),
+      desc: t('mobile_money_withdrawals_desc')
     },
     {
       icon: Globe,
-      title: "V-Guard AI",
-      desc: "Our automated referee ensures fair play, detecting bots and cheating instantly."
+      title: t('vguard_ai'),
+      desc: t('vguard_ai_desc')
     }
   ];
 
@@ -93,13 +95,13 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                 onClick={() => onNavigate('how-it-works')}
                 className="hidden md:block text-sm font-medium text-slate-300 hover:text-white transition-colors"
             >
-                How it Works
+                {t('how_it_works')}
             </button>
             <button 
                 onClick={onLogin}
                 className="px-5 py-2.5 bg-white/10 hover:bg-white/20 border border-white/10 rounded-full text-sm font-bold transition-all backdrop-blur-md"
             >
-                Login
+                {t('login')}
             </button>
         </div>
       </nav>
@@ -120,19 +122,20 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                 className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold-500/10 border border-gold-500/20 text-gold-400 text-xs font-bold uppercase tracking-wider mb-8 shadow-[0_0_15px_rgba(251,191,36,0.2)]"
               >
                   <span className="w-2 h-2 rounded-full bg-gold-500 animate-pulse"></span>
-                  Live in Cameroon
-              </motion.div>
+                   {t('live_in_cameroon')}
+               </motion.div>
 
               <h1 className="text-5xl md:text-7xl lg:text-8xl font-display font-black leading-[1.1] mb-6 tracking-tight">
-                  Play Skills. <br/>
-                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-300 via-yellow-100 to-gold-500 drop-shadow-sm">
-                      Win Money.
-                  </span>
+                   {t('play_skills_win_money')} <br/>
+                   <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-300 via-yellow-100 to-gold-500 drop-shadow-sm">
+                       {t('win_money')}
+                   </span>
               </h1>
 
               <p className="text-lg md:text-xl text-slate-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-                  The first premium P2P gaming platform. Challenge real players in Chess, Checkers, Dice, and Pool. Secure withdrawals to MoMo.
-              </p>
+                   {t('landing_hero_desc')}
+               </p>
+               <p className="text-xs text-slate-500 mb-6">{t('deposit_fee_notice')}</p>
 
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                   <motion.button 
@@ -141,16 +144,16 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                       onClick={onLogin}
                       className="w-full sm:w-auto px-8 py-4 bg-gold-500 hover:bg-gold-400 text-royal-950 font-black text-lg rounded-2xl shadow-[0_0_30px_rgba(251,191,36,0.3)] transition-all flex items-center justify-center gap-2"
                   >
-                      Start Playing <ChevronRight size={20} />
-                  </motion.button>
-                  
-                  <motion.button 
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => onNavigate('how-it-works')}
-                      className="w-full sm:w-auto px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-lg rounded-2xl backdrop-blur-md transition-all flex items-center justify-center gap-2"
-                  >
-                      <PlayCircle size={20} className="text-slate-400" /> How it Works
+                       {t('start_playing')} <ChevronRight size={20} />
+                   </motion.button>
+                   
+                   <motion.button 
+                       whileHover={{ scale: 1.05 }}
+                       whileTap={{ scale: 0.95 }}
+                       onClick={() => onNavigate('how-it-works')}
+                       className="w-full sm:w-auto px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 text-white font-bold text-lg rounded-2xl backdrop-blur-md transition-all flex items-center justify-center gap-2"
+                   >
+                       <PlayCircle size={20} className="text-slate-400" /> {t('how_it_works_btn')}
                   </motion.button>
               </div>
           </motion.div>
@@ -158,7 +161,7 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
           {/* Games Showcase */}
           <div className="w-full mb-24">
               <div className="text-center mb-10">
-                  <h3 className="text-lg font-bold text-white uppercase tracking-widest mb-2 opacity-80">Choose Your Arena</h3>
+                   <h3 className="text-lg font-bold text-white uppercase tracking-widest mb-2 opacity-80">{t('choose_your_arena')}</h3>
                   <div className="h-1 w-20 bg-gradient-to-r from-transparent via-gold-500 to-transparent mx-auto"></div>
               </div>
               
@@ -221,33 +224,33 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
                           <span className="font-display font-bold text-white tracking-widest text-lg">VANTAGE</span>
                       </div>
                       <p className="text-sm text-slate-400 leading-relaxed max-w-sm">
-                          The trusted, premium platform for skill-based, real-money gaming in Africa. Play with confidence.
+                          {t('footer_tagline')}
                       </p>
                   </div>
                   
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Platform</h4>
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">{t('platform_footer')}</h4>
                       <ul className="space-y-4 text-sm text-slate-400">
-                          <li><button onClick={() => onNavigate('how-it-works')} className="hover:text-gold-400 transition-colors">How it Works</button></li>
-                          <li><button onClick={() => onNavigate('matchmaking')} className="hover:text-gold-400 transition-colors">Games</button></li>
-                          <li><button onClick={onLogin} className="hover:text-gold-400 transition-colors">Login / Sign Up</button></li>
+                          <li><button onClick={() => onNavigate('how-it-works')} className="hover:text-gold-400 transition-colors">{t('how_it_works')}</button></li>
+                          <li><button onClick={() => onNavigate('matchmaking')} className="hover:text-gold-400 transition-colors">{t('games_footer')}</button></li>
+                          <li><button onClick={onLogin} className="hover:text-gold-400 transition-colors">{t('login_signup')}</button></li>
                       </ul>
                   </div>
 
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Legal</h4>
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">{t('legal_footer')}</h4>
                       <ul className="space-y-4 text-sm text-slate-400">
-                          <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">Terms of Service</button></li>
+                          <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">{t('terms')}</button></li>
                           <li><button onClick={() => onNavigate('privacy')} className="hover:text-gold-400 transition-colors">Privacy Policy</button></li>
-                          <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">Fair Play Policy</button></li>
+                          <li><button onClick={() => onNavigate('terms')} className="hover:text-gold-400 transition-colors">{t('fair_play_policy')}</button></li>
                       </ul>
                   </div>
 
                   <div>
-                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">Support</h4>
+                      <h4 className="text-white font-bold text-sm mb-6 uppercase tracking-wider">{t('support_footer')}</h4>
                       <ul className="space-y-4 text-sm text-slate-400">
-                          <li><button onClick={() => onNavigate('help-center')} className="hover:text-gold-400 transition-colors">Help Center</button></li>
-                          <li><button onClick={() => onNavigate('report-bug')} className="hover:text-gold-400 transition-colors">Report Issue</button></li>
+                          <li><button onClick={() => onNavigate('help-center')} className="hover:text-gold-400 transition-colors">{t('help_center_footer')}</button></li>
+                          <li><button onClick={() => onNavigate('report-bug')} className="hover:text-gold-400 transition-colors">{t('report_issue_footer')}</button></li>
                           <li className="flex items-center gap-2 text-gold-400 font-medium">
                               <Smartphone size={14} /> +237 657 960 690
                           </li>
@@ -256,10 +259,10 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onNavigate })
               </div>
               
               <div className="pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-6 text-xs text-slate-500">
-                  <p>&copy; {new Date().getFullYear()} Vantage Gaming Cameroon. All rights reserved.</p>
+                  <p>&copy; {new Date().getFullYear()} {t('copyright')}</p>
                   <div className="flex items-center gap-6 font-medium">
-                      <span className="hover:text-slate-300 transition-colors cursor-default">Douala, Cameroon</span>
-                      <span className="px-2 py-1 border border-slate-600 rounded text-[10px] tracking-widest text-slate-400">18+ PLAY RESPONSIBLY</span>
+                      <span className="hover:text-slate-300 transition-colors cursor-default">{t('douala_cameroon')}</span>
+                      <span className="px-2 py-1 border border-slate-600 rounded text-[10px] tracking-widest text-slate-400">{t('play_responsibly')}</span>
                   </div>
               </div>
           </div>

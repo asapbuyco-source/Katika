@@ -2,6 +2,7 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ShieldCheck, Cpu, Lock, Smartphone, UserPlus, Swords, Trophy, Wallet, Hash, Server, CheckCircle, Fingerprint } from 'lucide-react';
+import { useLanguage } from '../services/i18n';
 
 interface HowItWorksProps {
   onBack: () => void;
@@ -9,31 +10,32 @@ interface HowItWorksProps {
 }
 
 export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
+  const { t } = useLanguage();
   const steps = [
     {
-      title: "1. Create Account",
-      desc: "Sign up instantly using your Google account or email. We verify identity to ensure a bot-free environment.",
+      title: t('hiw_step1_title'),
+      desc: t('hiw_step1_desc'),
       icon: UserPlus,
       color: "bg-blue-500",
       textColor: "text-blue-400"
     },
     {
-      title: "2. Deposit Funds",
-      desc: "Load your wallet via MTN Mobile Money or Orange Money. Your funds are kept in a secure, personal vault.",
+      title: t('hiw_step2_title'),
+      desc: t('hiw_step2_desc'),
       icon: Smartphone,
       color: "bg-yellow-500",
       textColor: "text-yellow-400"
     },
     {
-      title: "3. Choose Your Arena",
-      desc: "Select a game (Ludo, Dice, Checkers, Chess) and a stake level. From 500 FCFA casual games to 50,000 FCFA pro tables.",
+      title: t('hiw_step3_title'),
+      desc: t('hiw_step3_desc'),
       icon: Swords,
       color: "bg-red-500",
       textColor: "text-red-400"
     },
     {
-      title: "4. Win & Withdraw",
-      desc: "Defeat your opponent. The escrow automatically releases the pot to your wallet. Withdraw to MoMo instantly.",
+      title: t('hiw_step4_title'),
+      desc: t('hiw_step4_desc'),
       icon: Trophy,
       color: "bg-gold-500",
       textColor: "text-gold-400"
@@ -73,22 +75,22 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
             className="text-center mb-24 max-w-3xl mx-auto"
         >
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-gold-500/10 border border-gold-500/20 text-gold-400 text-xs font-bold uppercase tracking-wider mb-6">
-                <ShieldCheck size={14} /> The Fair Play Guarantee
+                <ShieldCheck size={14} /> {t('fair_play_guarantee')}
             </div>
             <h1 className="text-5xl md:text-7xl font-display font-bold mb-6 leading-tight">
-                Skill Based.<br/>
+                {t('skill_based_trust_secured')}<br/>
                 <span className="text-transparent bg-clip-text bg-gradient-to-r from-gold-400 via-white to-gold-500">
-                    Trust Secured.
+                  {t('skill_based_trust_secured_2')}
                 </span>
             </h1>
             <p className="text-slate-400 text-lg md:text-xl leading-relaxed">
-                Vantage eliminates luck and fraud from online gaming. We provide the arena, you bring the skill. Our technology handles the rest.
+                {t('hiw_hero_desc')}
             </p>
         </motion.div>
 
         {/* The Process (Timeline) */}
         <div className="mb-32">
-            <h2 className="text-2xl font-display font-bold text-white mb-12 text-center">How to Start Earning</h2>
+            <h2 className="text-2xl font-display font-bold text-white mb-12 text-center">{t('how_start_earning')}</h2>
             <div className="relative">
                 {/* Connecting Line (Desktop) */}
                 <div className="hidden md:block absolute top-12 left-0 right-0 h-0.5 bg-gradient-to-r from-blue-500 via-red-500 to-gold-500 opacity-20"></div>
@@ -131,11 +133,11 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
                     <div className="p-3 bg-purple-500/20 rounded-xl text-purple-400">
                         <Server size={24} />
                     </div>
-                    <h3 className="text-2xl font-bold text-white">Provably Fair System</h3>
+                    <h3 className="text-2xl font-bold text-white">{t('provably_fair_title')}</h3>
                 </div>
                 
                 <p className="text-slate-400 mb-8 leading-relaxed">
-                    We use cryptographic hashing to ensure the game outcome is determined before the turn starts and cannot be altered.
+                    {t('provably_fair_desc')}
                 </p>
 
                 {/* Technical Visualization */}
@@ -172,11 +174,11 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
                     <div className="p-3 bg-green-500/20 rounded-xl text-green-400">
                         <Lock size={24} />
                     </div>
-                    <h3 className="text-2xl font-bold text-white">Escrow Protection</h3>
+                    <h3 className="text-2xl font-bold text-white">{t('escrow_protection_title')}</h3>
                 </div>
 
                 <p className="text-slate-400 mb-8 leading-relaxed">
-                    Stakes are locked in a neutral vault before the game begins. The loser cannot "run away" with the money—the code automatically pays the winner.
+                    {t('escrow_protection_desc')}
                 </p>
 
                 {/* Visual Flow */}
@@ -221,13 +223,13 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
                 <Cpu size={40} className="text-white" />
             </div>
 
-            <h2 className="text-3xl font-display font-bold text-white mb-4">Meet V-Guard AI</h2>
+            <h2 className="text-3xl font-display font-bold text-white mb-4">{t('meet_vguard')}</h2>
             <p className="text-slate-400 max-w-2xl mx-auto mb-8 leading-relaxed">
-                Our automated referee monitors network latency, game inputs, and user behavior in real-time. It detects bots, rage-quits, and suspicious patterns instantly.
+                {t('vguard_desc')}
             </p>
 
             <div className="flex flex-wrap justify-center gap-4">
-                {['Anti-Cheat Engine', 'Latency Compensation', 'Bot Detection', 'Auto-Forfeit Logic'].map((feature, i) => (
+                {[t('anti_cheat_engine'), t('latency_compensation'), t('bot_detection'), t('auto_forfeit_logic')].map((feature, i) => (
                     <div key={i} className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-full border border-white/5 text-sm text-slate-300">
                         <CheckCircle size={14} className="text-green-400" /> {feature}
                     </div>
@@ -237,14 +239,14 @@ export const HowItWorks: React.FC<HowItWorksProps> = ({ onBack, onLogin }) => {
 
         {/* CTA */}
         <div className="text-center relative z-10">
-            <h2 className="text-4xl font-display font-bold text-white mb-8">Ready to play?</h2>
+            <h2 className="text-4xl font-display font-bold text-white mb-8">{t('ready_to_play')}</h2>
             <button 
                 onClick={onLogin}
                 className="bg-gold-500 hover:bg-gold-400 text-royal-950 font-black text-xl py-5 px-16 rounded-full shadow-[0_0_40px_rgba(251,191,36,0.4)] hover:shadow-[0_0_60px_rgba(251,191,36,0.6)] transition-all transform hover:-translate-y-2 active:scale-95"
             >
-                CREATE ACCOUNT
+                {t('create_account_cta')}
             </button>
-            <p className="text-slate-500 text-sm mt-6">Secure payments powered by Fapshi • Regulated P2P Gaming</p>
+            <p className="text-slate-500 text-sm mt-6">{t('secure_payments_fapshi')}</p>
         </div>
 
       </div>

@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock } from 'lucide-react';
+import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock, Bot } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, subscribeToGameConfigs, subscribeToGlobalWinners } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -18,9 +18,10 @@ interface DashboardProps {
   setView: (view: ViewState) => void;
   onTopUp: () => void;
   onQuickMatch: (gameId?: string) => void;
+  onSoloPlay: (gameId: string) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch, onSoloPlay }) => {
   const { t } = useLanguage();
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
@@ -55,9 +56,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
 
   // Rotate Winners Ticker
   useEffect(() => {
-    if (winners.length > 1) {
+    const tickerCount = winners.length > 1 ? winners.length : seededWinners.length;
+    if (tickerCount > 1) {
       const interval = setInterval(() => {
-        setCurrentWinnerIndex(prev => (prev + 1) % winners.length);
+        setCurrentWinnerIndex(prev => (prev + 1) % tickerCount);
       }, 5000);
       return () => clearInterval(interval);
     }
@@ -67,13 +69,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
   const LAUNCH_GAME_SCOPE = getLaunchGameScope();
 
   const games = [
-    { id: 'Dice', name: 'Dice Duel', players: 1240, icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', defaultStatus: 'active' },
-    { id: 'Chess', name: 'Master Chess', players: 85, icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent', defaultStatus: 'active' },
-    { id: 'Checkers', name: 'Checkers Pro', players: 156, icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent', defaultStatus: 'active' },
-    { id: 'Ludo', name: 'Ludo King', players: 842, icon: Grid3x3, color: 'text-red-400', bg: 'hover:bg-red-500/20 hover:border-red-500/50', gradient: 'from-red-500/20 to-transparent', defaultStatus: 'active' },
-    { id: 'TicTacToe', name: 'XO Clash', players: 45, icon: X, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent', defaultStatus: 'active' },
-    { id: 'Cards', name: 'Kmer Card', players: 210, icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent', defaultStatus: 'disabled' },
-    { id: 'Pool', name: '8-Ball Pool', players: 320, icon: Disc, color: 'text-green-400', bg: 'hover:bg-green-500/20 hover:border-green-500/50', gradient: 'from-green-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Dice', name: 'Dice Duel', icon: Dice5, color: 'text-gold-400', bg: 'hover:bg-gold-500/20 hover:border-gold-500/50', gradient: 'from-gold-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Chess', name: 'Master Chess', icon: Brain, color: 'text-purple-400', bg: 'hover:bg-purple-500/20 hover:border-purple-500/50', gradient: 'from-purple-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Checkers', name: 'Checkers Pro', icon: Target, color: 'text-cam-red', bg: 'hover:bg-cam-red/20 hover:border-cam-red/50', gradient: 'from-cam-red/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Ludo', name: 'Ludo King', icon: Grid3x3, color: 'text-red-400', bg: 'hover:bg-red-500/20 hover:border-red-500/50', gradient: 'from-red-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'TicTacToe', name: 'XO Clash', icon: X, color: 'text-blue-400', bg: 'hover:bg-blue-500/20 hover:border-blue-500/50', gradient: 'from-blue-500/20 to-transparent', defaultStatus: 'active' },
+    { id: 'Cards', name: 'Kmer Card', icon: Layers, color: 'text-pink-400', bg: 'hover:bg-pink-500/20 hover:border-pink-500/50', gradient: 'from-pink-500/20 to-transparent', defaultStatus: 'disabled' },
+    { id: 'Pool', name: '8-Ball Pool', icon: Disc, color: 'text-green-400', bg: 'hover:bg-green-500/20 hover:border-green-500/50', gradient: 'from-green-500/20 to-transparent', defaultStatus: 'active' },
   ].filter(g => LAUNCH_GAME_SCOPE.has(g.id));
 
   const containerVariants = {
@@ -89,7 +91,15 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
     show: { y: 0, opacity: 1 }
   };
 
-  const currentWinner = winners[currentWinnerIndex];
+  const currentWinner = winners.length > 0 ? winners[currentWinnerIndex] : null;
+
+  const seededWinners = [
+    { name: 'Jean-Marc D.', amount: 4500, game: 'Ludo', avatar: '' },
+    { name: 'Amina K.', amount: 1800, game: 'Dice', avatar: '' },
+    { name: 'Paul B.', amount: 9000, game: 'Chess', avatar: '' },
+    { name: 'Christelle T.', amount: 3600, game: 'Checkers', avatar: '' },
+    { name: 'Eric M.', amount: 2000, game: 'Ludo', avatar: '' },
+  ];
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 pb-24 md:pb-6">
@@ -120,31 +130,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
           </div>
         </header>
 
-        {/* Live Winners Ticker */}
-        {winners.length > 0 && currentWinner && (
-          <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
+        {/* Live Wins Ticker */}
+        <motion.div variants={itemVariants} className="bg-royal-900/50 border border-white/5 rounded-xl p-3 flex items-center gap-3 overflow-hidden relative">
             <div className="flex items-center gap-2 text-gold-400 font-bold text-[10px] md:text-xs uppercase tracking-wider whitespace-nowrap z-10 bg-royal-900/80 pr-3 border-r border-white/10 shrink-0">
               <Flame size={12} className="animate-bounce" /> {t('live_wins')}
             </div>
             <div className="flex-1 h-6 relative overflow-hidden">
               <AnimatePresence mode='wait'>
                 <motion.div
-                  key={currentWinnerIndex}
+                  key={winners.length > 0 ? currentWinnerIndex : `seed-${currentWinnerIndex}`}
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
                   exit={{ y: -20, opacity: 0 }}
                   className="absolute inset-0 flex items-center gap-2 text-xs text-slate-300 w-full"
                 >
-                  <img src={currentWinner.avatar || "https://i.pravatar.cc/150"} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt={currentWinner.name} />
-                  <span className="text-white font-bold truncate max-w-[100px]">{currentWinner.name}</span>
-                  <span className="shrink-0">{t('won')}</span>
-                  <span className="text-gold-400 font-mono font-bold shrink-0">{currentWinner.amount} FCFA</span>
-                  <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {currentWinner.game}</span>
+                  {winners.length > 0 && currentWinner ? (
+                    <>
+                      <img src={currentWinner.avatar || "https://i.pravatar.cc/150"} className="w-4 h-4 rounded-full border border-white/20 shrink-0" alt={currentWinner.name} />
+                      <span className="text-white font-bold truncate max-w-[100px]">{currentWinner.name}</span>
+                      <span className="shrink-0">{t('won')}</span>
+                      <span className="text-gold-400 font-mono font-bold shrink-0">{currentWinner.amount} FCFA</span>
+                      <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {currentWinner.game}</span>
+                    </>
+                  ) : (
+                    <>
+                      <div className="w-4 h-4 rounded-full bg-gold-500/30 border border-gold-500/20 shrink-0 flex items-center justify-center text-[8px]">★</div>
+                      <span className="text-white font-bold truncate max-w-[100px]">{seededWinners[currentWinnerIndex]?.name}</span>
+                      <span className="shrink-0">{t('won')}</span>
+                      <span className="text-gold-400 font-mono font-bold shrink-0">{seededWinners[currentWinnerIndex]?.amount} FCFA</span>
+                      <span className="text-slate-500 text-[10px] shrink-0 truncate hidden sm:inline">{t('in')} {seededWinners[currentWinnerIndex]?.game}</span>
+                    </>
+                  )}
                 </motion.div>
               </AnimatePresence>
             </div>
           </motion.div>
-        )}
 
         {/* Bento Grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -183,7 +203,25 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
             </div>
           </motion.div>
 
-          {/* GAMES GRID TITLE */}
+          {/* Play vs AI Callout */}
+          <motion.div variants={itemVariants} className="md:col-span-3">
+            <div
+              onClick={() => onSoloPlay('')}
+              className="cursor-pointer premium-glass p-5 rounded-2xl border border-purple-500/20 bg-gradient-to-r from-purple-900/30 to-royal-900/50 hover:border-purple-500/40 hover:shadow-[0_0_25px_rgba(147,51,234,0.2)] transition-all group relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 p-8 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-colors"></div>
+              <div className="flex items-center gap-4 relative z-10">
+                <div className="p-3 rounded-xl bg-purple-500/20 text-purple-400 group-hover:scale-110 transition-transform">
+                  <Bot size={28} />
+                </div>
+                <div className="flex-1">
+                <h3 className="text-white font-bold text-base">{t('practice_vs_ai_dash')}</h3>
+                <p className="text-slate-400 text-xs">{t('practice_vs_ai_desc')}</p>
+                </div>
+                <ArrowRight size={20} className="text-purple-400 group-hover:translate-x-1 transition-transform shrink-0" />
+              </div>
+            </div>
+          </motion.div>
           <motion.div variants={itemVariants} className="md:col-span-3 flex items-center justify-between mt-4">
             <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
               <Zap className="text-gold-400 fill-gold-400" size={20} /> {t('trending_games')}
@@ -242,14 +280,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
 
                   <h3 className="text-lg font-bold text-white mb-1 group-hover:translate-x-1 group-hover:text-glow transition-all tracking-tight">{game.name}</h3>
                   <p className="text-xs text-slate-500 mb-4 group-hover:text-gold-400/80 transition-colors">
-                    {isActive ? 'Ranked & Casual Tables' : 'Under Development'}
+                    {isActive ? t('ranked_casual_tables') : t('under_development')}
                   </p>
 
                   <button className={`w-full py-2.5 rounded-xl border text-xs font-black uppercase tracking-widest transition-all ${isActive
                       ? `bg-white/5 group-hover:bg-gold-500/20 group-hover:border-gold-500/40 border-white/10 group-hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] ${game.color}`
                       : 'bg-transparent border-white/5 text-slate-600'
                     }`}>
-                    {isActive ? t('play_now') : 'Locked'}
+                    {isActive ? t('play_now') : t('locked')}
                   </button>
                 </div>
               </motion.div>
@@ -287,7 +325,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                 ))
               ) : (
                 <div className="col-span-3 text-center text-slate-500 text-sm py-4">
-                  No recent activity found. Start playing to see stats!
+                  {user.balance === 0 && recentTransactions.length === 0
+                    ? t('new_here_prompt')
+                    : t('no_activity')}
                 </div>
               )}
             </div>

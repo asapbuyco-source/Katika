@@ -16,6 +16,42 @@ import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWin
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
 import { validateWithdrawalRequest } from './server/withdrawalLogic.js';
+import { calculateBotMove } from './server/ai/botEngine.js';
+
+// --- RANDOM HOST PROFILE GENERATOR ---
+// Generates a fresh Cameroonian-friendly name + avatar per match so users
+// never see the same opponent name twice. The underlying katika_host_account
+// Firestore doc always stays the same.
+const HOST_FIRST_NAMES = [
+    'Jean-Paul', 'Christelle', 'Herve', 'Aminatou', 'Didier', 'Sandrine',
+    'Michel', 'Aicha', 'Franck', 'Mireille', 'Dimitri', 'Nadege', 'Serge',
+    'Carine', 'Landry', 'Doriane', 'Blaise', 'Raissa', 'Guy', 'Melanie',
+    'Rigobert', 'Solange', 'Armand', 'Estelle', 'Junior', 'Vanessa',
+    'Florent', 'Lisette', 'Alain', 'Chantal', 'Brice', 'Stephanie',
+    'Yannick', 'Josiane', 'Cedric', 'Charite', 'Boris', 'Helene',
+    'Nathan', 'Fleure', 'Kevin', 'Odette', 'Gaetan', 'Martine'
+];
+
+const HOST_LAST_NAMES = [
+    'Tchinda', 'Mbakop', 'Fotso', 'Nguimgo', 'Djomo', 'Kamga', 'Eyango',
+    'Njoya', 'Tagne', 'Mvondo', 'Biya', 'Eto\'o', 'Nkono', 'Moukouri',
+    'Sigha', 'Wandji', 'Mekongo', 'Fouda', 'Ngassa', 'Tankeu',
+    'Eyebe', 'Ndo', 'Mballa', 'Owona', 'Belinga', 'Zogo', 'Etoga'
+];
+
+function generateRandomHostProfile() {
+    const firstName = HOST_FIRST_NAMES[Math.floor(Math.random() * HOST_FIRST_NAMES.length)];
+    const lastName = HOST_LAST_NAMES[Math.floor(Math.random() * HOST_LAST_NAMES.length)];
+    const seed = Math.random().toString(36).substring(2, 10);
+    return {
+        id: 'katika_host_account',
+        name: `${firstName} ${lastName.charAt(0)}.`,
+        avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`,
+        elo: 1000,
+        rankTier: 'Gold',
+        isBot: true
+    };
+}
 
 // NOTE: sequence is now per-room (room.sequence) to prevent false gap-detection
 // resyncs when multiple games share the same server-wide counter. (Audit fix)
@@ -263,6 +299,31 @@ try {
 const db = admin.apps.length > 0 ? admin.firestore() : null;
 if (db) db.settings({ ignoreUndefinedProperties: true });
 
+async function ensureKatikaHostAccount() {
+    if (!db) return;
+    try {
+        const hostRef = db.collection('users').doc('katika_host_account');
+        const doc = await hostRef.get();
+        if (!doc.exists) {
+            await hostRef.set({
+                id: 'katika_host_account',
+                name: 'Katika Host',
+                avatar: `${FRONTEND_ORIGIN}/katika-host-avatar.png`,
+                balance: 100000,
+                promoBalance: 0,
+                elo: 1000,
+                rankTier: 'Silver',
+                isBot: true,
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+            console.log("Initialized katika_host_account with 100000 FCFA.");
+        }
+    } catch (e) {
+        console.error("Failed to initialize katika_host_account:", e);
+    }
+}
+ensureKatikaHostAccount();
+
 // [Step 1.1] Hash-based CSP — compute hashes from Vite build output.
 // Remove 'unsafe-inline' from scriptSrc and replace with sha256 hashes of
 // inline script contents. Falls back to 'unsafe-inline' if hashes not yet generated.
@@ -387,6 +448,13 @@ io.use(async (socket, next) => {
             console.log(`[Auth] Socket ${socket.id} connected as guest (no token)`);
         }
         return next(); // ← ALLOW: do not block the connection
+    }
+
+    // INTERNAL BOT BYPASS
+    if (token === (process.env.INTERNAL_BOT_SECRET || 'KATIKA_INTERNAL_BOT_SECURE_BYPASS_992')) {
+        socket.user = { uid: 'katika_host_account', isBot: true };
+        console.log(`[Auth] Local bot connected as Katika Host.`);
+        return next();
     }
 
     // TOKEN PROVIDED — verify it. Reject only on actual invalid/expired tokens.
@@ -2185,11 +2253,137 @@ const withRetry = async (fn, retries = 3, delayMs = 500) => {
 const settleGame = async (roomId, winnerId) => {
     if (!db) return;
     const room = rooms.get(roomId);
+    if (!room || !winnerId) return;
+
+    // Placement match (stake 0 vs Katika Trainer): just record gamesPlayed + ELO
+    if (room.stake === 0 && room.players.includes('katika_trainer')) {
+        const humanId = room.players.find(pid => pid !== 'katika_trainer');
+        if (humanId && db) {
+            try {
+                const humanRef = db.collection('users').doc(humanId);
+                await db.runTransaction(async (tx) => {
+                    const snap = await tx.get(humanRef);
+                    if (!snap.exists) return;
+                    const d = snap.data();
+                    const gameType = room.gameType;
+                    const isChess = gameType === 'Chess';
+                    const isCheckers = gameType === 'Checkers';
+                    const K = 32;
+                    const botElo = 1000;
+                    const humanElo = isChess ? (d.chessElo || 1000)
+                        : isCheckers ? (d.checkersElo || 1000) : (d.elo || 1000);
+                    const humanWon = winnerId === humanId;
+                    const expected = 1 / (1 + Math.pow(10, (botElo - humanElo) / 400));
+                    const delta = Math.round(K * (humanWon ? (1 - expected) : -expected));
+                    const update = {
+                        gamesPlayed: (d.gamesPlayed || 0) + 1,
+                        mostPlayedGame: d.mostPlayedGame || gameType
+                    };
+                    if (humanWon) update.winCount = (d.winCount || 0) + 1;
+                    if (isChess) update.chessElo = humanElo + delta;
+                    else if (isCheckers) update.checkersElo = humanElo + delta;
+                    else update.elo = humanElo + delta;
+                    tx.update(humanRef, update);
+                });
+            } catch (e) {
+                console.error('[PlacementSettle]', e.message);
+            }
+        }
+        return;
+    }
+
     if (!room || room.stake === 0 || !winnerId) return;
+
+    const BOT_IDS = new Set(['katika_host_account', 'katika_trainer']);
+    const isBotGame = room.players.some(pid => BOT_IDS.has(pid));
+    const botId = room.players.find(pid => BOT_IDS.has(pid));
+    const humanId = room.players.find(pid => !BOT_IDS.has(pid));
+    const humanWon = winnerId === humanId;
+
+    // ─── BOT SETTLEMENT (separate path, no Elo/referrals) ─────────────────────
+    if (isBotGame && botId && humanId) {
+        const { winnings } = calculatePayouts(room.stake);
+        const settlementId = `settle_bot_${roomId}`;
+        const settlementRef = db.collection('processed_settlements').doc(settlementId);
+        try {
+            await db.runTransaction(async (tx) => {
+                const sentinelSnap = await tx.get(settlementRef);
+                if (sentinelSnap.exists) return;
+
+                const humanRef = db.collection('users').doc(humanId);
+                const hostRef = db.collection('users').doc(botId);
+                const [humanSnap, hostSnap] = await Promise.all([tx.get(humanRef), tx.get(hostRef)]);
+
+                // ELO update for bot matches — uses the bot's fixed 1000 ELO
+                const gameType = room.gameType;
+                const isChess = gameType === 'Chess';
+                const isCheckers = gameType === 'Checkers';
+                const K = 32;
+                const botElo = 1000;
+                const humanData = humanSnap.exists ? humanSnap.data() : {};
+                const humanElo = isChess ? (humanData.chessElo || 1000)
+                    : isCheckers ? (humanData.checkersElo || 1000)
+                    : (humanData.elo || 1000);
+                const expectedWin = 1 / (1 + Math.pow(10, (botElo - humanElo) / 400));
+                const winnerEloDelta = Math.round(K * (1 - expectedWin));
+                const loserEloDelta = Math.round(K * expectedWin);
+
+                const humanUpdate = {
+                    gamesPlayed: (humanData.gamesPlayed || 0) + 1,
+                    mostPlayedGame: humanData.mostPlayedGame || gameType
+                };
+
+                if (humanWon) {
+                    humanUpdate.balance = (humanData.balance || 0) + winnings;
+                    humanUpdate.winCount = (humanData.winCount || 0) + 1;
+                    if (isChess) humanUpdate.chessElo = humanElo + winnerEloDelta;
+                    else if (isCheckers) humanUpdate.checkersElo = humanElo + winnerEloDelta;
+                    else humanUpdate.elo = humanElo + winnerEloDelta;
+                } else {
+                    if (isChess) humanUpdate.chessElo = humanElo - loserEloDelta;
+                    else if (isCheckers) humanUpdate.checkersElo = humanElo - loserEloDelta;
+                    else humanUpdate.elo = humanElo - loserEloDelta;
+                }
+
+                tx.update(humanRef, humanUpdate);
+
+                if (humanWon) {
+                    tx.set(humanRef.collection('transactions').doc(), {
+                        type: 'winnings', amount: winnings, status: 'completed',
+                        date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        gameType: room.gameType, note: `Won vs Katika Host`
+                    });
+                } else {
+                    tx.set(humanRef.collection('transactions').doc(), {
+                        type: 'stake_loss', amount: -room.stake, status: 'completed',
+                        date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: `Lost vs Katika Host`
+                    });
+                    if (hostSnap.exists) {
+                        tx.update(hostRef, {
+                            balance: (hostSnap.data().balance || 0) + winnings,
+                        });
+                        tx.set(hostRef.collection('transactions').doc(), {
+                            type: 'bot_winnings', amount: winnings, status: 'completed',
+                            date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            note: `Bot won ${room.gameType} vs ${humanId}, pot ${winnings} FCFA`
+                        });
+                    }
+                }
+                tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
+            });
+            console.log(`[BotSettle] ${roomId}: humanWon=${humanWon}, stake=${room.stake}, winnings=${winnings}`);
+        } catch (err) {
+            console.error(`[BotSettle] FAILED for room ${roomId}:`, err.message);
+        }
+        return;
+    }
+    // ──────────────────────────────────────────────────────────────────────────
 
     const { winnings } = calculatePayouts(room.stake);
     const loserId = room.players.find(id => id !== winnerId);
     if (!loserId) return;
+
 
     // Idempotency: prevent duplicate settlement for each game in a rematch chain.
     // The first game keeps the legacy key; rematches append the match sequence.
@@ -2214,8 +2408,14 @@ const settleGame = async (roomId, winnerId) => {
             const isChess = gameType === 'Chess';
             const isCheckers = gameType === 'Checkers';
 
-            const wElo = winnerDoc.exists ? (winnerDoc.data()[gameType]?.elo || winnerDoc.data().elo || 1200) : 1200;
-            const lElo = loserDoc.exists ? (loserDoc.data()[gameType]?.elo || loserDoc.data().elo || 1200) : 1200;
+            const wData = winnerDoc.exists ? winnerDoc.data() : null;
+            const lData = loserDoc.exists ? loserDoc.data() : null;
+            const wElo = wData
+                ? (isChess ? (wData.chessElo || 1200) : isCheckers ? (wData.checkersElo || 1200) : (wData.elo || 1200))
+                : 1200;
+            const lElo = lData
+                ? (isChess ? (lData.chessElo || 1200) : isCheckers ? (lData.checkersElo || 1200) : (lData.elo || 1200))
+                : 1200;
             const expectedWin = 1 / (1 + Math.pow(10, (lElo - wElo) / 400));
             const newWinnerElo = Math.round(wElo + K * (1 - expectedWin));
             const newLoserElo = Math.round(lElo - K * (1 - expectedWin));
@@ -2823,12 +3023,14 @@ const generateLeaderboardSnapshots = async () => {
         const snapshotDate = new Date().toISOString().split('T')[0];
         const usersSnap = await db.collection('users').orderBy('elo', 'desc').limit(100).get();
         const snapshots = {};
+        let rankIdx = 0;
         for (const doc of usersSnap.docs) {
+            rankIdx++;
             const d = doc.data();
             const gType = d.mostPlayedGame || 'Chess';
             const gEloField = gType === 'Chess' ? 'chessElo' : gType === 'Checkers' ? 'checkersElo' : 'elo';
             snapshots[doc.id] = {
-                rank: idx + 1,
+                rank: rankIdx,
                 name: d.name || 'Anonymous',
                 elo: d[gEloField] || d.elo || 1000,
                 gamesPlayed: d.gamesPlayed || 0
@@ -2862,7 +3064,7 @@ app.post('/api/games/bot', verifyAuth, async (req, res) => {
         const botProfile = {
             id: 'bot',
             name: 'Vantage AI',
-            avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=vantage_bot_9000',
+            avatar: `${FRONTEND_ORIGIN}/katika-host-avatar.png`,
             elo: 1200,
             rankTier: 'Silver'
         };
@@ -3127,6 +3329,289 @@ const deductEscrow = async (userId, amount, note) => {
     }
 };
 
+// ─── BOT TURN SCHEDULER ───────────────────────────────────────────────────────
+// Called after every game_update in a bot room. If the current turn belongs to
+// the Katika Host or Katika Trainer, we schedule an in-process move using the
+// server-side AI engine. This avoids the overhead of a loopback socket connection.
+const BOT_PLAYER_IDS = new Set(['katika_host_account', 'katika_trainer']);
+
+/**
+ * Emit game_update to all clients in a room and trigger bot turn if needed.
+ * This is the single centralized hook for all game state changes.
+ */
+function emitGameUpdate(roomId, room) {
+    io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+    scheduleBotTurn(roomId);
+}
+
+
+function scheduleBotTurn(roomId) {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== 'active') return;
+    const botId = room.players.find(pid => BOT_PLAYER_IDS.has(pid));
+    if (!botId) return; // Not a bot game
+    if (room.turn !== botId) return; // Not bot's turn
+
+    const difficulty = room.gameState?.difficulty || 'medium';
+    const computeHeavyGames = new Set(['Chess', 'Checkers']);
+    const delay = computeHeavyGames.has(room.gameType)
+        ? Math.floor(Math.random() * 800) + 400   // 0.4–1.2s (engine computes separately)
+        : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (instant moves, simulate thinking)
+
+    setTimeout(() => {
+        const currentRoom = rooms.get(roomId);
+        if (!currentRoom || currentRoom.status !== 'active') return;
+        if (currentRoom.turn !== botId) return; // Turn changed while waiting
+
+        const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
+        const humanProfile = humanId ? currentRoom.profiles?.[humanId] : null;
+        const gameType = currentRoom.gameType;
+        const userElo = gameType === 'Chess'
+            ? (humanProfile?.chessElo || humanProfile?.elo || 1000)
+            : gameType === 'Checkers'
+            ? (humanProfile?.checkersElo || humanProfile?.elo || 1000)
+            : (humanProfile?.elo || 1000);
+
+        const action = calculateBotMove(currentRoom.gameType, currentRoom.gameState, difficulty, botId, userElo);
+        if (!action) {
+            console.warn(`[BotTurn] No action calculated for ${currentRoom.gameType} in room ${roomId} — bot forfeits`);
+            const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
+            if (humanId) {
+                endGame(roomId, humanId, 'Bot Forfeited — No Legal Moves');
+            }
+            return;
+        }
+
+        // Dispatch the bot's action as if it came through the game_action event
+        processBotAction(roomId, botId, action);
+    }, delay);
+}
+
+function processBotAction(roomId, botId, action) {
+    const room = rooms.get(roomId);
+    if (!room || room.status !== 'active' || room.turn !== botId) return;
+
+    // Emit through the regular game action pipeline using a synthetic event
+    // by directly invoking the same logic paths used for player actions
+    // We reuse the io object to emit the action as a server-originating game_action
+    io.in(roomId).emit('bot_thinking'); // Optional: client can show "thinking..." indicator
+
+    // Directly update room state and emit game_update as server-authoritative moves
+    try {
+        const gameType = room.gameType;
+        if (gameType === 'TicTacToe' && action.type === 'MAKE_MOVE') {
+            const { validateMove, checkWinner, isBoardFull } = { validateMove: validateTicTacToeMove, checkWinner: checkTicTacToeWinner, isBoardFull: isTicTacToeBoardFull };
+            if (!validateMove(room.gameState.board, action.index)) return;
+            const symbol = botId === room.gameState.playerX ? 'X' : 'O';
+            room.gameState.board[action.index] = symbol;
+            const winner = checkWinner(room.gameState.board);
+            if (winner) {
+                const winnerPlayerId = winner === 'X' ? room.gameState.playerX : room.gameState.playerO;
+                emitGameUpdate(roomId, room);
+                endGame(roomId, winnerPlayerId, 'Tic-Tac-Toe Win');
+                return;
+            } else if (isBoardFull(room.gameState.board)) {
+                emitGameUpdate(roomId, room);
+                endGame(roomId, null, 'Draw');
+                return;
+            }
+            room.turn = room.players.find(id => id !== botId);
+            emitGameUpdate(roomId, room);
+            // No recursive call needed — the human turn won't trigger scheduleBotTurn
+            return;
+        }
+
+        if (gameType === 'Dice' && action.type === 'ROLL') {
+            const dice1 = crypto.randomInt(1, 7);
+            const dice2 = crypto.randomInt(1, 7);
+            room.gameState.roundRolls = room.gameState.roundRolls || {};
+            room.gameState.roundRolls[botId] = [dice1, dice2];
+            room.gameState.scores = room.gameState.scores || {};
+
+            emitGameUpdate(roomId, room);
+
+            const p1 = room.players[0];
+            const p2 = room.players[1];
+            if (room.gameState.roundRolls[p1] && room.gameState.roundRolls[p2]) {
+                const total1 = room.gameState.roundRolls[p1][0] + room.gameState.roundRolls[p1][1];
+                const total2 = room.gameState.roundRolls[p2][0] + room.gameState.roundRolls[p2][1];
+
+                if (total1 > total2) room.gameState.scores[p1] = (room.gameState.scores[p1] || 0) + 1;
+                else if (total2 > total1) room.gameState.scores[p2] = (room.gameState.scores[p2] || 0) + 1;
+
+                room.gameState.roundState = 'scored';
+                emitGameUpdate(roomId, room);
+
+                setTimeout(() => {
+                    const scores = room.gameState.scores || {};
+                    if (scores[p1] >= 3 || scores[p2] >= 3) {
+                        const winner = scores[p1] >= 3 ? p1 : p2;
+                        endGame(roomId, winner, 'Score Limit Reached');
+                    } else if ((room.gameState.currentRound || 1) >= 20) {
+                        endGame(roomId, null, 'Draw');
+                    } else {
+                        room.gameState.currentRound = (room.gameState.currentRound || 1) + 1;
+                        room.gameState.roundRolls = {};
+                        room.gameState.roundState = 'waiting';
+                        room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
+                        emitGameUpdate(roomId, room);
+                    }
+                }, 2000);
+            } else {
+                room.turn = room.players.find(id => id !== botId);
+                emitGameUpdate(roomId, room);
+            }
+            return;
+        }
+
+        if (gameType === 'Chess' && action.type === 'MOVE') {
+            const validatedMove = validateChessMove(room.gameState.fen, action.move);
+            if (!validatedMove || !validatedMove.isValid) return;
+            room.gameState.fen = validatedMove.newFen;
+            room.gameState.lastMove = action.move;
+            room.gameState.lastMoveTime = Date.now();
+            if (!room.gameState.timers) {
+                room.gameState.timers = {
+                    [room.players[0]]: 600,
+                    [room.players[1]]: 600
+                };
+            }
+            const elapsed = Math.round((Date.now() - (room.gameState.lastMoveTime || Date.now())) / 1000);
+            room.gameState.timers[botId] = Math.max(0, (room.gameState.timers[botId] || 600) - elapsed);
+            if (room.gameState.pgn) {
+                try {
+                    const pgnGame = new Chess();
+                    pgnGame.loadPgn(room.gameState.pgn);
+                    pgnGame.move(action.move);
+                    room.gameState.pgn = pgnGame.pgn();
+                } catch (pgnErr) {
+                    const pgnGame = new Chess(room.gameState.fen ? undefined : undefined);
+                    pgnGame.load(validatedMove.newFen);
+                    room.gameState.pgn = pgnGame.pgn();
+                }
+            } else {
+                try {
+                    const pgnGame = new Chess();
+                    pgnGame.load(validatedMove.newFen);
+                    room.gameState.pgn = pgnGame.pgn();
+                } catch (_) {}
+            }
+            if (validatedMove.isGameOver) {
+                emitGameUpdate(roomId, room);
+                const winner = validatedMove.reason === 'Checkmate' ? botId : null;
+                endGame(roomId, winner, validatedMove.reason || 'Game Over');
+                return;
+            }
+            room.turn = room.players.find(id => id !== botId);
+            emitGameUpdate(roomId, room);
+            return;
+        }
+
+        if (gameType === 'Ludo' && action.type === 'ROLL_DICE') {
+            const roll = Math.ceil(Math.random() * 6);
+            room.gameState.diceValue = roll;
+            room.gameState.diceRolled = true;
+            room.gameState.expectedAction = 'MOVE';
+            emitGameUpdate(roomId, room);
+            // Schedule bot to move a piece next
+            scheduleBotTurn(roomId);
+            return;
+        }
+
+        if (gameType === 'Ludo' && action.type === 'MOVE_PIECE') {
+            // Simplified: advance first moveable piece by dice value
+            const diceVal = room.gameState.diceValue || 0;
+            const myColor = room.gameState.turnColor || (botId === room.players[0] ? 'Red' : 'Blue');
+            const pieces = room.gameState.pieces || [];
+            const botPiece = pieces.find(p => p.color === myColor && !p.finished && p.id === action.pieceId);
+            if (botPiece) {
+                botPiece.step += diceVal;
+                if (botPiece.step >= 56) botPiece.finished = true;
+            }
+            room.gameState.diceRolled = false;
+            room.gameState.expectedAction = 'ROLL';
+
+            const redWin = pieces.filter(p => p.color === 'Red' && p.finished).length === 4;
+            const blueWin = pieces.filter(p => p.color === 'Blue' && p.finished).length === 4;
+            if (redWin) { endGame(roomId, room.players[0], 'Ludo Victory'); return; }
+            if (blueWin) { endGame(roomId, room.players[1], 'Ludo Victory'); return; }
+
+            room.turn = room.players.find(id => id !== botId);
+            emitGameUpdate(roomId, room);
+            return;
+        }
+
+        if (gameType === 'Checkers' && action.type === 'MOVE') {
+            const pieces = room.gameState.pieces || [];
+            const pieceMap = new Map(pieces.map(cp => [`${cp.r},${cp.c}`, cp]));
+            const idxFromKey = `${action.fromR},${action.fromC}`;
+            const movingPiece = pieceMap.get(idxFromKey);
+            if (!movingPiece || movingPiece.owner !== botId) return;
+
+            // Validate move geometry
+            const dr = action.toR - action.fromR;
+            const dc = action.toC - action.fromC;
+            const absDr = Math.abs(dr);
+            const absDc = Math.abs(dc);
+            if (absDr !== absDc) return; // not diagonal
+            if (!action.isJump && (absDr !== 1 || absDc !== 1)) return; // simple move: distance 1
+            if (action.isJump && (absDr !== 2 || absDc !== 2)) return; // jump: distance 2
+
+            // Validate direction for non-king pieces
+            if (!movingPiece.isKing) {
+                const forward = movingPiece.r < 5 ? 1 : -1;
+                if (dr !== forward && dr !== forward * (action.isJump ? 2 : 1)) {
+                    // Allow both forward directions if the piece could be close to the middle
+                    const otherForward = -forward;
+                    if (dr !== otherForward && dr !== otherForward * (action.isJump ? 2 : 1)) return;
+                }
+            }
+
+            // Validate destination is within bounds and empty
+            const destKey = `${action.toR},${action.toC}`;
+            if (action.toR < 0 || action.toR > 9 || action.toC < 0 || action.toC > 9) return;
+            if (pieceMap.has(destKey) && !pieceMap.get(destKey).captured && !pieceMap.get(destKey).removed) return;
+
+            // For jumps: validate there's an opponent piece at the midpoint
+            if (action.isJump) {
+                const midR = Math.round((action.fromR + action.toR) / 2);
+                const midC = Math.round((action.fromC + action.toC) / 2);
+                const midKey = `${midR},${midC}`;
+                const midPiece = pieceMap.get(midKey);
+                if (!midPiece || midPiece.owner === botId || midPiece.captured || midPiece.removed) return;
+                midPiece.captured = true;
+            }
+
+            movingPiece.r = action.toR;
+            movingPiece.c = action.toC;
+
+            // King promotion
+            const forward = movingPiece.r < 5 ? 1 : -1;
+            const promotionRow = forward > 0 ? 9 : 0;
+            if (action.toR === promotionRow && !movingPiece.isKing) {
+                movingPiece.isKing = true;
+            }
+
+            // Check for winner
+            const remainingOpponentPieces = pieces.filter(
+                p => p.owner !== botId && !p.captured && !p.removed
+            );
+            if (remainingOpponentPieces.length === 0) {
+                emitGameUpdate(roomId, room);
+                endGame(roomId, botId, 'All Pieces Captured');
+                return;
+            }
+
+            room.turn = room.players.find(id => id !== botId);
+            emitGameUpdate(roomId, room);
+            return;
+        }
+    } catch(e) {
+        console.error(`[BotAction] Failed to process bot action in ${roomId}:`, e);
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 const endGame = (roomId, winnerId, reason) => {
     const room = rooms.get(roomId);
     if (!room || room.status === 'completed') return;
@@ -3156,8 +3641,11 @@ const endGame = (roomId, winnerId, reason) => {
     });
 
     // ── Behavioral anomaly tracking (internal — not exposed to players) ────────
+    const BOT_IDS_FOR_TRACKING = new Set(['katika_host_account', 'katika_trainer']);
     room.players.forEach(pid => {
-        recordOutcomeAndCheckAnomaly(pid, pid === winnerId);
+        if (!BOT_IDS_FOR_TRACKING.has(pid)) {
+            recordOutcomeAndCheckAnomaly(pid, pid === winnerId);
+        }
     });
 
     // ── Audit log: write final game state to Firestore for dispute replay ──────
@@ -3631,6 +4119,61 @@ io.on('connection', (socket) => {
             }
         }
 
+        // --- KATIKA TRAINER (PLACEMENT MATCH) INTERCEPT ---
+        if (!privateRoomId && db) {
+            try {
+                const uDoc = await db.collection('users').doc(userId).get();
+                const gamesPlayed = uDoc.exists ? (uDoc.data().gamesPlayed || 0) : 0;
+                if (gamesPlayed === 0) {
+                    // Force 0 stake placement match
+                    stake = 0;
+                    const roomId = generateRoomId();
+                    const botId = 'katika_trainer';
+                    
+                    const room = {
+                        id: roomId,
+                        gameType,
+                        stake: 0,
+                        privateRoomId: null,
+                        players: [userId, botId], // Player 0 (Host), Player 1 (Joiner)
+                        escrowSplits: {
+                            [userId]: { real: 0, promo: 0 },
+                            [botId]: { real: 0, promo: 0 }
+                        },
+                        profiles: {
+                            [userId]: userProfile,
+                            [botId]: {
+                                id: botId, name: 'Katika Trainer', avatar: `${FRONTEND_ORIGIN}/katika-trainer-avatar.png`, elo: 1000, rankTier: 'Bronze', isBot: true
+                            }
+                        },
+                        turn: userId,
+                        status: 'active',
+                        gameState: createInitialGameState(gameType, userId, botId),
+                        chat: [],
+                        rematchVotes: new Set(),
+                        rematchStreak: 0,
+                        matchSequence: 0
+                    };
+                    room.gameState.difficulty = 'medium'; // placement match: moderate difficulty
+                    rooms.set(roomId, room);
+                    persistRoomToFirestore(roomId, room);
+                    socket.join(roomId);
+                    
+                    io.to(roomId).emit('match_found', {
+                        roomId, players: room.players, gameType, stake: 0,
+                        gameState: room.gameState, turn: room.turn,
+                        profiles: room.profiles, privateRoomId: null, tournamentMatchId: null
+                    });
+                    console.log(`[Placement] Matched ${userId} against Katika Trainer: ${roomId}`);
+                    // If bot has first turn, schedule its move
+                    scheduleBotTurn(roomId);
+                    return; // Intercept complete, skip escrow and queue!
+                }
+            } catch (e) {
+                console.error("[Placement Check Error]", e);
+            }
+        }
+
         // --- UPFRONT ESCROW DEDUCTION ---
         let realDeducted = 0;
         let promoDeducted = 0;
@@ -3776,6 +4319,92 @@ io.on('connection', (socket) => {
             queue.push({ socketId: socket.id, userProfile, latencyBucket, queuedAt: Date.now(), realDeducted, promoDeducted });
             socket.emit('waiting_for_opponent');
             console.log(`Added to queue: ${queueKey} [latency=${latencyBucket}]`);
+
+            // KATIKA HOST (LIQUIDITY BOT) TIMEOUT
+            if (!privateRoomId && db) {
+                setTimeout(async () => {
+                    const currentQueue = queues.get(queueKey);
+                    if (!currentQueue) return;
+                    
+                    const myIdx = currentQueue.findIndex(i => i.userProfile.id === userId);
+                    if (myIdx > -1) {
+                        try {
+                            const hostRef = db.collection('users').doc('katika_host_account');
+                            const hostSnap = await hostRef.get();
+                            const hostData = hostSnap.exists ? hostSnap.data() : null;
+                            
+                            // Circuit Breaker: house balance > 5000 and stake <= 500
+                            if (hostData && hostData.balance >= 5000 && stake <= 500) {
+                                const me = currentQueue.splice(myIdx, 1)[0];
+                                const roomId = generateRoomId();
+                                const botId = 'katika_host_account';
+                                
+                                const room = {
+                                    id: roomId,
+                                    gameType,
+                                    stake,
+                                    privateRoomId: null,
+                                    players: [userId, botId], // Host, Joiner
+                                    escrowSplits: {
+                                        [userId]: { real: me.realDeducted, promo: me.promoDeducted },
+                                        [botId]: { real: stake, promo: 0 } // Bot stakes entirely in real funds
+                                    },
+                                    profiles: {
+                                        [userId]: me.userProfile,
+                                        [botId]: generateRandomHostProfile()
+                                    },
+                                    turn: userId,
+                                    status: 'active',
+                                    gameState: createInitialGameState(gameType, userId, botId),
+                                    chat: [],
+                                    rematchVotes: new Set(),
+                                    rematchStreak: 0,
+                                    matchSequence: 0
+                                };
+                                room.gameState.difficulty = (me.userProfile.elo || 1000) < 1200 ? 'easy' : (me.userProfile.elo || 1000) < 1500 ? 'medium' : 'hard';
+
+                                if (stake > 0) {
+                                    await db.runTransaction(async (tx) => {
+                                        const hRef = db.collection('users').doc(botId);
+                                        const hSnap = await tx.get(hRef);
+                                        if (hSnap.exists && hSnap.data().balance >= stake) {
+                                            tx.update(hRef, { balance: hSnap.data().balance - stake });
+                                            tx.set(hRef.collection('transactions').doc(), {
+                                                type: 'game_fee', amount: -stake, status: 'completed',
+                                                date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                                note: `Bot Escrow for ${gameType} match ${roomId}`
+                                            });
+                                        } else {
+                                            throw new Error("Bot Circuit Breaker activated during tx.");
+                                        }
+                                    });
+                                }
+
+                                rooms.set(roomId, room);
+                                persistRoomToFirestore(roomId, room);
+                                socket.join(roomId);
+                                
+                                io.to(roomId).emit('match_found', {
+                                    roomId, players: room.players, gameType, stake,
+                                    gameState: room.gameState, turn: room.turn,
+                                    profiles: room.profiles, privateRoomId: null, tournamentMatchId: null
+                                });
+                                console.log(`Matched against Katika Host: ${roomId}`);
+                                // If bot has first turn, schedule its move
+                                scheduleBotTurn(roomId);
+                            }
+                        } catch(e) {
+                            console.error("[Bot Matchmaking Error]", e);
+                            const meInQueue = currentQueue.find(i => i.userProfile.id === userId);
+                            if (meInQueue) {
+                                refundEscrow(userId, meInQueue.realDeducted, meInQueue.promoDeducted);
+                                currentQueue.splice(currentQueue.indexOf(meInQueue), 1);
+                                console.log(`[BotMatch] Refunded escrow to ${userId} after circuit breaker.`);
+                            }
+                        }
+                    }
+                }, 15000); // 15 seconds
+            }
         }
     });
 
@@ -3875,7 +4504,7 @@ io.on('connection', (socket) => {
             if (!room.chat) room.chat = [];
             room.chat.push(msg);
             if (room.chat.length > 50) room.chat.shift();
-            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+            emitGameUpdate(roomId, room);
             return;
         }
 
@@ -4097,7 +4726,7 @@ io.on('connection', (socket) => {
             }
             room.gameState.myGroupP1 = action.myGroupP1;
             room.gameState.myGroupP2 = action.myGroupP2;
-            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+            emitGameUpdate(roomId, room);
             return;
         }
 
@@ -4110,7 +4739,7 @@ io.on('connection', (socket) => {
 
             room.gameState.roundRolls[userId] = [roll1, roll2];
 
-            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+            emitGameUpdate(roomId, room);
 
             const p1 = room.players[0];
             const p2 = room.players[1];
@@ -4123,7 +4752,7 @@ io.on('connection', (socket) => {
                     else if (total2 > total1) room.gameState.scores[p2]++;
 
                     room.gameState.roundState = 'scored';
-                    io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                    emitGameUpdate(roomId, room);
 
                     setTimeout(() => {
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
@@ -4136,14 +4765,14 @@ io.on('connection', (socket) => {
                             room.gameState.roundRolls = {};
                             room.gameState.roundState = 'waiting';
                             room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
-                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                            emitGameUpdate(roomId, room);
                         }
                     }, 3000);
 
                 }, 2000);
             } else {
                 room.turn = room.players.find(id => id !== userId);
-                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                emitGameUpdate(roomId, room);
             }
         }
 
@@ -4321,7 +4950,7 @@ io.on('connection', (socket) => {
                 const nextTurn = hasMoreJumps ? userId : opponentId;
                 room.turn = nextTurn;
                 room.gameState.turn = nextTurn;
-                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                emitGameUpdate(roomId, room);
                 // [Step 2.1] Persist Checkers state after every move for crash-restart resilience
                 persistRoomToFirestore(roomId, room);
                 return;
@@ -4677,7 +5306,7 @@ io.on('connection', (socket) => {
                             room.gameState.board = Array(9).fill(null);
                             room.status = 'active';
                             room.turn = room.players.find(id => id !== room.turn);
-                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                            emitGameUpdate(roomId, room);
                             persistRoomToFirestore(roomId, room); // [Step 2.1] Persist TicTacToe state after draw reset
                         }, 3000);
                     } else {
@@ -4686,7 +5315,7 @@ io.on('connection', (socket) => {
                     }
                 }
             }
-            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+            emitGameUpdate(roomId, room);
         }
         // Draw is handled above inside the MOVE + index branch.
         // The separate DRAW_ROUND action is intentionally not handled here
@@ -4699,7 +5328,7 @@ io.on('connection', (socket) => {
                 const diceVal = crypto.randomInt(1, 7); // Fix C2: use crypto-secure RNG
                 room.gameState.diceValue = diceVal;
                 room.gameState.diceRolled = true;
-                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                emitGameUpdate(roomId, room);
                 persistRoomToFirestore(roomId, room);
             }
             else if (action.type === 'MOVE_PIECE') {
@@ -4832,7 +5461,7 @@ io.on('connection', (socket) => {
                 if (!action.bonusTurn) {
                     room.turn = room.players.find(id => id !== userId);
                 }
-                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                emitGameUpdate(roomId, room);
                 persistRoomToFirestore(roomId, room); // [Step 2.1] Persist Ludo state after every move
             }
         }

@@ -21,7 +21,7 @@ export const WinShareCard: React.FC<WinShareCardProps> = ({
 }) => {
     const { t } = useLanguage();
 
-    const shareMessage = `${t('share_text').replace('{amount}', amount.toLocaleString())} Playing ${gameType}!\nJoin me with code ${referralCode} for 200 FCFA bonus 🎮\nvantage.gg`;
+    const shareMessage = `${t('share_text').replace('{amount}', amount.toLocaleString())} Playing ${gameType}!\nJoin me with code ${referralCode} for 100 FCFA bonus 🎮\nvantage.gg`;
 
     const handleShare = () => {
         playSFX('win');
@@ -100,7 +100,7 @@ export const WinShareCard: React.FC<WinShareCardProps> = ({
                         <div className="bg-black/30 rounded-xl p-4 mb-6 border border-white/5">
                             <p className="text-xs text-slate-500 mb-1">🎁 Challenge your friends — use your code</p>
                             <p className="font-mono text-gold-400 font-bold text-xl tracking-widest">{referralCode}</p>
-                            <p className="text-xs text-slate-500 mt-1">They get 200 FCFA free on signup</p>
+                            <p className="text-xs text-slate-500 mt-1">They get 100 FCFA free on signup</p>
                         </div>
 
                         {/* Share button */}

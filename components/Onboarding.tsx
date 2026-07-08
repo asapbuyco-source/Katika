@@ -4,6 +4,7 @@ import { ChevronRight, Gamepad2, Coins, Users, Check, Wallet } from 'lucide-reac
 import { User } from '../types';
 import { db } from '../services/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import { useLanguage } from '../services/i18n';
 
 interface OnboardingProps {
     user: User;
@@ -11,32 +12,35 @@ interface OnboardingProps {
 }
 
 export const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
+    const { t } = useLanguage();
     const [step, setStep] = useState(0);
     const [isLoading, setIsLoading] = useState(false);
+
+    const hasBonus = (user.balance > 0 || user.welcomeBonusStatus === 'granted');
 
     const steps = [
         {
             icon: <Coins size={50} className="text-amber-400 drop-shadow-[0_0_15px_rgba(251,191,36,0.5)]" />,
-            title: "Welcome Gift: 100 FCFA",
-            description: "Thanks for joining Katika! We've credited your account with 100 FCFA to get you started. Use it to play your first match and win real cash!",
+            title: hasBonus ? t('onboarding_welcome_title') : t('onboarding_welcome_title_no_bonus'),
+            description: hasBonus ? t('onboarding_welcome_desc') : t('onboarding_welcome_desc_no_bonus'),
             bg: "from-amber-600/40 to-royal-900/40"
         },
         {
             icon: <Gamepad2 size={40} className="text-blue-400" />,
-            title: "Play Real Matches",
-            description: "Compete against real people in Ludo, Chess, Checkers, and more. 100% fair play guaranteed by our AI Referee.",
+            title: t('onboarding_play_title'),
+            description: t('onboarding_play_desc'),
             bg: "from-blue-900/40 to-royal-900/40"
         },
         {
             icon: <Wallet size={40} className="text-green-400" />,
-            title: "Instant Withdrawals",
-            description: "Deposit and withdraw instantly using Mobile Money (MTN & Orange). Your funds are fully secure in Escrow during matches.",
+            title: t('onboarding_withdraw_title'),
+            description: t('onboarding_withdraw_desc'),
             bg: "from-green-900/40 to-royal-900/40"
         },
         {
             icon: <Users size={40} className="text-purple-400" />,
-            title: "100 FCFA Referral Bonus",
-            description: "Share your referral code! When a friend deposits, you earn 100 FCFA. Wager it in matches, and when you win, it becomes real withdrawable cash!",
+            title: t('onboarding_referral_title'),
+            description: t('onboarding_referral_desc'),
             bg: "from-purple-900/40 to-royal-900/40"
         }
     ];
@@ -102,11 +106,11 @@ export const Onboarding: React.FC<OnboardingProps> = ({ user, onComplete }) => {
                         className="px-6 py-3 bg-white text-royal-950 font-bold rounded-xl flex items-center gap-2 hover:bg-slate-200 transition-colors disabled:opacity-50"
                     >
                         {isLoading ? (
-                            <span className="animate-pulse">Saving...</span>
+                            <span className="animate-pulse">{t('saving')}</span>
                         ) : step === steps.length - 1 ? (
-                            <>Get Started <Check size={18} /></>
+                            <>{t('get_started')} <Check size={18} /></>
                         ) : (
-                            <>Next <ChevronRight size={18} /></>
+                            <>{t('next')} <ChevronRight size={18} /></>
                         )}
                     </button>
                 </div>

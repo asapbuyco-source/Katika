@@ -2,10 +2,12 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
 import { User, Table, PlayerProfile } from '../types';
-import { Search, Lock, AlertTriangle, Wifi, ShieldAlert } from 'lucide-react';
+import { Search, Lock, AlertTriangle, Wifi, ShieldAlert, Zap } from 'lucide-react';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
+
+const MATCHMAKING_TIMEOUT = 15; // seconds before match is guaranteed
 
 interface MatchmakingScreenProps {
   user: User;
@@ -13,7 +15,7 @@ interface MatchmakingScreenProps {
   stake: number;
   onMatchFound: (table: Table) => void;
   onCancel: () => void;
-  isSocketMode?: boolean; // New prop to toggle behavior
+  isSocketMode?: boolean;
   isTournament?: boolean;
 }
 
@@ -21,14 +23,15 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
   const [status, setStatus] = useState<'connecting' | 'waiting' | 'found'>('connecting');
   const [gameId, setGameId] = useState<string | null>(null);
   const [opponent, setOpponent] = useState<PlayerProfile | null>(null);
+  const [countdown, setCountdown] = useState<number>(MATCHMAKING_TIMEOUT);
+  const [countdownDone, setCountdownDone] = useState(false);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Initialize Matchmaking
   useEffect(() => {
     let mounted = true;
 
-    // If using Socket Mode, we don't use Firebase Matchmaking here.
-    // We just wait for the parent component (App.tsx) to tell us a match is found via props/view change.
     if (isSocketMode) {
         setStatus('waiting');
         return;
@@ -36,10 +39,6 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
 
     const initMatch = async () => {
         try {
-            // [Phase 1] findOrCreateMatch removed — the authoritative matchmaking path
-            // is the socket join_game event, not Firestore. The MatchmakingScreen
-            // still receives match data via the socket layer from the parent App.tsx.
-            // For non-socket (legacy) path, the parent handles transition.
             setStatus('waiting');
         } catch (error) {
             console.error("Matchmaking failed:", error);
@@ -53,6 +52,39 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         if (unsubscribeRef.current) unsubscribeRef.current();
     };
   }, [user, gameType, stake, onMatchFound, isSocketMode]);
+
+  // Countdown timer — only runs in socket waiting mode, not tournaments
+  useEffect(() => {
+    if (status !== 'waiting' || !isSocketMode || isTournament) return;
+
+    setCountdown(MATCHMAKING_TIMEOUT);
+    setCountdownDone(false);
+
+    countdownRef.current = setInterval(() => {
+        setCountdown(prev => {
+            if (prev <= 1) {
+                clearInterval(countdownRef.current!);
+                setCountdownDone(true);
+                return 0;
+            }
+            return prev - 1;
+        });
+    }, 1000);
+
+    return () => {
+        if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [status, isSocketMode, isTournament]);
+
+  // Clear countdown when match is found
+  useEffect(() => {
+    if (status === 'found' && countdownRef.current) {
+        clearInterval(countdownRef.current);
+    }
+  }, [status]);
+
+  // Progress bar fill 0→100% over MATCHMAKING_TIMEOUT seconds
+  const progress = ((MATCHMAKING_TIMEOUT - countdown) / MATCHMAKING_TIMEOUT) * 100;
 
   return (
     <div className="fixed inset-0 z-50 bg-royal-950 flex flex-col items-center justify-center p-6">
@@ -83,7 +115,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
         >
             <h2 className="text-2xl font-display font-bold text-white mb-2">
                 {status === 'connecting' && "Accessing Vantage Network..."}
-                {status === 'waiting' && (isSocketMode ? "Waiting for Opponent..." : "Waiting for Opponent...")}
+                {status === 'waiting' && (countdownDone ? "Getting your match ready..." : "Waiting for Opponent...")}
                 {status === 'found' && "MATCH SECURED"}
             </h2>
             
@@ -100,7 +132,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
                 ) : (
                     <>
                         <p className="text-slate-400 font-mono text-sm uppercase tracking-widest text-gold-500 font-bold">
-                            {isSocketMode ? "Waiting in Arena..." : "Searching Global Pool..."}
+                            {countdownDone ? "Preparing arena..." : (isSocketMode ? "Searching Arena..." : "Searching Global Pool...")}
                         </p>
                         <div className="px-3 py-1 bg-royal-800 rounded-full border border-gold-500/30 text-gold-400 text-xs font-bold">
                             Stake: {stake.toLocaleString()} FCFA
@@ -158,11 +190,51 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
 
         </div>
 
+        {/* Countdown Bar — only in socket mode, non-tournament, while waiting */}
+        {status === 'waiting' && isSocketMode && !isTournament && (
+            <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.4 }}
+                className="mt-16 w-full max-w-sm mx-auto"
+            >
+                <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-xs text-slate-500 font-mono uppercase tracking-wider flex items-center gap-1">
+                        <Zap size={11} className="text-gold-500" />
+                        {countdownDone ? "Securing your match" : "Finding best match"}
+                    </span>
+                    <AnimatePresence mode="wait">
+                        {!countdownDone && (
+                            <motion.span
+                                key={countdown}
+                                initial={{ opacity: 0, scale: 0.8 }}
+                                animate={{ opacity: 1, scale: 1 }}
+                                exit={{ opacity: 0, scale: 1.2 }}
+                                transition={{ duration: 0.2 }}
+                                className="text-xs font-mono font-bold text-gold-400 tabular-nums"
+                            >
+                                {countdown}s
+                            </motion.span>
+                        )}
+                    </AnimatePresence>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="w-full h-1.5 bg-royal-800 rounded-full overflow-hidden">
+                    <motion.div
+                        className={`h-full rounded-full ${countdownDone ? 'bg-green-500' : 'bg-gold-500'}`}
+                        initial={{ width: '0%' }}
+                        animate={{ width: countdownDone ? '100%' : `${progress}%` }}
+                        transition={{ ease: 'linear', duration: countdownDone ? 0.3 : 1 }}
+                    />
+                </div>
+            </motion.div>
+        )}
+
         {/* Warning Block */}
-        <div className="mt-16 w-full max-w-sm">
+        <div className={`${status === 'waiting' && isSocketMode && !isTournament ? 'mt-4' : 'mt-16'} w-full max-w-sm mx-auto`}>
             {status !== 'found' && (
                 <>
-                    {/* ONLY SHOW ARENA RULES COUNTDOWN FOR TOURNAMENTS */}
                     {isTournament ? (
                         <div className="bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-start gap-3 text-left mb-6">
                             <ShieldAlert className="text-red-500 shrink-0 mt-0.5" size={18} />
@@ -201,3 +273,5 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
     </div>
   );
 };
+
+

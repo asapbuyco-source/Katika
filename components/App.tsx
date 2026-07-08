@@ -889,7 +889,7 @@ const AppContent = () => {
                         <AnimatePresence>
                             {currentView === 'landing' && <MV k="landing">    <LandingPage onLogin={() => setView('auth')} onNavigate={setView} /></MV>}
                             {currentView === 'auth' && <MV k="auth">       <AuthScreen onAuthenticated={u => dispatch({ type: 'SET_USER', payload: u || null })} onNavigate={setView} /></MV>}
-                            {currentView === 'dashboard' && user && <MV k="dashboard">  <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} /></MV>}
+                            {currentView === 'dashboard' && user && <MV k="dashboard">  <Dashboard user={user} setView={setView} onTopUp={() => setView('finance')} onQuickMatch={handleDashboardQuickMatch} onSoloPlay={() => handleDashboardQuickMatch()} /></MV>}
                             {currentView === 'lobby' && user && <MV k="lobby">      <Lobby user={user} setView={setView} onQuickMatch={startMatchmaking} initialGameId={preSelectedGame} onClearInitialGame={() => dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: null })} /></MV>}
                             {currentView === 'matchmaking' && matchmakingConfig && user && (
                                 <MV k="matchmaking">

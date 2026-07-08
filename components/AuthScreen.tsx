@@ -4,6 +4,7 @@ import { motion as originalMotion } from 'framer-motion';
 import { ChevronRight, Lock, AlertTriangle, User, Mail, ArrowLeft, KeyRound, CheckCircle, Smartphone } from 'lucide-react';
 import { signInWithGoogle, registerWithEmail, loginWithEmail, syncUserProfile, triggerPasswordReset } from '../services/firebase';
 import { User as AppUser, ViewState } from '../types';
+import { useLanguage } from '../services/i18n';
 
 // Fix for Framer Motion type mismatches in current environment
 const motion = originalMotion as any;
@@ -14,7 +15,8 @@ interface AuthScreenProps {
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavigate }) => {
-    const [method, setMethod] = useState<'menu' | 'email' | 'forgotPassword'>('menu');
+  const { t } = useLanguage();
+  const [method, setMethod] = useState<'menu' | 'email' | 'forgotPassword'>('menu');
     const [isRegistering, setIsRegistering] = useState(false);
 
     const [email, setEmail] = useState('');
@@ -30,7 +32,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
     const handleGoogleLogin = async () => {
         if (!eligibilityConfirmed) {
-            setError('Confirm you are 18+ and located in Cameroon to continue.');
+            setError(t('confirm_18_to_continue'));
             return;
         }
         setIsLoading(true);
@@ -40,10 +42,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
         }
         try {
             const firebaseUser = await signInWithGoogle();
-            // For real Firebase users, onAuthStateChanged in App.tsx handles navigation.
-            // No manual onAuthenticated call needed here.
             if (!firebaseUser) {
-                // Popup was closed without signing in
                 setError('');
                 setIsLoading(false);
             }
@@ -52,7 +51,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
             if (err.code === 'auth/popup-blocked') {
                 setError('Popup was blocked. Please allow popups for this site, or use Email & Password instead.');
             } else if (err.code === 'auth/popup-closed-by-user') {
-                setError(''); // User cancelled — not an error
+                setError('');
             } else if (err.code === 'auth/network-request-failed') {
                 setError('Network error. Check your connection and try again.');
             } else {
@@ -63,7 +62,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
     };
 
     const handleForgotPassword = async () => {
-        if (!resetEmail) { setError('Please enter your email address.'); return; }
+        if (!resetEmail) { setError(t('fill_all_fields')); return; }
         setIsLoading(true);
         setError('');
         try {
@@ -84,20 +83,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
     const handleEmailAuth = async () => {
         if (!email || !password) {
-            setError("Please fill in all fields.");
+            setError(t('fill_all_fields'));
             return;
         }
         if (password.length < 6) {
-            setError("Password must be at least 6 characters.");
+            setError(t('password_min_6'));
             return;
         }
         if (isRegistering && !eligibilityConfirmed) {
-            setError('Confirm you are 18+ and located in Cameroon to create an account.');
+            setError(t('confirm_18_to_create'));
             return;
         }
         const cleanPhone = phone.replace(/\D/g, '').replace(/^237/, '');
         if (isRegistering && !/^6\d{8}$/.test(cleanPhone)) {
-            setError('Enter a valid Cameroon phone number starting with 6 to check welcome bonus eligibility.');
+            setError(t('valid_cam_phone'));
             return;
         }
 
@@ -168,8 +167,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                     <div className="w-16 h-16 bg-gradient-to-br from-gold-400 to-gold-600 rounded-2xl mx-auto flex items-center justify-center text-royal-950 font-black text-3xl shadow-[0_0_40px_rgba(251,191,36,0.3)] mb-4">
                         V
                     </div>
-                    <h1 className="text-3xl font-display font-bold text-white mb-2">Welcome Back</h1>
-                    <p className="text-slate-400">Secure Access Portal</p>
+                    <h1 className="text-3xl font-display font-bold text-white mb-2">{isRegistering ? t('create_account_title') : t('welcome_back')}</h1>
+                    <p className="text-slate-400">{isRegistering ? t('join_arena') : t('secure_access')}</p>
                 </motion.div>
 
                 <div className="glass-panel p-8 rounded-3xl border border-white/10 shadow-2xl relative overflow-hidden min-h-[400px] flex flex-col justify-center">
@@ -191,7 +190,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                     onChange={(e) => setEligibilityConfirmed(e.target.checked)}
                                     className="mt-0.5 h-4 w-4 accent-gold-500"
                                 />
-                                <span>I confirm I am 18+ and located in Cameroon.</span>
+                                <span>{t('confirm_18_plus')}</span>
                             </label>
 
                             {/* Standard Logins */}
@@ -201,19 +200,16 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                 className="w-full bg-white hover:bg-slate-100 text-royal-900 font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
                             >
                                 {isLoading ? (
-                                    <span className="animate-pulse">Connecting...</span>
+                                    <span className="animate-pulse">{t('connecting')}</span>
                                 ) : (
                                     <>
-                                        {/* AUDIT FIX: Inline SVG — no cross-origin request to google.com.
-                                            Some African mobile networks block google.com DNS, which broke
-                                            the button appearance without affecting actual sign-in. */}
                                         <svg className="w-5 h-5" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
                                             <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
                                             <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
                                             <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
                                             <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
                                         </svg>
-                                        <span>Continue with Google</span>
+                                        <span>{t('continue_google')}</span>
                                         <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-royal-900 transition-colors" />
                                     </>
                                 )}
@@ -221,7 +217,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
                             <div className="relative py-2">
                                 <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-white/10"></div></div>
-                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">Or use email</span></div>
+                                <div className="relative flex justify-center text-xs uppercase"><span className="bg-royal-900/80 px-2 text-slate-500">{t('or_email')}</span></div>
                             </div>
 
                             <button
@@ -229,7 +225,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                 className="w-full bg-royal-800/50 hover:bg-royal-800 border border-white/10 text-white font-bold py-4 rounded-xl transition-all active:scale-95 flex items-center justify-center gap-3 relative group"
                             >
                                 <Mail size={20} className="text-gold-400" />
-                                <span>Email & Password</span>
+                                <span>{t('email_pass')}</span>
                                 <ChevronRight size={18} className="absolute right-4 text-slate-400 group-hover:text-white transition-colors" />
                             </button>
                         </motion.div>
@@ -239,13 +235,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                     {method === 'email' && (
                         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                             <div className="text-center mb-6">
-                                <h3 className="text-white font-bold text-xl">{isRegistering ? 'Create Account' : 'Sign In'}</h3>
-                                <p className="text-xs text-slate-400">Enter your credentials below</p>
+                                <h3 className="text-white font-bold text-xl">{isRegistering ? t('create_account') : t('sign_in')}</h3>
+                                <p className="text-xs text-slate-400">{t('enter_credentials')}</p>
                             </div>
 
                             <div className="space-y-4 mb-6">
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('email_label')}</label>
                                     <div className="relative">
                                         <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
                                         <input
@@ -260,7 +256,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                 </div>
 
                                 <div>
-                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
+                                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('pass_label')}</label>
                                     <div className="relative">
                                         <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
                                         <input
@@ -275,7 +271,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
 
                                 {isRegistering && (
                                     <div>
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">MoMo Phone Number</label>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('momo_phone_number')}</label>
                                         <div className="relative">
                                             <Smartphone className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
                                             <input
@@ -287,13 +283,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                                 className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 pl-12 pr-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-sans"
                                             />
                                         </div>
-                                        <p className="mt-1 text-[11px] text-slate-500">Used only to make sure the 100 FCFA new account bonus is claimed once.</p>
+                                        <p className="mt-1 text-[11px] text-slate-500">{t('momo_phone_hint')}</p>
                                     </div>
                                 )}
                                 
                                 {isRegistering && (
                                     <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="space-y-4">
-                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Referral Code (Optional)</label>
+                                        <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('referral_code_optional')}</label>
                                         <div className="relative">
                                             <input
                                                 type="text"
@@ -303,15 +299,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                                 className="w-full bg-royal-900/50 border border-royal-700 rounded-xl py-4 px-4 text-white placeholder:text-slate-600 focus:outline-none focus:border-gold-500 transition-colors font-mono tracking-widest uppercase"
                                             />
                                         </div>
-                                        <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-300">
-                                            <input
-                                                type="checkbox"
-                                                checked={eligibilityConfirmed}
-                                                onChange={(e) => setEligibilityConfirmed(e.target.checked)}
-                                                className="mt-0.5 h-4 w-4 accent-gold-500"
-                                            />
-                                            <span>I confirm I am 18+ and located in Cameroon.</span>
-                                        </label>
                                     </motion.div>
                                 )}
                             </div>
@@ -328,7 +315,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                     disabled={isLoading}
                                     className="flex-1 bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 flex items-center justify-center gap-2"
                                 >
-                                    {isLoading ? <span className="animate-pulse">Processing...</span> : <span>{isRegistering ? 'Create Account' : 'Sign In'}</span>}
+                                    {isLoading ? <span className="animate-pulse">{t('processing')}</span> : <span>{isRegistering ? t('create_account') : t('sign_in')}</span>}
                                 </button>
                             </div>
 
@@ -337,14 +324,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                     onClick={() => { setIsRegistering(!isRegistering); setError(''); }}
                                     className="text-xs text-gold-400 hover:text-white transition-colors font-medium underline-offset-4 hover:underline"
                                 >
-                                    {isRegistering ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+                                    {isRegistering ? t('already_have_account') : t('dont_have_account')}
                                 </button>
                                 {!isRegistering && (
                                     <button
                                         onClick={() => { setMethod('forgotPassword'); setError(''); setResetSent(false); setResetEmail(email); }}
                                         className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
                                     >
-                                        Forgot password?
+                                        {t('forgot_password')}
                                     </button>
                                 )}
                             </div>
@@ -357,27 +344,27 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                         <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }}>
                             <div className="text-center mb-6">
                                 <KeyRound size={32} className="text-gold-400 mx-auto mb-3" />
-                                <h3 className="text-white font-bold text-xl">Reset Password</h3>
-                                <p className="text-xs text-slate-400 mt-1">We'll send a reset link to your email</p>
+                                <h3 className="text-white font-bold text-xl">{t('reset_password_title')}</h3>
+                                <p className="text-xs text-slate-400 mt-1">{t('we_send_link')}</p>
                             </div>
 
                             {resetSent ? (
                                 <div className="flex flex-col items-center gap-3 py-4">
                                     <CheckCircle size={40} className="text-green-400" />
-                                    <p className="text-white font-bold text-center">Reset email sent!</p>
-                                    <p className="text-slate-400 text-xs text-center">Check your inbox and follow the instructions.</p>
+                                    <p className="text-white font-bold text-center">{t('reset_email_sent')}</p>
+                                    <p className="text-slate-400 text-xs text-center">{t('check_inbox')}</p>
                                     <button
                                         onClick={() => { setMethod('email'); setError(''); setIsRegistering(false); }}
                                         className="mt-3 text-gold-400 text-sm font-bold hover:text-white transition-colors"
                                     >
-                                        Back to Sign In
+                                        {t('back_sign_in')}
                                     </button>
                                 </div>
                             ) : (
                                 <>
                                     <div className="space-y-4 mb-6">
                                         <div>
-                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Email Address</label>
+                                            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">{t('email_label')}</label>
                                             <div className="relative">
                                                 <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gold-400" size={18} />
                                                 <input
@@ -404,7 +391,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                             disabled={isLoading}
                                             className="flex-1 bg-gold-500 text-black font-bold py-4 rounded-xl hover:bg-gold-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                         >
-                                            {isLoading ? <span className="animate-pulse">Sending...</span> : 'Send Reset Link'}
+                                            {isLoading ? <span className="animate-pulse">{t('sending')}</span> : t('send_reset_link')}
                                         </button>
                                     </div>
                                 </>

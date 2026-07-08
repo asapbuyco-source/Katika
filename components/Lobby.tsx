@@ -392,17 +392,17 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                 <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
                                     <Wallet className="text-red-500" size={32} />
                                 </div>
-                                <h2 className="text-xl font-bold text-white mb-2">Insufficient Funds</h2>
+                                <h2 className="text-xl font-bold text-white mb-2">{t('insufficient_funds')}</h2>
                                 <p className="text-sm text-slate-400">
                                     You need <span className="text-gold-400 font-bold">{neededAmount.toLocaleString()} FCFA</span> more.
                                 </p>
                             </div>
                             <div className="space-y-3">
                                 <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-yellow-400 text-black font-bold rounded-xl flex items-center justify-center gap-2">
-                                    {isProcessingPayment ? "Processing..." : "MTN Mobile Money"}
+                                    {isProcessingPayment ? t('processing_lobby') : t('mtn_mobile_money')}
                                 </button>
                                 <button onClick={handleDeposit} disabled={isProcessingPayment} className="w-full py-3 bg-orange-500 text-white font-bold rounded-xl flex items-center justify-center gap-2">
-                                    {isProcessingPayment ? "Processing..." : "Orange Money"}
+                                    {isProcessingPayment ? t('processing_lobby') : t('orange_money')}
                                 </button>
                             </div>
                         </motion.div>
@@ -459,11 +459,11 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                                 <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">Results</p>
                                                 {isSearching ? (
                                                     <div className="flex items-center justify-center py-8 text-gold-400 gap-2">
-                                                        <Loader2 className="animate-spin" size={20} /> Searching Database...
+                                                        <Loader2 className="animate-spin" size={20} /> {t('searching_database')}
                                                     </div>
                                                 ) : searchResults.length === 0 ? (
                                                     <div className="text-center text-slate-600 text-sm py-8">
-                                                        {searchQuery.length > 0 ? "No users found." : "Type a name to search existing users."}
+                                                        {searchQuery.length > 0 ? t('no_users_found') : t('type_name_search')}
                                                     </div>
                                                 ) : (
                                                     searchResults.map((friend, idx) => (
@@ -563,7 +563,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                                     <Swords size={32} className="text-gold-400" />
                                                 </div>
                                             </div>
-                                            <h3 className="text-xl font-bold text-white mb-2">Sending Challenge...</h3>
+                                            <h3 className="text-xl font-bold text-white mb-2">{t('sending_challenge')}</h3>
                                             <p className="text-slate-400 text-sm">Waiting for <span className="text-white font-bold">{selectedFriend?.name}</span> to accept.</p>
 
                                             <button
@@ -639,7 +639,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                         <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/40 backdrop-blur-[1px]">
                                             <div className="px-3 py-1 bg-black/60 border border-white/10 rounded-full flex items-center gap-1.5 shadow-lg">
                                                 <Lock size={12} className="text-slate-400" />
-                                                <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">Coming Soon</span>
+                                                <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wider">{t('coming_soon')}</span>
                                             </div>
                                         </div>
                                     )}
@@ -666,12 +666,12 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                                     )}
 
                                     <div className="flex items-center gap-2 text-xs text-slate-400 mb-6 font-medium relative z-10">
-                                        <Users size={14} className="text-slate-500 group-hover:text-gold-400 transition-colors" /> {game.players.toLocaleString()} in Arena
+                                        <Users size={14} className="text-slate-500 group-hover:text-gold-400 transition-colors" /> {game.players.toLocaleString()} {t('players_in_arena')}
                                     </div>
 
                                     <button className={`w-full py-3.5 rounded-xl bg-white/5 border border-white/10 text-xs font-black uppercase tracking-widest transition-all relative z-10 ${isActive ? `group-hover:bg-gold-500/20 group-hover:border-gold-500/40 group-hover:shadow-[0_0_15px_rgba(251,191,36,0.3)] ${game.color}` : 'text-slate-600'
                                         }`}>
-                                        {isActive ? 'Enter Arena' : 'Locked'}
+                                        {isActive ? t('enter_arena') : t('locked')}
                                     </button>
                                 </motion.div>
                             )
@@ -790,7 +790,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
             </AnimatePresence>
 
             <div className="mt-8 p-4 bg-royal-900/30 border border-white/10 rounded-2xl flex items-center justify-center gap-2 text-sm text-slate-400">
-                <Lock size={14} /> Stakes are held in secure Escrow until game completion.
+                <Lock size={14} /> {t('stakes_held_escrow')}
             </div>
         </div>
     );

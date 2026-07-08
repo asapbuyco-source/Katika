@@ -24,7 +24,7 @@ export const TermsOfService: React.FC<TermsOfServiceProps> = ({ onBack }) => {
                 <div className="text-sm max-w-none text-slate-200 space-y-6">
                     <div className="flex items-center gap-3 text-gold-400 mb-6">
                         <ScrollText size={32} />
-                        <span className="font-mono text-xs uppercase tracking-widest">Last Updated: March 15, 2024</span>
+                        <span className="font-mono text-xs uppercase tracking-widest">Last Updated: July 7, 2026</span>
                     </div>
 
                     <section>

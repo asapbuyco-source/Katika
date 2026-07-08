@@ -23,7 +23,7 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                 <div className="text-sm max-w-none text-slate-200 space-y-6">
                     <div className="flex items-center gap-3 text-blue-400 mb-6">
                         <Shield size={32} />
-                        <span className="font-mono text-xs uppercase tracking-widest">Effective Date: March 15, 2024</span>
+                        <span className="font-mono text-xs uppercase tracking-widest">Effective Date: July 7, 2026</span>
                     </div>
 
                     <section>

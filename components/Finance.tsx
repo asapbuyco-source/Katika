@@ -179,7 +179,7 @@ const handleWithdraw = async () => {
         if (!amount || !phone || !momoName.trim()) { setErrorMsg('Please fill in the amount, phone number, and MoMo account name.'); withdrawingRef.current = false; return; }
         const withdrawAmount = parseInt(amount);
         if (isNaN(withdrawAmount) || withdrawAmount < 600) {
-            setErrorMsg('Minimum withdrawal is 600FCFA.');
+            setErrorMsg('Minimum withdrawal is 600 FCFA. Top up your balance with more deposits and wins to reach the threshold.');
             withdrawingRef.current = false;
             return;
         }

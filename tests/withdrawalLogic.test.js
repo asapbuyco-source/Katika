@@ -23,10 +23,10 @@ describe('Withdrawal validation', () => {
     });
 
     it('rejects invalid amounts before touching payment rails', () => {
-        expect(validateWithdrawalRequest({ ...validBody, amount: 999 }, 'user_1')).toMatchObject({
+        expect(validateWithdrawalRequest({ ...validBody, amount: 599 }, 'user_1')).toMatchObject({
             valid: false,
             status: 400,
-            error: 'Minimum withdrawal is 1,000 FCFA.'
+            error: 'Minimum withdrawal is 600 FCFA.'
         });
         expect(validateWithdrawalRequest({ ...validBody, amount: 500_001 }, 'user_1')).toMatchObject({
             valid: false,
