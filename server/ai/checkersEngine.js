@@ -214,18 +214,18 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000)
 
         let depth;
         if (difficulty === 'easy') {
-            depth = 2;
+            depth = 4;
         } else if (difficulty === 'medium') {
-            depth = userElo < 1200 ? 3 : 5;
+            depth = userElo < 1200 ? 6 : 8;
         } else {
-            if (userElo < 1000) depth = 4;
-            else if (userElo < 1200) depth = 5;
-            else if (userElo < 1500) depth = 7;
-            else if (userElo < 1800) depth = 9;
-            else depth = 11;
+            if (userElo < 1000) depth = 7;
+            else if (userElo < 1200) depth = 8;
+            else if (userElo < 1500) depth = 10;
+            else if (userElo < 1800) depth = 12;
+            else depth = 14;
         }
 
-        const maxTime = 2000;
+        const maxTime = 3000;
         const startTime = Date.now();
 
         let bestMove = allMoves[Math.floor(Math.random() * allMoves.length)];

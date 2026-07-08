@@ -62,6 +62,13 @@ export const useGameController = () => {
 
         if (stake === -1) {
             try {
+                // Use server-mediated Katika Trainer bot with Stockfish
+                if (isConnected && socket) {
+                    dispatch({ type: 'SET_VIEW', payload: 'matchmaking' });
+                    socket.emit('practice_match', { gameType, difficulty: difficulty || 'medium' });
+                    return;
+                }
+                // Fallback: local offline bot match (no socket / server unavailable)
                 const gameId = await createBotMatch(user, gameType, difficulty);
                 const table: Table = {
                     id: gameId, gameType: gameType as any, stake: stake,

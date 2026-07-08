@@ -1,27 +1,33 @@
 import { getStockfishLevelMove } from './chessEngine.js';
 import { getCheckersEngineMove } from './checkersEngine.js';
+import { getStockfishMove, mapEloToSkillLevel } from './stockfishEngine.js';
 
 /**
- * Calculates the next move for the Katika Host / Trainer.
- * @param {string} gameType - 'Chess', 'Checkers', 'TicTacToe', 'Ludo', 'Dice', 'Pool'
- * @param {Object} gameState - The current game state
- * @param {string} difficulty - 'easy', 'medium', 'hard' (based on user MMR)
- * @param {string} botId - The ID of the bot playing
- * @param {number} [userElo] - The human player's ELO for difficulty scaling
- * @returns {Object|null} - The action to be emitted by the bot, or null if no action.
+ * Async version — used by scheduleBotTurn. Chess uses Stockfish (async);
+ * all other games use synchronous engines.
+ */
+export async function calculateBotMoveAsync(gameType, gameState, difficulty, botId, userElo = 1000) {
+    switch (gameType) {
+        case 'Chess':
+            return await getChessMoveAsync(gameState, difficulty, botId, userElo);
+        case 'Checkers':
+            return getCheckersMove(gameState, difficulty, botId, userElo);
+        default:
+            return calculateBotMove(gameType, gameState, difficulty, botId, userElo);
+    }
+}
+
+/**
+ * Synchronous version — used by all games except Chess.
  */
 export function calculateBotMove(gameType, gameState, difficulty, botId, userElo = 1000) {
     switch (gameType) {
         case 'TicTacToe':
             return getTicTacToeMove(gameState, difficulty, botId);
-        case 'Chess':
-            return getChessMove(gameState, difficulty, botId, userElo);
         case 'Dice':
             return getDiceMove(gameState, difficulty, botId);
         case 'Ludo':
             return getLudoMove(gameState, difficulty, botId);
-        case 'Checkers':
-            return getCheckersMove(gameState, difficulty, botId, userElo);
         default:
             return null;
     }
@@ -62,15 +68,27 @@ function getTicTacToeMove(gameState, difficulty, botId) {
     return { type: 'MAKE_MOVE', index: pick };
 }
 
-function getChessMove(gameState, difficulty, botId, userElo) {
+async function getChessMoveAsync(gameState, difficulty, botId, userElo) {
     try {
         const fen = gameState.fen;
         if (!fen) return null;
-        const move = getStockfishLevelMove(fen, difficulty, userElo);
-        return move ? { type: 'MOVE', move } : null;
+        const skillLevel = mapEloToSkillLevel(userElo, difficulty);
+        const move = await getStockfishMove(fen, skillLevel);
+        if (!move) return null;
+        return {
+            type: 'MOVE',
+            move: {
+                from: move.from,
+                to: move.to,
+                promotion: move.promotion || undefined
+            }
+        };
     } catch (e) {
-        console.error('[BotEngine/Chess] Fallback error:', e.message);
-        return null;
+        console.error('[BotEngine/Chess] Stockfish error, falling back to minimax:', e.message);
+        // Fall back to synchronous minimax
+        return getStockfishLevelMove(fen, difficulty, userElo)
+            ? { type: 'MOVE', move: getStockfishLevelMove(fen, difficulty, userElo) }
+            : null;
     }
 }
 

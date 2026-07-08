@@ -16,7 +16,8 @@ import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWin
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
 import { validateWithdrawalRequest } from './server/withdrawalLogic.js';
-import { calculateBotMove } from './server/ai/botEngine.js';
+import { calculateBotMove, calculateBotMoveAsync } from './server/ai/botEngine.js';
+import { initStockfish, shutdownStockfish } from './server/ai/stockfishEngine.js';
 
 // --- RANDOM HOST PROFILE GENERATOR ---
 // Generates a fresh Cameroonian-friendly name + avatar per match so users
@@ -3358,10 +3359,10 @@ function scheduleBotTurn(roomId) {
         ? Math.floor(Math.random() * 800) + 400   // 0.4–1.2s (engine computes separately)
         : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (instant moves, simulate thinking)
 
-    setTimeout(() => {
+    setTimeout(async () => {
         const currentRoom = rooms.get(roomId);
         if (!currentRoom || currentRoom.status !== 'active') return;
-        if (currentRoom.turn !== botId) return; // Turn changed while waiting
+        if (currentRoom.turn !== botId) return;
 
         const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
         const humanProfile = humanId ? currentRoom.profiles?.[humanId] : null;
@@ -3372,7 +3373,7 @@ function scheduleBotTurn(roomId) {
             ? (humanProfile?.checkersElo || humanProfile?.elo || 1000)
             : (humanProfile?.elo || 1000);
 
-        const action = calculateBotMove(currentRoom.gameType, currentRoom.gameState, difficulty, botId, userElo);
+        const action = await calculateBotMoveAsync(currentRoom.gameType, currentRoom.gameState, difficulty, botId, userElo);
         if (!action) {
             console.warn(`[BotTurn] No action calculated for ${currentRoom.gameType} in room ${roomId} — bot forfeits`);
             const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
@@ -3922,6 +3923,64 @@ io.on('connection', (socket) => {
     // ── Login streak tracking (internal — used for engagement, not displayed to players) ──
     const userId_connect = socketUsers.get(socket.id);
     // Will be set on join_game; tracked via Firestore in that handler.
+
+    // 0. PRACTICE MATCH — instant match vs Katika Trainer at 0 stake
+    socket.on('practice_match', async ({ gameType, difficulty }) => {
+        const userId = socketUsers.get(socket.id);
+        if (!userId || !socket.user || !socket.user.uid) {
+            socket.emit('auth_required', { message: 'Please log in to practice.' });
+            return;
+        }
+        if (!isGameInLaunchScope(gameType)) {
+            socket.emit('game_error', { message: `${gameType} is not available yet.` });
+            return;
+        }
+        const roomId = generateRoomId();
+        const botId = 'katika_trainer';
+        const userProfile = {
+            id: userId,
+            name: socket.user.name || 'Player',
+            avatar: socket.user.avatar || '',
+            elo: 1000,
+            rankTier: 'Bronze'
+        };
+
+        const room = {
+            id: roomId,
+            gameType,
+            stake: 0,
+            privateRoomId: null,
+            players: [userId, botId],
+            escrowSplits: { [userId]: { real: 0, promo: 0 }, [botId]: { real: 0, promo: 0 } },
+            profiles: {
+                [userId]: userProfile,
+                [botId]: {
+                    id: botId, name: 'Katika Trainer',
+                    avatar: `${FRONTEND_ORIGIN}/katika-trainer-avatar.png`,
+                    elo: 1000, rankTier: 'Bronze', isBot: true
+                }
+            },
+            turn: userId,
+            status: 'active',
+            gameState: createInitialGameState(gameType, userId, botId),
+            chat: [],
+            rematchVotes: new Set(),
+            rematchStreak: 0,
+            matchSequence: 0
+        };
+        room.gameState.difficulty = difficulty || 'medium';
+        rooms.set(roomId, room);
+        persistRoomToFirestore(roomId, room);
+        socket.join(roomId);
+
+        io.to(roomId).emit('match_found', {
+            roomId, players: room.players, gameType, stake: 0,
+            gameState: room.gameState, turn: room.turn,
+            profiles: room.profiles, privateRoomId: null, tournamentMatchId: null
+        });
+        console.log(`[Practice] Matched ${userId} vs Katika Trainer: ${roomId} (${gameType}/${difficulty})`);
+        scheduleBotTurn(roomId);
+    });
 
     // 1. JOIN GAME (MATCHMAKING)
     socket.on('join_game', async ({ stake, userProfile, gameType, privateRoomId }) => {
@@ -5662,6 +5721,12 @@ async function startServer() {
             console.log(`Vantage Game Server running on port ${PORT}`);
             if (!process.env.FAPSHI_API_KEY) console.warn('WARNING: FAPSHI_API_KEY not set.');
             reconcileOrphanedEscrows();
+            // Initialize Stockfish chess engine (async, non-blocking)
+            initStockfish().then(() => {
+                console.log('[Server] Stockfish chess engine ready.');
+            }).catch(e => {
+                console.warn('[Server] Stockfish init failed, chess bot will use fallback:', e.message);
+            });
         });
     } catch (err) {
         console.error('[Startup] Failed to start server:', err);
