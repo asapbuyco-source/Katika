@@ -137,19 +137,14 @@ export function getStockfishLevelMove(fen, difficulty, userElo = 1000) {
 
         let depth;
         if (difficulty === 'easy') {
-            depth = 2;
+            depth = 5;
         } else if (difficulty === 'medium') {
-            depth = userElo < 1200 ? 3 : 4;
+            depth = 6;
         } else {
-            // hard: scale depth with ELO
-            if (userElo < 1000) depth = 3;
-            else if (userElo < 1200) depth = 4;
-            else if (userElo < 1500) depth = 5;
-            else if (userElo < 1800) depth = 6;
-            else depth = 7;
+            depth = 7;
         }
 
-        const maxTime = 3000; // 3s max (increased for deeper search)
+        const maxTime = 5000; // 3s max (increased for deeper search)
         const startTime = Date.now();
 
         // Iterative deepening: try increasing depths, fall back to best result if time runs out

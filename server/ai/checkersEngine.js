@@ -214,15 +214,11 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000)
 
         let depth;
         if (difficulty === 'easy') {
-            depth = 4;
+            depth = 10;
         } else if (difficulty === 'medium') {
-            depth = userElo < 1200 ? 6 : 8;
+            depth = 12;
         } else {
-            if (userElo < 1000) depth = 7;
-            else if (userElo < 1200) depth = 8;
-            else if (userElo < 1500) depth = 10;
-            else if (userElo < 1800) depth = 12;
-            else depth = 14;
+            depth = 14;
         }
 
         const maxTime = 3000;
