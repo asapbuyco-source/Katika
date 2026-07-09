@@ -85,15 +85,15 @@ test('Returns null when all bot pieces are captured', () => {
 });
 
 // ─── Test: Response time under 3 seconds ───
-test('Responds within 3 seconds for depth 14', () => {
+test('Responds within 3.5 seconds for depth 16', () => {
     const botPieces = makePieces('bot1', [[7, 1], [7, 3], [7, 5], [7, 7], [8, 0], [8, 2], [8, 4], [8, 6], [9, 1], [9, 3], [9, 5], [9, 7]]);
     const humanPieces = makePieces('human', [[0, 0], [0, 2], [0, 4], [0, 6], [1, 1], [1, 3], [1, 5], [1, 7], [2, 0], [2, 2], [2, 4], [2, 6]]);
     const pieces = [...botPieces, ...humanPieces];
     const start = Date.now();
     const move = getCheckersEngineMove(pieces, 'bot1', 'hard', 2000);
     const elapsed = Date.now() - start;
-    console.log(`        Depth 14 response time: ${elapsed}ms`);
-    if (elapsed > 4000) throw new Error(`Took ${elapsed}ms, expected < 4000ms`);
+    console.log(`        Depth response time: ${elapsed}ms`);
+    if (elapsed > 3500) throw new Error(`Took ${elapsed}ms, expected < 3500ms`);
     if (!move) throw new Error('No move returned');
 });
 

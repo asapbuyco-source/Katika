@@ -2286,8 +2286,9 @@ const settleGame = async (roomId, winnerId) => {
                     else update.elo = humanElo + delta;
                     tx.update(humanRef, update);
                 });
+                console.log(`[PlacementSettle] ${humanId}: ${winnerId === humanId ? 'won' : 'lost'} ${gameType}, elo=${humanElo}→${humanElo + (winnerId === humanId ? delta : -delta)}, gamesPlayed=${(d.gamesPlayed||0)+1}`);
             } catch (e) {
-                console.error('[PlacementSettle]', e.message);
+                console.error('[PlacementSettle] FAILED:', e.message);
             }
         }
         return;
@@ -3360,9 +3361,12 @@ function scheduleBotTurn(roomId) {
 
     const difficulty = room.gameState?.difficulty || 'medium';
     const computeHeavyGames = new Set(['Chess', 'Checkers']);
+    const instantGames = new Set(['Dice']);
     const delay = computeHeavyGames.has(room.gameType)
         ? Math.floor(Math.random() * 800) + 400   // 0.4–1.2s (engine computes separately)
-        : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (instant moves, simulate thinking)
+        : instantGames.has(room.gameType)
+        ? 500                                       // 0.5s (luck games, instant)
+        : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (other games, simulate thinking)
 
     setTimeout(async () => {
         try {
@@ -3569,17 +3573,18 @@ function processBotAction(roomId, botId, action) {
             const absDr = Math.abs(dr);
             const absDc = Math.abs(dc);
             if (absDr !== absDc) return; // not diagonal
-            if (!action.isJump && (absDr !== 1 || absDc !== 1)) return; // simple move: distance 1
-            if (action.isJump && (absDr !== 2 || absDc !== 2)) return; // jump: distance 2
+
+            // Simple move: distance 1. Jump: any even distance (2, 4, 6... for flying kings)
+            const isJump = action.isJump || absDr >= 2;
+            if (!isJump && (absDr !== 1 || absDc !== 1)) return;
+            if (isJump && absDr % 2 !== 0) return; // jump distance must be even
 
             // Validate direction for non-king pieces
             if (!movingPiece.isKing) {
                 const forward = movingPiece.r < 5 ? 1 : -1;
-                if (dr !== forward && dr !== forward * (action.isJump ? 2 : 1)) {
-                    // Allow both forward directions if the piece could be close to the middle
-                    const otherForward = -forward;
-                    if (dr !== otherForward && dr !== otherForward * (action.isJump ? 2 : 1)) return;
-                }
+                const expectedDr = forward * (isJump ? 2 : 1);
+                const altDr = -forward * (isJump ? 2 : 1);
+                if (dr !== expectedDr && dr !== altDr) return;
             }
 
             // Validate destination is within bounds and empty
@@ -3587,14 +3592,22 @@ function processBotAction(roomId, botId, action) {
             if (action.toR < 0 || action.toR > 9 || action.toC < 0 || action.toC > 9) return;
             if (pieceMap.has(destKey) && !pieceMap.get(destKey).captured && !pieceMap.get(destKey).removed) return;
 
-            // For jumps: validate there's an opponent piece at the midpoint
-            if (action.isJump) {
-                const midR = Math.round((action.fromR + action.toR) / 2);
-                const midC = Math.round((action.fromC + action.toC) / 2);
-                const midKey = `${midR},${midC}`;
-                const midPiece = pieceMap.get(midKey);
-                if (!midPiece || midPiece.owner === botId || midPiece.captured || midPiece.removed) return;
-                midPiece.captured = true;
+            // For jumps: find and capture ALL opponent pieces between from and to
+            if (isJump) {
+                const stepR = dr > 0 ? 1 : -1;
+                const stepC = dc > 0 ? 1 : -1;
+                let capturedAny = false;
+                for (let r = action.fromR + stepR, c = action.fromC + stepC;
+                     r !== action.toR || c !== action.toC;
+                     r += stepR, c += stepC) {
+                    const key = `${r},${c}`;
+                    const midPiece = pieceMap.get(key);
+                    if (midPiece && midPiece.owner !== botId && !midPiece.captured && !midPiece.removed) {
+                        midPiece.captured = true;
+                        capturedAny = true;
+                    }
+                }
+                if (!capturedAny) return; // no opponent piece captured in the jump path
             }
 
             movingPiece.r = action.toR;

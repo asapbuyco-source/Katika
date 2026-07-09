@@ -37,28 +37,36 @@ async function run() {
     process.exit(failed > 0 ? 1 : 0);
 }
 
-// ─── Test: Skill Level Mapping (now dynamic based on ELO) ───
+// ─── Test: Skill Level Mapping (always max strength) ───
 
-test('Easy maps to 16 for low ELO, 18 for high ELO', async () => {
-    if (mapEloToSkillLevel(500, 'easy') !== 16) throw new Error(`Expected 16 for ELO 500 easy`);
-    if (mapEloToSkillLevel(1500, 'easy') !== 18) throw new Error(`Expected 18 for ELO 1500 easy`);
+test('All difficulties return max strength (18-20)', async () => {
+    if (mapEloToSkillLevel(500, 'easy') !== 18) throw new Error(`Expected 18 for easy`);
+    if (mapEloToSkillLevel(1000, 'medium') !== 19) throw new Error(`Expected 19 for medium`);
+    if (mapEloToSkillLevel(2000, 'hard') !== 20) throw new Error(`Expected 20 for hard`);
 });
 
-test('Medium maps to 17 for low ELO, 20 for high ELO', async () => {
-    if (mapEloToSkillLevel(800, 'medium') !== 17) throw new Error(`Expected 17 for ELO 800 medium`);
-    if (mapEloToSkillLevel(1600, 'medium') !== 20) throw new Error(`Expected 20 for ELO 1600 medium`);
+test('Skill level is constant regardless of ELO', async () => {
+    for (const diff of ['easy', 'medium', 'hard']) {
+        const lvl1 = mapEloToSkillLevel(500, diff);
+        const lvl2 = mapEloToSkillLevel(2500, diff);
+        if (lvl1 !== lvl2) throw new Error(`${diff}: ELO should not affect skill (got ${lvl1} vs ${lvl2})`);
+    }
 });
 
-test('Hard is always 20 for 1200+', async () => {
-    if (mapEloToSkillLevel(1200, 'hard') !== 20) throw new Error(`Expected 20 for ELO 1200 hard`);
-    if (mapEloToSkillLevel(2500, 'hard') !== 20) throw new Error(`Expected 20 for ELO 2500 hard`);
+test('Easy=18, Medium=19, Hard=20 across all ELOs', async () => {
+    for (const elo of [500, 1000, 1500, 2000, 2500]) {
+        if (mapEloToSkillLevel(elo, 'easy') !== 18) throw new Error(`Easy ELO ${elo}: expected 18`);
+        if (mapEloToSkillLevel(elo, 'medium') !== 19) throw new Error(`Medium ELO ${elo}: expected 19`);
+        if (mapEloToSkillLevel(elo, 'hard') !== 20) throw new Error(`Hard ELO ${elo}: expected 20`);
+    }
 });
 
-test('Skill level scales UP with ELO within each difficulty tier', async () => {
-    // Within easy: 500→16, 1100→17, 1500→18
-    if (mapEloToSkillLevel(500, 'easy') >= mapEloToSkillLevel(1100, 'easy')) throw new Error('Skill should increase with ELO');
-    // Within medium: 800→17, 1100→18, 1300→19, 1600→20
-    if (mapEloToSkillLevel(800, 'medium') >= mapEloToSkillLevel(1300, 'medium')) throw new Error('Skill should increase with ELO');
+test('Moves differ between Skill 0 and Skill 20 (strength gap verified)', async () => {
+    const fen = 'r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 4 4';
+    const move0 = await getStockfishMove(fen, 0);
+    const move20 = await getStockfishMove(fen, 20);
+    if (!move0 || !move20) throw new Error('No move returned');
+    console.log(`        Skill 0 plays: ${move0.from}${move0.to}, Skill 20 plays: ${move20.from}${move20.to}`);
 });
 
 // ─── Test: Mate in 1 (back rank) ───

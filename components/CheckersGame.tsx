@@ -244,10 +244,12 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
     useEffect(() => {
         if (isP2P && socketGame) {
             if (socketGame.gameState && socketGame.gameState.pieces) {
-                const mappedPieces = socketGame.gameState.pieces.map((p: any) => ({
-                    ...p,
-                    player: p.owner === user.id ? 'me' : 'opponent'
-                }));
+                const mappedPieces = socketGame.gameState.pieces
+                    .filter((p: any) => !p.captured && !p.removed)
+                    .map((p: any) => ({
+                        ...p,
+                        player: p.owner === user.id ? 'me' : 'opponent'
+                    }));
 
                 const serverTurn = socketGame.turn ?? socketGame.gameState?.turn;
                 const isMyTurnNow = serverTurn === user.id;

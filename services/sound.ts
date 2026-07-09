@@ -21,16 +21,8 @@ const getAudio = (file: string): HTMLAudioElement | null => {
 
 const playAudioFile = (file: string, fallbackSynth: () => void) => {
     if (isMuted) return;
-    const audio = getAudio(file);
-    if (audio) {
-        audio.currentTime = 0;
-        audio.play().catch(e => {
-            console.warn(`HTML5 Audio play failed for ${file}, falling back to synth`, e);
-            fallbackSynth();
-        });
-    } else {
-        fallbackSynth();
-    }
+    // Always use synth — avoids 404s, CSP issues, and NotSupportedError freezes
+    fallbackSynth();
 };
 
 const initAudio = () => {

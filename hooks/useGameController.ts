@@ -206,8 +206,8 @@ export const useGameController = () => {
         try {
             isTransitioningRef.current = true;
 
-            if (socket && socketGame) {
-                socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } });
+            if (socket && socketGame && socket.connected) {
+                try { socket.emit('game_action', { roomId: socketGame.roomId, action: { type: 'REMATCH_DECLINE' } }); } catch (_) {}
             }
 
             const socketTournamentMatchId = socketGame?.tournamentMatchId || socketGame?.privateRoomId || null;
