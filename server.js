@@ -3365,31 +3365,39 @@ function scheduleBotTurn(roomId) {
         : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (instant moves, simulate thinking)
 
     setTimeout(async () => {
-        const currentRoom = rooms.get(roomId);
-        if (!currentRoom || currentRoom.status !== 'active') return;
-        if (currentRoom.turn !== botId) return;
+        try {
+            const currentRoom = rooms.get(roomId);
+            if (!currentRoom || currentRoom.status !== 'active') return;
+            if (currentRoom.turn !== botId) return;
 
-        const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
-        const humanProfile = humanId ? currentRoom.profiles?.[humanId] : null;
-        const gameType = currentRoom.gameType;
-        const userElo = gameType === 'Chess'
-            ? (humanProfile?.chessElo || humanProfile?.elo || 1000)
-            : gameType === 'Checkers'
-            ? (humanProfile?.checkersElo || humanProfile?.elo || 1000)
-            : (humanProfile?.elo || 1000);
-
-        const action = await calculateBotMoveAsync(currentRoom.gameType, currentRoom.gameState, difficulty, botId, userElo);
-        if (!action) {
-            console.warn(`[BotTurn] No action calculated for ${currentRoom.gameType} in room ${roomId} — bot forfeits`);
             const humanId = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
-            if (humanId) {
-                endGame(roomId, humanId, 'Bot Forfeited — No Legal Moves');
-            }
-            return;
-        }
+            const humanProfile = humanId ? currentRoom.profiles?.[humanId] : null;
+            const gameType = currentRoom.gameType;
+            const userElo = gameType === 'Chess'
+                ? (humanProfile?.chessElo || humanProfile?.elo || 1000)
+                : gameType === 'Checkers'
+                ? (humanProfile?.checkersElo || humanProfile?.elo || 1000)
+                : (humanProfile?.elo || 1000);
 
-        // Dispatch the bot's action as if it came through the game_action event
-        processBotAction(roomId, botId, action);
+            const action = await calculateBotMoveAsync(currentRoom.gameType, currentRoom.gameState, difficulty, botId, userElo);
+            if (!action) {
+                console.warn(`[BotTurn] No action calculated for ${currentRoom.gameType} in room ${roomId} — bot forfeits`);
+                const hid = currentRoom.players.find(id => !BOT_PLAYER_IDS.has(id));
+                if (hid) {
+                    endGame(roomId, hid, 'Bot Forfeited — No Legal Moves');
+                }
+                return;
+            }
+
+            processBotAction(roomId, botId, action);
+        } catch (e) {
+            console.error(`[BotTurn] Error in room ${roomId}:`, e.message);
+            const cr = rooms.get(roomId);
+            if (cr && cr.status === 'active') {
+                const hid = cr.players.find(id => !BOT_PLAYER_IDS.has(id));
+                if (hid) endGame(roomId, hid, 'Bot Forfeited — Engine Error');
+            }
+        }
     }, delay);
 }
 
@@ -3434,7 +3442,8 @@ function processBotAction(roomId, botId, action) {
             room.gameState.roundRolls[botId] = [dice1, dice2];
             room.gameState.scores = room.gameState.scores || {};
 
-            emitGameUpdate(roomId, room);
+            // Emit update WITHOUT triggering scheduleBotTurn (avoid double-roll bug)
+            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
 
             const p1 = room.players[0];
             const p2 = room.players[1];
@@ -3446,7 +3455,7 @@ function processBotAction(roomId, botId, action) {
                 else if (total2 > total1) room.gameState.scores[p2] = (room.gameState.scores[p2] || 0) + 1;
 
                 room.gameState.roundState = 'scored';
-                emitGameUpdate(roomId, room);
+                io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
 
                 setTimeout(() => {
                     const scores = room.gameState.scores || {};

@@ -108,7 +108,22 @@ export function getStockfishMove(fen, skillLevel) {
     const clampedSkill = Math.max(0, Math.min(20, Math.round(skillLevel)));
     
     return new Promise((resolve, reject) => {
-        requestQueue.push({ fen, skillLevel: clampedSkill, resolve });
+        const timeout = setTimeout(() => {
+            // Stockfish didn't respond — remove our resolve from the queue
+            if (currentResolve) {
+                currentResolve = null;
+                processing = false;
+                processQueue();
+            }
+            resolve(null);
+        }, 5000);
+        
+        const wrappedResolve = (result) => {
+            clearTimeout(timeout);
+            resolve(result);
+        };
+        
+        requestQueue.push({ fen, skillLevel: clampedSkill, resolve: wrappedResolve });
         processQueue();
     });
 }
