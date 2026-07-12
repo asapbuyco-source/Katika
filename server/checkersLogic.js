@@ -106,3 +106,105 @@ export const checkWinner = (board) => {
     if (blackCount === 0) return 'red';
     return null;
 };
+
+export const getValidMoveSequences = (playerUserId, currentPieces, forwardDir, specificId = null) => {
+    const myPieces = currentPieces.filter(p => p.owner === playerUserId && !p.captured && !p.removed);
+    const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
+    const pieceMap = new Map(currentPieces.filter(p => !p.captured && !p.removed).map(cp => [`${cp.r},${cp.c}`, cp]));
+
+    const isValidPos = (r, c) => r >= 0 && r < 10 && c >= 0 && c < 10;
+
+    const getJumpSequences = (startPiece, visitedIds) => {
+        const sequences = [];
+        const isKing = startPiece.isKing;
+        const dirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+
+        for (const [dr, dc] of dirs) {
+            let step = 1;
+            let foundEnemy = null;
+            
+            while (true) {
+                const mr = startPiece.r + dr * step;
+                const mc = startPiece.c + dc * step;
+                if (!isValidPos(mr, mc)) break;
+                
+                const mid = pieceMap.get(`${mr},${mc}`);
+                if (mid) {
+                    if (mid.owner === playerUserId) break;
+                    if (foundEnemy) break;
+                    if (visitedIds.has(mid.id)) break;
+                    foundEnemy = mid;
+                } else if (foundEnemy) {
+                    const jumpMove = {
+                        fromR: startPiece.r, fromC: startPiece.c,
+                        r: mr, c: mc, isJump: true, jumpId: foundEnemy.id
+                    };
+                    
+                    const newVisited = new Set(visitedIds);
+                    newVisited.add(foundEnemy.id);
+                    
+                    const tempPiece = { ...startPiece, r: mr, c: mc };
+                    const nextSequences = getJumpSequences(tempPiece, newVisited);
+                    
+                    if (nextSequences.length === 0) {
+                        sequences.push([jumpMove]);
+                    } else {
+                        for (const seq of nextSequences) {
+                            sequences.push([jumpMove, ...seq]);
+                        }
+                    }
+                }
+                
+                if (!isKing && step >= 2) break;
+                step++;
+            }
+        }
+        return sequences;
+    };
+
+    let allSequences = [];
+    toCheck.forEach(p => {
+        allSequences.push(...getJumpSequences(p, new Set()));
+    });
+
+    if (allSequences.length > 0) {
+        const maxCaptures = Math.max(...allSequences.map(seq => seq.length));
+        const bestSequences = allSequences.filter(seq => seq.length === maxCaptures);
+        
+        const uniqueFirstMoves = new Map();
+        bestSequences.forEach(seq => {
+            const firstMove = seq[0];
+            const key = `${firstMove.fromR},${firstMove.fromC}-${firstMove.r},${firstMove.c}`;
+            if (!uniqueFirstMoves.has(key)) {
+                // Attach the full sequence so the engine can evaluate it
+                firstMove.fullSequence = seq; 
+                uniqueFirstMoves.set(key, firstMove);
+            }
+        });
+        
+        return { moves: Array.from(uniqueFirstMoves.values()), hasJump: true };
+    }
+
+    let allMoves = [];
+    toCheck.forEach(p => {
+        const moveDir = forwardDir;
+        const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[moveDir, -1], [moveDir, 1]];
+
+        for (const [dr, dc] of dirs) {
+            let step = 1;
+            while (true) {
+                const tr = p.r + dr * step;
+                const tc = p.c + dc * step;
+                if (!isValidPos(tr, tc)) break;
+                if (pieceMap.has(`${tr},${tc}`)) break;
+                
+                allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
+                
+                if (!p.isKing) break;
+                step++;
+            }
+        }
+    });
+
+    return { moves: allMoves, hasJump: false };
+};

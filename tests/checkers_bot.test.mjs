@@ -85,7 +85,7 @@ test('Returns null when all bot pieces are captured', () => {
 });
 
 // ─── Test: Response time under 3 seconds ───
-test('Responds within 3.5 seconds for depth 16', () => {
+test('Responds within 3.5 seconds for depth 10', () => {
     const botPieces = makePieces('bot1', [[7, 1], [7, 3], [7, 5], [7, 7], [8, 0], [8, 2], [8, 4], [8, 6], [9, 1], [9, 3], [9, 5], [9, 7]]);
     const humanPieces = makePieces('human', [[0, 0], [0, 2], [0, 4], [0, 6], [1, 1], [1, 3], [1, 5], [1, 7], [2, 0], [2, 2], [2, 4], [2, 6]]);
     const pieces = [...botPieces, ...humanPieces];

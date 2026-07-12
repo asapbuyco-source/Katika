@@ -117,14 +117,14 @@ function getLudoMove(gameState, difficulty, botId) {
 
         const scored = myPieces.map(p => {
             let score = 0;
-            if (p.position === -1 && dieValue === 6) score += 100; // can enter from base
-            if (p.position >= 0) {
-                score += p.position; // prefer pieces furthest along the path
-                if (safeSpots.includes(p.position)) score += 20; // prefer safe spots
+            if (p.step === -1 && dieValue === 6) score += 100; // can enter from base
+            if (p.step >= 0) {
+                score += p.step; // prefer pieces furthest along the path
+                if (safeSpots.includes(p.step)) score += 20; // prefer safe spots
                 // avoid landing on opponent-occupied squares if at risk
-                const nextPos = p.position + dieValue;
+                const nextPos = p.step + dieValue;
                 const wouldLandOnOpponent = opponentPieces.some(
-                    op => op.position >= 0 && op.position === nextPos
+                    op => op.step >= 0 && op.step === nextPos
                 );
                 if (wouldLandOnOpponent) score -= 180; // heavily avoid bad captures
             }
@@ -142,7 +142,7 @@ function getCheckersMove(gameState, difficulty, botId, userElo) {
         const myPieces = pieces.filter(p => p.owner === botId && !p.captured && !p.removed);
         if (myPieces.length === 0) return null;
 
-        const move = getCheckersEngineMove(pieces, botId, difficulty, userElo);
+        const move = getCheckersEngineMove(pieces, botId, difficulty, userElo, gameState.mustJumpFrom);
         return move;
     } catch (e) {
         console.error('[BotEngine/Checkers] Error:', e.message);

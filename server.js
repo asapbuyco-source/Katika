@@ -15,6 +15,7 @@ import { validateChessMove } from './server/chessLogic.js';
 import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWinner, createInitialState as ticTacToeInitialState, isBoardFull as isTicTacToeBoardFull } from './server/tictactoeLogic.js';
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
+import { getValidMoveSequences } from './server/checkersLogic.js';
 import { validateWithdrawalRequest } from './server/withdrawalLogic.js';
 import { calculateBotMove, calculateBotMoveAsync } from './server/ai/botEngine.js';
 import { initStockfish, shutdownStockfish } from './server/ai/stockfishEngine.js';
@@ -2269,16 +2270,29 @@ const settleGame = async (roomId, winnerId) => {
                     const gameType = room.gameType;
                     const isChess = gameType === 'Chess';
                     const isCheckers = gameType === 'Checkers';
-                    const K = 32;
+                    const humanWon = winnerId === humanId;
+
+                    // Anti-streak: consecutive wins multiply ELO gain, losses barely drop it
+                    const streak = d.consecutiveBotWins || 0;
+                    let K;
+                    if (humanWon) {
+                        // Win streak multiplier — 3rd win nearly impossible
+                        if (streak >= 2) K = 256;        // 3rd+ consecutive win → massive ELO jump
+                        else if (streak === 1) K = 128;  // 2nd consecutive win → big jump
+                        else K = 48;                      // 1st win → solid gain
+                    } else {
+                        K = 10; // Loss → tiny ELO drop, bot stays strong
+                    }
+
                     const botElo = 1000;
                     const humanElo = isChess ? (d.chessElo || 1000)
                         : isCheckers ? (d.checkersElo || 1000) : (d.elo || 1000);
-                    const humanWon = winnerId === humanId;
                     const expected = 1 / (1 + Math.pow(10, (botElo - humanElo) / 400));
                     const delta = Math.round(K * (humanWon ? (1 - expected) : -expected));
                     const update = {
                         gamesPlayed: (d.gamesPlayed || 0) + 1,
-                        mostPlayedGame: d.mostPlayedGame || gameType
+                        mostPlayedGame: d.mostPlayedGame || gameType,
+                        consecutiveBotWins: humanWon ? streak + 1 : 0
                     };
                     if (humanWon) update.winCount = (d.winCount || 0) + 1;
                     if (isChess) update.chessElo = humanElo + delta;
@@ -2286,7 +2300,7 @@ const settleGame = async (roomId, winnerId) => {
                     else update.elo = humanElo + delta;
                     tx.update(humanRef, update);
                 });
-                console.log(`[PlacementSettle] ${humanId}: ${winnerId === humanId ? 'won' : 'lost'} ${gameType}, elo=${humanElo}→${humanElo + (winnerId === humanId ? delta : -delta)}, gamesPlayed=${(d.gamesPlayed||0)+1}`);
+                console.log(`[PlacementSettle] ${humanId}: ${humanWon ? 'won' : 'lost'} ${gameType}, streak=${humanWon ? streak + 1 : 'reset'}, K=${K}, elo=${humanElo}→${humanElo + delta}`);
             } catch (e) {
                 console.error('[PlacementSettle] FAILED:', e.message);
             }
@@ -2320,9 +2334,20 @@ const settleGame = async (roomId, winnerId) => {
                 const gameType = room.gameType;
                 const isChess = gameType === 'Chess';
                 const isCheckers = gameType === 'Checkers';
-                const K = 32;
                 const botElo = 1000;
                 const humanData = humanSnap.exists ? humanSnap.data() : {};
+
+                // Anti-streak: consecutive wins massively boost ELO, losses barely drop it
+                const streak = humanData.consecutiveBotWins || 0;
+                let K;
+                if (humanWon) {
+                    if (streak >= 2) K = 256;
+                    else if (streak === 1) K = 128;
+                    else K = 48;
+                } else {
+                    K = 10;
+                }
+
                 const humanElo = isChess ? (humanData.chessElo || 1000)
                     : isCheckers ? (humanData.checkersElo || 1000)
                     : (humanData.elo || 1000);
@@ -2332,7 +2357,8 @@ const settleGame = async (roomId, winnerId) => {
 
                 const humanUpdate = {
                     gamesPlayed: (humanData.gamesPlayed || 0) + 1,
-                    mostPlayedGame: humanData.mostPlayedGame || gameType
+                    mostPlayedGame: humanData.mostPlayedGame || gameType,
+                    consecutiveBotWins: humanWon ? streak + 1 : 0
                 };
 
                 if (humanWon) {
@@ -2764,12 +2790,16 @@ setInterval(() => {
             console.warn(`[Reaper] Evicting orphan room ${roomId} (${room.gameType}, both players disconnected)`);
             // Refund escrows for stake games so money isn't lost
             if (room.stake > 0 && room.escrowSplits) {
-                (room.players || []).forEach(pid => {
+                const refunds = (room.players || []).map(pid => {
                     const split = room.escrowSplits[pid];
-                    if (split) refundEscrow(pid, split.real || 0, split.promo || 0);
+                    return split ? refundEscrow(pid, split.real || 0, split.promo || 0) : Promise.resolve();
                 });
+                Promise.allSettled(refunds).then(() => {
+                    rooms.delete(roomId);
+                });
+            } else {
+                rooms.delete(roomId);
             }
-            rooms.delete(roomId);
         }
     }
 }, 10 * 60 * 1000);
@@ -3562,76 +3592,61 @@ function processBotAction(roomId, botId, action) {
 
         if (gameType === 'Checkers' && action.type === 'MOVE') {
             const pieces = room.gameState.pieces || [];
-            const pieceMap = new Map(pieces.map(cp => [`${cp.r},${cp.c}`, cp]));
-            const idxFromKey = `${action.fromR},${action.fromC}`;
-            const movingPiece = pieceMap.get(idxFromKey);
-            if (!movingPiece || movingPiece.owner !== botId) return;
-
-            // Validate move geometry
-            const dr = action.toR - action.fromR;
-            const dc = action.toC - action.fromC;
-            const absDr = Math.abs(dr);
-            const absDc = Math.abs(dc);
-            if (absDr !== absDc) return; // not diagonal
-
-            // Simple move: distance 1. Jump: any even distance (2, 4, 6... for flying kings)
-            const isJump = action.isJump || absDr >= 2;
-            if (!isJump && (absDr !== 1 || absDc !== 1)) return;
-            if (isJump && absDr % 2 !== 0) return; // jump distance must be even
-
-            // Validate direction for non-king pieces
-            if (!movingPiece.isKing) {
-                const forward = movingPiece.r < 5 ? 1 : -1;
-                const expectedDr = forward * (isJump ? 2 : 1);
-                const altDr = -forward * (isJump ? 2 : 1);
-                if (dr !== expectedDr && dr !== altDr) return;
-            }
-
-            // Validate destination is within bounds and empty
-            const destKey = `${action.toR},${action.toC}`;
-            if (action.toR < 0 || action.toR > 9 || action.toC < 0 || action.toC > 9) return;
-            if (pieceMap.has(destKey) && !pieceMap.get(destKey).captured && !pieceMap.get(destKey).removed) return;
-
-            // For jumps: find and capture ALL opponent pieces between from and to
-            if (isJump) {
-                const stepR = dr > 0 ? 1 : -1;
-                const stepC = dc > 0 ? 1 : -1;
-                let capturedAny = false;
-                for (let r = action.fromR + stepR, c = action.fromC + stepC;
-                     r !== action.toR || c !== action.toC;
-                     r += stepR, c += stepC) {
-                    const key = `${r},${c}`;
-                    const midPiece = pieceMap.get(key);
-                    if (midPiece && midPiece.owner !== botId && !midPiece.captured && !midPiece.removed) {
-                        midPiece.captured = true;
-                        capturedAny = true;
-                    }
-                }
-                if (!capturedAny) return; // no opponent piece captured in the jump path
-            }
-
-            movingPiece.r = action.toR;
-            movingPiece.c = action.toC;
-
-            // King promotion
-            const forward = movingPiece.r < 5 ? 1 : -1;
-            const promotionRow = forward > 0 ? 9 : 0;
-            if (action.toR === promotionRow && !movingPiece.isKing) {
-                movingPiece.isKing = true;
-            }
-
-            // Check for winner
-            const remainingOpponentPieces = pieces.filter(
-                p => p.owner !== botId && !p.captured && !p.removed
-            );
-            if (remainingOpponentPieces.length === 0) {
-                emitGameUpdate(roomId, room);
-                endGame(roomId, botId, 'All Pieces Captured');
+            const isPlayer1 = room.players[0] === botId;
+            const forwardDir = isPlayer1 ? -1 : 1;
+            
+            const { moves } = getValidMoveSequences(botId, pieces, forwardDir, room.gameState.mustJumpFrom);
+            
+            const validMove = moves.find(m => m.fromR === action.fromR && m.fromC === action.fromC && m.r === action.toR && m.c === action.toC);
+            if (!validMove) {
+                console.warn(`[Checkers][${roomId}] Invalid bot move by ${botId}. Rejected.`);
                 return;
             }
 
-            room.turn = room.players.find(id => id !== botId);
+            if (validMove.isJump) {
+                const capturedIdx = pieces.findIndex(p => p.id === validMove.jumpId);
+                if (capturedIdx !== -1) pieces.splice(capturedIdx, 1);
+            }
+
+            const movedPiece = pieces.find(p => p.r === action.fromR && p.c === action.fromC && p.owner === botId);
+            if (!movedPiece) return;
+
+            movedPiece.r = action.toR;
+            movedPiece.c = action.toC;
+
+            const promotionRow = isPlayer1 ? 0 : 9;
+            if (!movedPiece.isKing && action.toR === promotionRow) {
+                movedPiece.isKing = true;
+            }
+
+            let hasMoreJumps = false;
+            if (validMove.isJump) {
+                const { hasJump: canContinue } = getValidMoveSequences(botId, pieces, forwardDir, movedPiece.id);
+                hasMoreJumps = canContinue;
+            }
+
+            if (!hasMoreJumps) {
+                const oppId = room.players.find(id => id !== botId);
+                const oppForwardDir = isPlayer1 ? 1 : -1;
+                const { moves: oppMoves } = getValidMoveSequences(oppId, pieces, oppForwardDir, null);
+                
+                if (oppMoves.length === 0) {
+                    const opponentPieces = pieces.filter(p => p.owner === oppId);
+                    const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
+                    endGame(roomId, botId, reason);
+                    return;
+                }
+            }
+
+            room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
+            const nextTurn = hasMoreJumps ? botId : room.players.find(id => id !== botId);
+            room.turn = nextTurn;
+            room.gameState.turn = nextTurn;
             emitGameUpdate(roomId, room);
+            
+            if (hasMoreJumps) {
+                scheduleBotTurn(roomId);
+            }
             return;
         }
     } catch(e) {
@@ -4457,7 +4472,7 @@ io.on('connection', (socket) => {
                                     rematchStreak: 0,
                                     matchSequence: 0
                                 };
-                                room.gameState.difficulty = (me.userProfile.elo || 1000) < 1200 ? 'easy' : (me.userProfile.elo || 1000) < 1500 ? 'medium' : 'hard';
+                                room.gameState.difficulty = stake >= 500 ? 'hard' : (stake > 0 ? 'medium' : ((me.userProfile.elo || 1000) < 1200 ? 'easy' : 'medium'));
 
                                 if (stake > 0) {
                                     await db.runTransaction(async (tx) => {
@@ -4882,114 +4897,13 @@ io.on('connection', (socket) => {
             // Server validates ownership, bounds, diagonal, jump, king promo, win.
             // =====================================================================
             if (room.gameType === 'Checkers' && action.fromR !== undefined) {
-                // Server-side Checkers engine helper
-                const getGlobalValidMovesCheckers = (playerUserId, currentPieces, forwardDir, specificId = null) => {
-                    const myPieces = currentPieces.filter(p => p.owner === playerUserId);
-                    const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;
-                    const pieceMap = new Map(currentPieces.map(cp => [`${cp.r},${cp.c}`, cp]));
-
-                    const isValidPos = (r, c) => r >= 0 && r < 10 && c >= 0 && c < 10;
-
-                    const getJumpSequences = (startPiece, visitedIds) => {
-                        const sequences = [];
-                        const isKing = startPiece.isKing;
-                        const dirs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
-
-                        for (const [dr, dc] of dirs) {
-                            let step = 1;
-                            let foundEnemy = null;
-                            
-                            while (true) {
-                                const mr = startPiece.r + dr * step;
-                                const mc = startPiece.c + dc * step;
-                                if (!isValidPos(mr, mc)) break;
-                                
-                                const mid = pieceMap.get(`${mr},${mc}`);
-                                if (mid) {
-                                    if (mid.owner === playerUserId) break;
-                                    if (foundEnemy) break;
-                                    if (visitedIds.has(mid.id)) break;
-                                    foundEnemy = mid;
-                                } else if (foundEnemy) {
-                                    const jumpMove = {
-                                        fromR: startPiece.r, fromC: startPiece.c,
-                                        r: mr, c: mc, isJump: true, jumpId: foundEnemy.id
-                                    };
-                                    
-                                    const newVisited = new Set(visitedIds);
-                                    newVisited.add(foundEnemy.id);
-                                    
-                                    const tempPiece = { ...startPiece, r: mr, c: mc };
-                                    const nextSequences = getJumpSequences(tempPiece, newVisited);
-                                    
-                                    if (nextSequences.length === 0) {
-                                        sequences.push([jumpMove]);
-                                    } else {
-                                        for (const seq of nextSequences) {
-                                            sequences.push([jumpMove, ...seq]);
-                                        }
-                                    }
-                                }
-                                
-                                if (!isKing && step >= 2) break;
-                                step++;
-                            }
-                        }
-                        return sequences;
-                    };
-
-                    let allSequences = [];
-                    toCheck.forEach(p => {
-                        allSequences.push(...getJumpSequences(p, new Set()));
-                    });
-
-                    if (allSequences.length > 0) {
-                        const maxCaptures = Math.max(...allSequences.map(seq => seq.length));
-                        const bestSequences = allSequences.filter(seq => seq.length === maxCaptures);
-                        
-                        const uniqueFirstMoves = new Map();
-                        bestSequences.forEach(seq => {
-                            const firstMove = seq[0];
-                            const key = `${firstMove.fromR},${firstMove.fromC}-${firstMove.r},${firstMove.c}`;
-                            if (!uniqueFirstMoves.has(key)) {
-                                uniqueFirstMoves.set(key, firstMove);
-                            }
-                        });
-                        
-                        return { moves: Array.from(uniqueFirstMoves.values()), hasJump: true };
-                    }
-
-                    let allMoves = [];
-                    toCheck.forEach(p => {
-                        const moveDir = forwardDir;
-                        const dirs = p.isKing ? [[-1, -1], [-1, 1], [1, -1], [1, 1]] : [[moveDir, -1], [moveDir, 1]];
-
-                        for (const [dr, dc] of dirs) {
-                            let step = 1;
-                            while (true) {
-                                const tr = p.r + dr * step;
-                                const tc = p.c + dc * step;
-                                if (!isValidPos(tr, tc)) break;
-                                if (pieceMap.has(`${tr},${tc}`)) break;
-                                
-                                allMoves.push({ fromR: p.r, fromC: p.c, r: tr, c: tc, isJump: false });
-                                
-                                if (!p.isKing) break;
-                                step++;
-                            }
-                        }
-                    });
-
-                    return { moves: allMoves, hasJump: false };
-                };
-
                 const { fromR, fromC, toR, toC } = action;
                 const pieces = room.gameState.pieces;
                 const isPlayer1 = room.players[0] === userId;
                 const forwardDir = isPlayer1 ? -1 : 1;
                 
                 // 1. Get valid moves using authoritative server engine
-                const { moves, hasJump } = getGlobalValidMovesCheckers(userId, pieces, forwardDir, room.gameState.mustJumpFrom);
+                const { moves, hasJump } = getValidMoveSequences(userId, pieces, forwardDir, room.gameState.mustJumpFrom);
                 
                 // 2. Find if proposed move matches a valid move
                 const validMove = moves.find(m => m.fromR === fromR && m.fromC === fromC && m.r === toR && m.c === toC);
@@ -5021,14 +4935,14 @@ io.on('connection', (socket) => {
                 
                 let hasMoreJumps = false;
                 if (validMove.isJump) {
-                    const { hasJump: canContinue } = getGlobalValidMovesCheckers(userId, updatedPieces, forwardDir, movedPiece.id);
+                    const { hasJump: canContinue } = getValidMoveSequences(userId, updatedPieces, forwardDir, movedPiece.id);
                     hasMoreJumps = canContinue;
                 }
 
                 if (!hasMoreJumps) {
                     // Check if opponent has any legal moves left
                     const oppForwardDir = isPlayer1 ? 1 : -1;
-                    const { moves: oppMoves } = getGlobalValidMovesCheckers(opponentId, updatedPieces, oppForwardDir, null);
+                    const { moves: oppMoves } = getValidMoveSequences(opponentId, updatedPieces, oppForwardDir, null);
                     
                     if (oppMoves.length === 0) {
                         const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
@@ -5543,7 +5457,15 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                room.gameState.pieces = action.pieces;
+                // Apply only authorized step/finished changes — never trust the full client array
+                const moverPieces = action.pieces.filter(p => p.owner === userId);
+                for (const clientPiece of moverPieces) {
+                    const serverPiece = room.gameState.pieces.find(sp => sp.id === clientPiece.id);
+                    if (serverPiece) {
+                        serverPiece.step = clientPiece.step;
+                        serverPiece.finished = clientPiece.finished;
+                    }
+                }
                 room.gameState.diceRolled = false;
 
                 // S3 Fix: Winner detection using color (aligned with server init) and finished flag

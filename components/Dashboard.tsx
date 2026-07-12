@@ -203,25 +203,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
             </div>
           </motion.div>
 
-          {/* Play vs AI Callout */}
-          <motion.div variants={itemVariants} className="md:col-span-3">
-            <div
-              onClick={() => onSoloPlay('')}
-              className="cursor-pointer premium-glass p-5 rounded-2xl border border-purple-500/20 bg-gradient-to-r from-purple-900/30 to-royal-900/50 hover:border-purple-500/40 hover:shadow-[0_0_25px_rgba(147,51,234,0.2)] transition-all group relative overflow-hidden"
-            >
-              <div className="absolute top-0 right-0 p-8 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition-colors"></div>
-              <div className="flex items-center gap-4 relative z-10">
-                <div className="p-3 rounded-xl bg-purple-500/20 text-purple-400 group-hover:scale-110 transition-transform">
-                  <Bot size={28} />
-                </div>
-                <div className="flex-1">
-                <h3 className="text-white font-bold text-base">{t('practice_vs_ai_dash')}</h3>
-                <p className="text-slate-400 text-xs">{t('practice_vs_ai_desc')}</p>
-                </div>
-                <ArrowRight size={20} className="text-purple-400 group-hover:translate-x-1 transition-transform shrink-0" />
-              </div>
-            </div>
-          </motion.div>
+
           <motion.div variants={itemVariants} className="md:col-span-3 flex items-center justify-between mt-4">
             <h3 className="text-xl font-display font-bold text-white flex items-center gap-2">
               <Zap className="text-gold-400 fill-gold-400" size={20} /> {t('trending_games')}

@@ -4,20 +4,13 @@
  * Board: 10×10, international checkers rules.
  */
 
+import { getValidMoveSequences } from '../checkersLogic.js';
+
 const PAWN_VALUE = 100;
 const KING_VALUE = 180;
-const ADVANCED_PAWN_BONUS = 30;
 
 function clonePieces(pieces) {
     return pieces.map(p => ({ ...p }));
-}
-
-function buildBoard(pieces) {
-    const board = Array.from({ length: 10 }, () => Array(10).fill(null));
-    for (const p of pieces) {
-        if (!p.captured && !p.removed) board[p.r][p.c] = p;
-    }
-    return board;
 }
 
 function getPlayerForward(playerId, pieces) {
@@ -27,104 +20,56 @@ function getPlayerForward(playerId, pieces) {
     return avgRow < 5 ? 1 : -1;
 }
 
-function getOpponentForward(playerId, pieces) {
-    return -getPlayerForward(playerId, pieces);
-}
-
-function getAllMoves(pieces, playerId) {
+function getAllMoves(pieces, playerId, mustJumpFrom = null) {
     const forward = getPlayerForward(playerId, pieces);
     if (forward === 0) return [];
-    const myPieces = pieces.filter(p => p.owner === playerId && !p.captured && !p.removed);
-    const opponentPieces = pieces.filter(p => p.owner !== playerId && !p.captured && !p.removed);
-    const pieceMap = new Map();
-    for (const p of pieces) {
-        if (!p.captured && !p.removed) pieceMap.set(`${p.r},${p.c}`, p);
-    }
-    const isValidPos = (r, c) => r >= 0 && r < 10 && c >= 0 && c < 10;
-    const isEmpty = (r, c) => !pieceMap.has(`${r},${c}`);
-
-    const simpleMoves = [];
-    const jumpMoves = [];
-
-    for (const piece of myPieces) {
-        const dirs = piece.isKing
-            ? [[-1, -1], [-1, 1], [1, -1], [1, 1]]
-            : [[forward, -1], [forward, 1]];
-
-        for (const [dr, dc] of dirs) {
-            // Simple move
-            const tr = piece.r + dr;
-            const tc = piece.c + dc;
-            if (isValidPos(tr, tc) && isEmpty(tr, tc)) {
-                simpleMoves.push({
-                    piece, fromR: piece.r, fromC: piece.c, toR: tr, toC: tc,
-                    capturedId: null, isJump: false
-                });
-            }
-
-            // Jump move
-            const jr = piece.r + dr * 2;
-            const jc = piece.c + dc * 2;
-            const midKey = `${tr},${tc}`;
-            if (isValidPos(jr, jc) && pieceMap.has(midKey) &&
-                pieceMap.get(midKey).owner !== playerId && isEmpty(jr, jc)) {
-                jumpMoves.push({
-                    piece, fromR: piece.r, fromC: piece.c, toR: jr, toC: jc,
-                    capturedId: pieceMap.get(midKey).id, isJump: true
-                });
-            }
-        }
-    }
-
-    // Extended multi-jump sequences for kings
-    if (myPieces.some(p => p.isKing)) {
-        for (const piece of myPieces.filter(p => p.isKing)) {
-            for (const [dr, dc] of [[-1, -1], [-1, 1], [1, -1], [1, 1]]) {
-                // Flying king: slide through empty squares to find jumps
-                for (let step = 1; step < 10; step++) {
-                    const sr = piece.r + dr * step;
-                    const sc = piece.c + dc * step;
-                    if (!isValidPos(sr, sc)) break;
-                    const skey = `${sr},${sc}`;
-                    if (pieceMap.has(skey)) {
-                        if (pieceMap.get(skey).owner !== playerId) {
-                            // Found opponent — check landing
-                            const lr = sr + dr;
-                            const lc = sc + dc;
-                            if (isValidPos(lr, lc) && isEmpty(lr, lc)) {
-                                jumpMoves.push({
-                                    piece, fromR: piece.r, fromC: piece.c, toR: lr, toC: lc,
-                                    capturedId: pieceMap.get(skey).id, isJump: true
-                                });
-                            }
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    return jumpMoves.length > 0 ? jumpMoves : simpleMoves;
+    
+    // We reuse the server's authoritative logic.
+    // It enforces the "maximum capture" rule natively!
+    const { moves } = getValidMoveSequences(playerId, pieces, forward, mustJumpFrom);
+    return moves;
 }
 
 function applyMove(pieces, move) {
     const newPieces = clonePieces(pieces);
-    const piece = newPieces.find(p => p.id === move.piece.id);
-    if (!piece) return newPieces;
+    
+    // If it's a multi-jump sequence, apply all intermediate steps
+    if (move.isJump && move.fullSequence) {
+        let piece = newPieces.find(p => p.r === move.fromR && p.c === move.fromC);
+        if (!piece) return newPieces;
+        
+        const forward = getPlayerForward(piece.owner, newPieces);
+        const promotionRow = forward > 0 ? 9 : 0;
+        
+        for (const step of move.fullSequence) {
+            piece.r = step.r;
+            piece.c = step.c;
+            
+            const captured = newPieces.find(p => p.id === step.jumpId);
+            if (captured) captured.captured = true;
+            
+            if (step.r === promotionRow && !piece.isKing) {
+                piece.isKing = true;
+            }
+        }
+    } else {
+        // Single move or single jump without fullSequence
+        const piece = newPieces.find(p => p.r === move.fromR && p.c === move.fromC);
+        if (!piece) return newPieces;
 
-    piece.r = move.toR;
-    piece.c = move.toC;
+        piece.r = move.r; // getValidMoveSequences uses `r` and `c` for destination
+        piece.c = move.c;
 
-    const forward = getPlayerForward(piece.owner, newPieces);
-    const promotionRow = forward > 0 ? 9 : 0;
-    if (move.toR === promotionRow && !piece.isKing) {
-        piece.isKing = true;
-    }
+        const forward = getPlayerForward(piece.owner, newPieces);
+        const promotionRow = forward > 0 ? 9 : 0;
+        if (move.r === promotionRow && !piece.isKing) {
+            piece.isKing = true;
+        }
 
-    if (move.capturedId) {
-        const captured = newPieces.find(p => p.id === move.capturedId);
-        if (captured) captured.captured = true;
+        if (move.isJump && move.jumpId) {
+            const captured = newPieces.find(p => p.id === move.jumpId);
+            if (captured) captured.captured = true;
+        }
     }
 
     return newPieces;
@@ -146,12 +91,21 @@ function evaluateBoard(pieces, playerId) {
             // Advancement bonus
             const progress = forward > 0 ? p.r : (9 - p.r);
             score += Math.floor(progress * 4) * multiplier;
+            
+            // Back-row defense (very important in Checkers to prevent opponent kings)
+            if (progress === 0) {
+                score += 15 * multiplier; 
+            }
         }
 
         // Center control bonus
-        if (p.c >= 3 && p.c <= 6) score += 10 * multiplier;
-        // Edge penalty
-        if (p.c === 0 || p.c === 9) score -= 8 * multiplier;
+        if (p.c >= 3 && p.c <= 6 && p.r >= 3 && p.r <= 6) {
+            score += 12 * multiplier;
+        }
+        // Edge penalty (sometimes good for defense, but generally less mobility)
+        if (p.c === 0 || p.c === 9) {
+            score -= 5 * multiplier;
+        }
     }
 
     return score;
@@ -198,9 +152,10 @@ function minimax(pieces, depth, alpha, beta, isMaximizing, playerId, opponentId,
  * @param {string} botId - Bot's player ID
  * @param {string} difficulty - 'easy', 'medium', 'hard'
  * @param {number} userElo - Approximate player ELO for depth scaling
+ * @param {string} mustJumpFrom - Optional piece ID to force jump from
  * @returns {{ type: 'MOVE', fromR, fromC, toR, toC, isJump } | null}
  */
-export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000) {
+export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000, mustJumpFrom = null) {
     try {
         const opponentId = 'opponent';
         const currentPieces = clonePieces(pieces);
@@ -209,19 +164,32 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000)
             if (p.owner !== botId) p.owner = opponentId;
         }
 
-        const allMoves = getAllMoves(currentPieces, botId);
+        const allMoves = getAllMoves(currentPieces, botId, mustJumpFrom);
         if (allMoves.length === 0) return null;
+
+        // If there's only one forced move, take it instantly without search
+        if (allMoves.length === 1 && allMoves[0].isJump) {
+            const bestMove = allMoves[0];
+            return {
+                type: 'MOVE',
+                fromR: bestMove.fromR,
+                fromC: bestMove.fromC,
+                toR: bestMove.r,
+                toC: bestMove.c,
+                isJump: bestMove.isJump || false
+            };
+        }
 
         let depth;
         if (difficulty === 'easy') {
-            depth = 12;
+            depth = 5;
         } else if (difficulty === 'medium') {
-            depth = 14;
+            depth = 7;
         } else {
-            depth = 16;
+            depth = 9;
         }
 
-        const maxTime = 3000;
+        const maxTime = 2500; 
         const startTime = Date.now();
 
         let bestMove = allMoves[Math.floor(Math.random() * allMoves.length)];
@@ -250,7 +218,7 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000)
         }
 
         // Simulate human-like play at easy
-        if (difficulty === 'easy' && Math.random() < 0.5) {
+        if (difficulty === 'easy' && Math.random() < 0.3) {
             const nonJump = allMoves.filter(m => !m.isJump);
             if (nonJump.length > 0) {
                 bestMove = nonJump[Math.floor(Math.random() * nonJump.length)];
@@ -261,8 +229,8 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000)
             type: 'MOVE',
             fromR: bestMove.fromR,
             fromC: bestMove.fromC,
-            toR: bestMove.toR,
-            toC: bestMove.toC,
+            toR: bestMove.r, // getValidMoveSequences uses 'r' instead of 'toR'
+            toC: bestMove.c, // getValidMoveSequences uses 'c' instead of 'toC'
             isJump: bestMove.isJump || false
         };
     } catch (e) {
