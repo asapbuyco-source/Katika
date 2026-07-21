@@ -91,7 +91,7 @@ function processQueue() {
     engine.sendCommand('ucinewgame');
     engine.sendCommand(`position fen ${fen}`);
     engine.sendCommand(`setoption name Skill Level value ${skillLevel}`);
-    engine.sendCommand('go movetime 3000');
+    engine.sendCommand('go depth 20 movetime 4000');
 }
 
 /**

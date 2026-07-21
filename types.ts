@@ -95,7 +95,8 @@ export interface Transaction {
   id: string;
   type: 'deposit' | 'withdrawal' | 'winnings' | 'stake' | 'stake_loss' |
         'tournament_entry' | 'tournament_refund' | 'escrow_lock' | 'escrow_refund' |
-        'streak_bonus' | 'referral_bonus' | 'welcome_bonus';
+        'streak_bonus' | 'referral_bonus' | 'welcome_bonus' |
+        'bot_winnings' | 'game_fee';
   amount: number;
   date: string;
   status: 'completed' | 'pending' | 'failed';

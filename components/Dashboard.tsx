@@ -288,23 +288,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               {recentTransactions.length > 0 ? (
-                recentTransactions.map((item, idx) => (
-                  <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
-                        {item.type === 'winnings' ? <Trophy size={16} /> :
-                          item.type === 'stake' ? <Target size={16} /> : <Wallet size={16} />}
+                recentTransactions.map((item, idx) => {
+                  const typeLabels: Record<string, string> = {
+                    winnings: 'Win',
+                    stake: 'Game Entry',
+                    escrow_lock: 'Game Entry',
+                    game_fee: 'Game Fee',
+                    bot_winnings: 'Win vs AI',
+                    stake_loss: 'Loss',
+                    deposit: 'Deposit',
+                    withdrawal: 'Withdrawal',
+                    referral_bonus: 'Referral Bonus',
+                    streak_bonus: 'Streak Bonus',
+                  };
+                  const displayType = typeLabels[item.type] || item.type.replace(/_/g, ' ');
+                  const displayDate = item.date
+                    ? new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                    : '';
+                  return (
+                    <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-royal-800 rounded-lg text-slate-400">
+                          {(item.type === 'winnings' || (item.type as string) === 'bot_winnings') ? <Trophy size={16} /> :
+                           (item.type === 'stake' || item.type === 'escrow_lock' || (item.type as string) === 'game_fee') ? <Target size={16} /> : <Wallet size={16} />}
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="font-medium text-white text-sm capitalize">{displayType}</span>
+                          <span className="text-[10px] text-slate-500">{displayDate}</span>
+                        </div>
                       </div>
-                      <div className="flex flex-col">
-                        <span className="font-medium text-white text-sm capitalize">{item.type}</span>
-                        <span className="text-[10px] text-slate-500">{item.date}</span>
+                      <div className={`font-mono font-bold text-sm ${item.amount > 0 ? 'text-green-400' : 'text-slate-200'}`}>
+                        {item.amount > 0 ? '+' : ''}{item.amount} FCFA
                       </div>
                     </div>
-                    <div className={`font-mono font-bold text-sm ${item.amount > 0 ? 'text-green-400' : 'text-slate-200'}`}>
-                      {item.amount > 0 ? '+' : ''}{item.amount} FCFA
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               ) : (
                 <div className="col-span-3 text-center text-slate-500 text-sm py-4">
                   {user.balance === 0 && recentTransactions.length === 0

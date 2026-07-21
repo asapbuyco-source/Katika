@@ -391,8 +391,11 @@ app.use('/api/', limiter);
 app.use(express.json({ limit: '1mb' }));
 app.use(cors({
     origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl) or matching FRONTEND_ORIGIN
-        if (!origin || FRONTEND_ORIGIN === '*' || origin === FRONTEND_ORIGIN) {
+        if (!origin || FRONTEND_ORIGIN === '*') {
+            callback(null, true);
+        } else if (origin === FRONTEND_ORIGIN) {
+            callback(null, true);
+        } else if (/^https?:\/\/localhost(:\d+)?$/.test(origin) || origin.startsWith('http://192.168.') || origin.startsWith('http://127.0.0.1')) {
             callback(null, true);
         } else {
             console.warn(`CORS blocked request from origin: ${origin}`);
@@ -2106,6 +2109,65 @@ app.post('/api/maintenance', verifyAdmin, async (req, res) => {
     }
 });
 
+// ─── AI Host Toggle (Admin) ───────────────────────────────────────────────────
+app.post('/api/admin/ai-toggle', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    const { enabled } = req.body;
+    if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) required' });
+    try {
+        await db.collection('settings').doc('katika_host').set(
+            { enabled, updatedAt: admin.firestore.FieldValue.serverTimestamp() },
+            { merge: true }
+        );
+        // Invalidate in-memory cache so the change takes effect immediately
+        aiHostEnabledCache = enabled;
+        aiHostCacheTime = Date.now();
+        console.log(`[AI Host] ${enabled ? 'ENABLED' : 'DISABLED'} by admin`);
+        res.json({ success: true, enabled });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ─── AI Earnings Tracker (Admin) ───────────────────────────────────────────────
+app.get('/api/admin/ai-earnings', verifyAdmin, async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database unavailable' });
+    try {
+        const hostRef = db.collection('users').doc('katika_host_account');
+        const hostSnap = await hostRef.get();
+        const hostData = hostSnap.exists ? hostSnap.data() : null;
+        const currentBalance = hostData?.balance || 0;
+        const startingBalance = hostData?.startingBalance || 100000;
+        const netProfit = currentBalance - startingBalance;
+
+        // Fetch recent bot transactions
+        const txSnap = await hostRef.collection('transactions')
+            .orderBy('timestamp', 'desc')
+            .limit(50)
+            .get();
+        const recentTransactions = txSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+
+        // Calculate totals
+        let totalWon = 0, totalLost = 0, totalGames = 0;
+        for (const tx of recentTransactions) {
+            if (tx.type === 'bot_winnings') { totalWon += Math.abs(tx.amount || 0); totalGames++; }
+            if (tx.type === 'game_fee') { totalLost += Math.abs(tx.amount || 0); totalGames++; }
+        }
+
+        res.json({
+            currentBalance,
+            startingBalance,
+            netProfit,
+            totalGames,
+            totalWon,
+            totalLost,
+            recentTransactions: recentTransactions.slice(0, 20)
+        });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // --- ADMIN: CANCEL TOURNAMENT + REFUND ALL FEES (Fix 5) ---
 app.post('/api/tournaments/cancel', verifyAdmin, async (req, res) => {
     if (!db) return res.status(503).json({ error: 'Database unavailable' });
@@ -2308,7 +2370,7 @@ const settleGame = async (roomId, winnerId) => {
         return;
     }
 
-    if (!room || room.stake === 0 || !winnerId) return;
+    if (!room || !winnerId) return;
 
     const BOT_IDS = new Set(['katika_host_account', 'katika_trainer']);
     const isBotGame = room.players.some(pid => BOT_IDS.has(pid));
@@ -2376,26 +2438,32 @@ const settleGame = async (roomId, winnerId) => {
                 tx.update(humanRef, humanUpdate);
 
                 if (humanWon) {
-                    tx.set(humanRef.collection('transactions').doc(), {
-                        type: 'winnings', amount: winnings, status: 'completed',
-                        date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                        gameType: room.gameType, note: `Won vs Katika Host`
-                    });
+                    if (winnings > 0) {
+                        tx.set(humanRef.collection('transactions').doc(), {
+                            type: 'winnings', amount: winnings, status: 'completed',
+                            date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            gameType: room.gameType, note: `Won vs Katika Host`
+                        });
+                    }
                 } else {
-                    tx.set(humanRef.collection('transactions').doc(), {
-                        type: 'stake_loss', amount: -room.stake, status: 'completed',
-                        date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                        note: `Lost vs Katika Host`
-                    });
+                    if (room.stake > 0) {
+                        tx.set(humanRef.collection('transactions').doc(), {
+                            type: 'stake_loss', amount: -room.stake, status: 'completed',
+                            date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                            note: `Lost vs Katika Host`
+                        });
+                    }
                     if (hostSnap.exists) {
                         tx.update(hostRef, {
                             balance: (hostSnap.data().balance || 0) + winnings,
                         });
-                        tx.set(hostRef.collection('transactions').doc(), {
-                            type: 'bot_winnings', amount: winnings, status: 'completed',
-                            date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                            note: `Bot won ${room.gameType} vs ${humanId}, pot ${winnings} FCFA`
-                        });
+                        if (winnings > 0) {
+                            tx.set(hostRef.collection('transactions').doc(), {
+                                type: 'bot_winnings', amount: winnings, status: 'completed',
+                                date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                                note: `Bot won ${room.gameType} vs ${humanId}, pot ${winnings} FCFA`
+                            });
+                        }
                     }
                 }
                 tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId });
@@ -2473,22 +2541,26 @@ const settleGame = async (roomId, winnerId) => {
             if (winnerDoc.exists) {
                 const wData = winnerDoc.data();
                 tx.update(winnerRef, winnerUpdate);
-                tx.set(winnerRef.collection('transactions').doc(), {
-                    type: 'winnings', amount: winnings, status: 'completed',
-                    date: new Date().toISOString(),
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    gameType: room.gameType
-                });
+                if (winnings > 0) {
+                    tx.set(winnerRef.collection('transactions').doc(), {
+                        type: 'winnings', amount: winnings, status: 'completed',
+                        date: new Date().toISOString(),
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        gameType: room.gameType
+                    });
+                }
             }
             if (loserDoc.exists) {
                 const lData = loserDoc.data();
                 tx.update(loserRef, loserUpdate);
-                tx.set(loserRef.collection('transactions').doc(), {
-                    type: 'stake_loss', amount: -room.stake, status: 'completed',
-                    date: new Date().toISOString(),
-                    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-                    note: `Settled loss for ${room.gameType}`
-                });
+                if (room.stake > 0) {
+                    tx.set(loserRef.collection('transactions').doc(), {
+                        type: 'stake_loss', amount: -room.stake, status: 'completed',
+                        date: new Date().toISOString(),
+                        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+                        note: `Settled loss for ${room.gameType}`
+                    });
+                }
             }
             tx.set(settlementRef, { settledAt: admin.firestore.FieldValue.serverTimestamp(), winnerId, roomId, settlementRound });
         }));
@@ -3126,6 +3198,20 @@ const userSockets = new Map(); // userId -> Set<socketId>
 const socketUsers = new Map(); // socketId -> userId
 const disconnectTimers = new Map(); // userId -> TimeoutID
 
+// AI Host toggle — in-memory cache with 60s TTL, refreshed on admin toggle
+let aiHostEnabledCache = true; // default: enabled
+let aiHostCacheTime = 0;
+const isAIHostEnabled = async () => {
+    if (Date.now() - aiHostCacheTime < 60000) return aiHostEnabledCache;
+    if (!db) return aiHostEnabledCache;
+    try {
+        const snap = await db.collection('settings').doc('katika_host').get();
+        aiHostEnabledCache = snap.exists ? (snap.data().enabled !== false) : true;
+        aiHostCacheTime = Date.now();
+    } catch (_) {}
+    return aiHostEnabledCache;
+};
+
 const getUserSocketIds = (userId) => {
     const entry = userSockets.get(userId);
     if (!entry) return [];
@@ -3391,12 +3477,9 @@ function scheduleBotTurn(roomId) {
 
     const difficulty = room.gameState?.difficulty || 'medium';
     const computeHeavyGames = new Set(['Chess', 'Checkers']);
-    const instantGames = new Set(['Dice']);
     const delay = computeHeavyGames.has(room.gameType)
         ? Math.floor(Math.random() * 800) + 400   // 0.4–1.2s (engine computes separately)
-        : instantGames.has(room.gameType)
-        ? 500                                       // 0.5s (luck games, instant)
-        : Math.floor(Math.random() * 1500) + 1500; // 1.5–3s (other games, simulate thinking)
+        : Math.floor(Math.random() * 2000) + 1500; // 1.5–3.5s (dice/ludo — human-like timing)
 
     setTimeout(async () => {
         try {
@@ -3505,7 +3588,7 @@ function processBotAction(roomId, botId, action) {
                         room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
                         emitGameUpdate(roomId, room);
                     }
-                }, 2000);
+                }, 1200);
             } else {
                 room.turn = room.players.find(id => id !== botId);
                 emitGameUpdate(roomId, room);
@@ -4438,6 +4521,9 @@ io.on('connection', (socket) => {
                     const myIdx = currentQueue.findIndex(i => i.userProfile.id === userId);
                     if (myIdx > -1) {
                         try {
+                            // Check if AI Host is globally enabled (admin toggle)
+                            if (!(await isAIHostEnabled())) return;
+
                             const hostRef = db.collection('users').doc('katika_host_account');
                             const hostSnap = await hostRef.get();
                             const hostData = hostSnap.exists ? hostSnap.data() : null;
@@ -4472,7 +4558,7 @@ io.on('connection', (socket) => {
                                     rematchStreak: 0,
                                     matchSequence: 0
                                 };
-                                room.gameState.difficulty = stake >= 500 ? 'hard' : (stake > 0 ? 'medium' : ((me.userProfile.elo || 1000) < 1200 ? 'easy' : 'medium'));
+                                room.gameState.difficulty = 'hard';
 
                                 if (stake > 0) {
                                     await db.runTransaction(async (tx) => {
@@ -4878,9 +4964,9 @@ io.on('connection', (socket) => {
                             room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
                             emitGameUpdate(roomId, room);
                         }
-                    }, 3000);
+                    }, 1500);
 
-                }, 2000);
+                }, 1200);
             } else {
                 room.turn = room.players.find(id => id !== userId);
                 emitGameUpdate(roomId, room);
@@ -4963,6 +5049,10 @@ io.on('connection', (socket) => {
                 emitGameUpdate(roomId, room);
                 // [Step 2.1] Persist Checkers state after every move for crash-restart resilience
                 persistRoomToFirestore(roomId, room);
+                
+                if (BOT_PLAYER_IDS.has(nextTurn)) {
+                    scheduleBotTurn(roomId);
+                }
                 return;
             }
             // =====================================================================

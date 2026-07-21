@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { User, BugReport, Tournament, TournamentMatch } from '../types';
 import { Users, DollarSign, Activity, Shield, Search, Ban, CheckCircle, Server, RefreshCw, Lock, Bug, CheckSquare, AlertCircle, Gamepad2, Power, Trophy, Plus, Calendar, Play, Trash2, StopCircle, RefreshCcw, Eye, Coins, Clock, UploadCloud, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth, editUserBalance, deleteUserAccount, getAdminWithdrawals, markWithdrawalPaid, rejectWithdrawal } from '../services/firebase';
+import { getAllUsers, getActiveGamesCount, getSystemLogs, getGameActivityStats, getBugReports, resolveBugReport, updateGameStatus, subscribeToGameConfigs, createTournament, getTournaments, deleteTournament, updateTournamentStatus, getTournamentMatches, startTournament, banUser, setMaintenanceMode, subscribeToMaintenanceMode, reportTournamentMatchResult, auth, editUserBalance, deleteUserAccount, getAdminWithdrawals, markWithdrawalPaid, rejectWithdrawal, getApiUrl } from '../services/firebase';
 import type { AdminWithdrawalRequest } from '../services/firebase';
 
 interface AdminDashboardProps {
@@ -179,6 +179,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
             alert(e.message || 'Failed to toggle maintenance mode');
         }
     };
+
+    // ─── AI Host Controls ──────────────────────────────────────────────────────
+    const [aiHostEnabled, setAIHostEnabled] = useState(true);
+    const [aiEarnings, setAIEarnings] = useState<any>(null);
+
+    const handleAIToggle = async () => {
+        try {
+            const newState = !aiHostEnabled;
+            const res = await fetch(`${getApiUrl()}/api/admin/ai-toggle`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}` },
+                body: JSON.stringify({ enabled: newState })
+            });
+            if (!res.ok) throw new Error(await res.text());
+            setAIHostEnabled(newState);
+            addLog("AI Host", newState ? "Enabled" : "Disabled", newState ? "info" : "warning");
+        } catch (e: any) {
+            console.error('AI toggle failed:', e);
+            alert(e.message || 'Failed to toggle AI Host');
+        }
+    };
+
+    const fetchAIEarnings = async () => {
+        try {
+            const res = await fetch(`${getApiUrl()}/api/admin/ai-earnings`, {
+                headers: { 'Authorization': `Bearer ${await auth.currentUser?.getIdToken()}` }
+            });
+            if (res.ok) { const data = await res.json(); setAIEarnings(data); }
+        } catch (e) { console.error('AI earnings fetch failed:', e); }
+    };
+
+    useEffect(() => {
+        if (activeTab === 'system') {
+            fetchAIEarnings();
+        }
+    }, [activeTab]);
 
     const handleBanUser = async (player: any) => {
         const newBan = !player.isBanned;
@@ -1042,6 +1078,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                     <div className={`absolute left-1 top-1 w-4 h-4 rounded-full transition-all ${maintenanceMode ? 'bg-white translate-x-6' : 'bg-slate-500 translate-x-0'}`}></div>
                                 </button>
                             </div>
+
+                            <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-purple-500/20">
+                                <div>
+                                    <div className="font-bold text-white">Katika AI Host</div>
+                                    <div className="text-xs text-slate-500">Enable/disable bot opponents in matchmaking</div>
+                                </div>
+                                <button
+                                    onClick={handleAIToggle}
+                                    className={`w-12 h-6 rounded-full relative transition-colors ${aiHostEnabled ? 'bg-purple-500' : 'bg-royal-800'}`}
+                                >
+                                    <div className={`absolute left-1 top-1 w-4 h-4 rounded-full transition-all ${aiHostEnabled ? 'bg-white translate-x-6' : 'bg-slate-500 translate-x-0'}`}></div>
+                                </button>
+                            </div>
+
+                            {/* AI Earnings Summary */}
+                            {aiEarnings && (
+                            <div className="p-4 bg-royal-900/50 rounded-xl border border-white/5 space-y-2">
+                                <div className="text-sm font-bold text-white mb-2">AI Earnings Summary</div>
+                                <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="text-slate-400">Current Balance:</div>
+                                    <div className="text-white font-mono text-right">{aiEarnings.currentBalance?.toLocaleString()} FCFA</div>
+                                    <div className="text-slate-400">Net Profit:</div>
+                                    <div className={`font-mono text-right ${aiEarnings.netProfit >= 0 ? 'text-green-400' : 'text-red-400'}`}>{aiEarnings.netProfit >= 0 ? '+' : ''}{aiEarnings.netProfit?.toLocaleString()} FCFA</div>
+                                    <div className="text-slate-400">Total Games:</div>
+                                    <div className="text-white font-mono text-right">{aiEarnings.totalGames}</div>
+                                    <div className="text-slate-400">Total Won:</div>
+                                    <div className="text-green-400 font-mono text-right">+{aiEarnings.totalWon?.toLocaleString()} FCFA</div>
+                                    <div className="text-slate-400">Total Lost:</div>
+                                    <div className="text-red-400 font-mono text-right">-{aiEarnings.totalLost?.toLocaleString()} FCFA</div>
+                                </div>
+                            </div>
+                            )}
 
                             <div className="flex items-center justify-between p-4 bg-royal-900/50 rounded-xl border border-white/5">
                                 <div>

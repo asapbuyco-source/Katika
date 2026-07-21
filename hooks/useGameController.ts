@@ -225,7 +225,11 @@ export const useGameController = () => {
             dispatch({ type: 'SET_MATCHMAKING_CONFIG', payload: null });
             dispatch({ type: 'SET_REMATCH_STATUS', payload: 'idle' });
             dispatch({ type: 'SET_OPPONENT_DISCONNECTED', payload: { disconnected: false } });
+            dispatch({ type: 'SET_GAME_RESULT', payload: null });
+            localStorage.removeItem('vantage_active_tournament_match');
+            activeTournamentMatchIdRef.current = null;
 
+            // Navigate to lobby/tournaments
             if (isTournament) {
                 dispatch({ type: 'SET_PRE_SELECTED_GAME', payload: pendingTournamentId });
                 dispatch({ type: 'SET_VIEW', payload: 'tournaments' });
@@ -233,22 +237,24 @@ export const useGameController = () => {
                 dispatch({ type: 'SET_VIEW', payload: 'lobby' });
             }
 
-            dispatch({ type: 'SET_GAME_RESULT', payload: null });
-            localStorage.removeItem('vantage_active_tournament_match');
-            activeTournamentMatchIdRef.current = null;
-            
-            // Absolute fallback to ensure UI state is flushed
+            // Safety net: if the app freezes after this, force a reload
+            // This handles the chess match freeze that sometimes occurs
             setTimeout(() => {
-                dispatch({ type: 'SET_VIEW', payload: isTournament ? 'tournaments' : 'lobby' });
-                dispatch({ type: 'SET_GAME_RESULT', payload: null });
                 isTransitioningRef.current = false;
-            }, 100);
+                // Force reload if still on game view (navigation didn't work)
+                if (state.currentView === 'game') {
+                    console.warn('[GameController] Navigation stuck, force-reloading...');
+                    window.location.reload();
+                }
+            }, 2000);
         } catch (err) {
             console.error('[GameController] finalizeGameEnd error:', err);
             dispatch({ type: 'SET_VIEW', payload: 'lobby' });
             dispatch({ type: 'SET_GAME_RESULT', payload: null });
             setSocketGame(null);
             isTransitioningRef.current = false;
+            // Force reload on error too
+            setTimeout(() => window.location.reload(), 1500);
         }
     }, [socket, socketGame, setSocketGame, dispatch]);
 
