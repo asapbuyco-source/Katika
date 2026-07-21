@@ -237,16 +237,15 @@ export const useGameController = () => {
                 dispatch({ type: 'SET_VIEW', payload: 'lobby' });
             }
 
-            // Safety net: if the app freezes after this, force a reload
-            // This handles the chess match freeze that sometimes occurs
+            // Safety net: force reload if navigation didn't work after 3s
+            const viewAtExit = state.currentView;
             setTimeout(() => {
                 isTransitioningRef.current = false;
-                // Force reload if still on game view (navigation didn't work)
-                if (state.currentView === 'game') {
+                if (viewAtExit === 'game') {
                     console.warn('[GameController] Navigation stuck, force-reloading...');
                     window.location.reload();
                 }
-            }, 2000);
+            }, 3000);
         } catch (err) {
             console.error('[GameController] finalizeGameEnd error:', err);
             dispatch({ type: 'SET_VIEW', payload: 'lobby' });

@@ -162,7 +162,7 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
         if (!selectedGame) return;
 
 
-        if (user.balance < tier.stake) {
+        if ((user.balance || 0) < tier.stake) {
             setNeededAmount(tier.stake - user.balance);
             setShowDepositModal(true);
             playSFX('error');

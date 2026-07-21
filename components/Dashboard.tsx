@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock, Bot } from 'lucide-react';
+import { Plus, Wallet, Trophy, Play, History, Shield, Flame, Users, ArrowRight, Zap, LayoutGrid, Dice5, Target, Brain, TrendingUp, X, Layers, Grid3x3, Disc, Lock } from 'lucide-react';
 import { User, ViewState, Transaction } from '../types';
 import { getUserTransactions, subscribeToGameConfigs, subscribeToGlobalWinners } from '../services/firebase';
 import { motion as originalMotion, AnimatePresence } from 'framer-motion';
@@ -18,10 +18,9 @@ interface DashboardProps {
   setView: (view: ViewState) => void;
   onTopUp: () => void;
   onQuickMatch: (gameId?: string) => void;
-  onSoloPlay: (gameId: string) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch, onSoloPlay }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, onQuickMatch }) => {
   const { t } = useLanguage();
   const [currentWinnerIndex, setCurrentWinnerIndex] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
@@ -121,9 +120,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
             <NetworkSignalIndicator />
             <motion.div whileHover={{ scale: 1.05 }} className="relative cursor-pointer" onClick={() => setView('profile')}>
               <img
-                src={user.avatar}
+                src={user.avatar || 'https://api.dicebear.com/7.x/initials/svg?seed=' + (user.name || 'U')}
                 alt="Profile"
                 className="w-12 h-12 rounded-full border-2 border-gold-400 object-cover shadow-[0_0_15px_rgba(251,191,36,0.3)]"
+                onError={(e) => { (e.target as HTMLImageElement).src = 'https://api.dicebear.com/7.x/initials/svg?seed=' + (user.name || 'U'); }}
               />
               <div className="absolute bottom-0 right-0 w-3 h-3 bg-cam-green rounded-full border-2 border-royal-900 animate-pulse"></div>
             </motion.div>
@@ -303,7 +303,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ user, setView, onTopUp, on
                   };
                   const displayType = typeLabels[item.type] || item.type.replace(/_/g, ' ');
                   const displayDate = item.date
-                    ? new Date(item.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                    ? (() => { try { const d = new Date(item.date); return isNaN(d.getTime()) ? '' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }); } catch { return ''; } })()
                     : '';
                   return (
                     <div key={idx} className="flex justify-between items-center p-3 bg-royal-900/50 rounded-xl hover:bg-royal-900 transition-colors border border-transparent hover:border-white/5">

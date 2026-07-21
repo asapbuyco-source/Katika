@@ -148,7 +148,8 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
             {/* User Avatar */}
             <motion.div className="relative">
                 <div className="w-24 h-24 rounded-full border-4 border-gold-500 overflow-hidden relative z-10 bg-royal-800 shadow-[0_0_20px_rgba(251,191,36,0.3)]">
-                    <img src={user.avatar} alt="Me" className="w-full h-full object-cover" />
+                    <img src={user.avatar || 'https://api.dicebear.com/7.x/initials/svg?seed=' + (user.name || 'U')} alt="Me" className="w-full h-full object-cover"
+                      onError={(e) => { (e.target as HTMLImageElement).src = 'https://api.dicebear.com/7.x/initials/svg?seed=' + (user.name || 'U'); }} />
                 </div>
                 <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 whitespace-nowrap">
                     <div className="font-bold text-white">{user.name}</div>
@@ -157,7 +158,7 @@ export const MatchmakingScreen: React.FC<MatchmakingScreenProps> = ({ user, game
             </motion.div>
 
             {/* VS Badge */}
-            <div className="font-display font-black text-4xl text-white/20 italic">VS</div>
+            <div className="font-display font-black text-4xl text-white/50 italic">VS</div>
 
             {/* Opponent Avatar */}
             <div className="relative">

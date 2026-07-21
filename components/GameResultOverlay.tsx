@@ -182,7 +182,7 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                                     </div>
                                 </div>
                             </div>
-                        ) : !isTournament && amount !== 0 && !isTournament && (
+                        ) : !isTournament && amount !== 0 && (
                             <div className="mb-8 w-full">
                                 <div className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">
                                     {result === 'win' ? 'Winnings Added' : 'Stake Lost'}
@@ -251,11 +251,11 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
                             ${result === 'win' ? 'bg-gold-500 text-royal-950 hover:bg-gold-400 shadow-gold-500/20' : 'bg-white/10 text-white hover:bg-white/20'}
                         `}
                             >
-                                {isTournament ? 'Return to Bracket' : result === 'win' ? 'Claim Winnings' : 'Return to Lobby'} <ArrowRight size={20} />
+                                {isTournament ? 'Return to Bracket' : result === 'win' && amount > 0 ? 'Claim Winnings' : 'Back to Lobby'} <ArrowRight size={20} />
                             </button>
 
-                            {/* Share Win Button */}
-                            {result === 'win' && !isTournament && (
+                            {/* Share Win Button — only for real-money wins */}
+                            {result === 'win' && amount > 0 && !isTournament && (
                                 <button
                                     onClick={() => {
                                          const shareMessage = `I just won ${displayAmount.toLocaleString()} FCFA playing on Vantage Gaming!\n\nJoin me for a FREE signup bonus! 🎮\n👉 vantage.gg`;
