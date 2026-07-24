@@ -107,6 +107,57 @@ export const checkWinner = (board) => {
     return null;
 };
 
+export const createDrawState = () => ({
+    positions: {},
+    kingOnlyPly: 0,
+    lowMaterialKingPly: 0
+});
+
+export const getCheckersPositionKey = (pieces = [], turn = '') => {
+    const active = pieces
+        .filter(p => !p.captured && !p.removed)
+        .map(p => `${p.owner}:${p.isKing ? 'K' : 'M'}:${p.r},${p.c}`)
+        .sort()
+        .join('|');
+    return `${turn}|${active}`;
+};
+
+export const updateCheckersDrawState = (previousPieces = [], nextPieces = [], nextTurn = '', move = {}, previousState = null) => {
+    const state = previousState ? {
+        positions: { ...(previousState.positions || {}) },
+        kingOnlyPly: previousState.kingOnlyPly || 0,
+        lowMaterialKingPly: previousState.lowMaterialKingPly || 0
+    } : createDrawState();
+
+    const activeNext = nextPieces.filter(p => !p.captured && !p.removed);
+    const allKings = activeNext.length > 0 && activeNext.every(p => p.isKing);
+    const lowMaterialKings = allKings && activeNext.length <= 4;
+    const movedBefore = previousPieces.find(p => p.r === move.fromR && p.c === move.fromC && !p.captured && !p.removed);
+    const manMoved = movedBefore && !movedBefore.isKing;
+    const captured = !!move.isJump || previousPieces.filter(p => !p.captured && !p.removed).length > activeNext.length;
+
+    state.kingOnlyPly = allKings && !captured && !manMoved ? state.kingOnlyPly + 1 : 0;
+    state.lowMaterialKingPly = lowMaterialKings && !captured && !manMoved ? state.lowMaterialKingPly + 1 : 0;
+
+    const key = getCheckersPositionKey(nextPieces, nextTurn);
+    state.positions[key] = (state.positions[key] || 0) + 1;
+
+    return state;
+};
+
+export const getCheckersDrawReason = (drawState = {}) => {
+    if (Object.values(drawState.positions || {}).some(count => count >= 3)) {
+        return 'Draw by Threefold Repetition';
+    }
+    if ((drawState.lowMaterialKingPly || 0) >= 32) {
+        return 'Draw by Low-Material King Endgame';
+    }
+    if ((drawState.kingOnlyPly || 0) >= 50) {
+        return 'Draw by 25 King Moves Without Progress';
+    }
+    return null;
+};
+
 export const getValidMoveSequences = (playerUserId, currentPieces, forwardDir, specificId = null) => {
     const myPieces = currentPieces.filter(p => p.owner === playerUserId && !p.captured && !p.removed);
     const toCheck = specificId ? myPieces.filter(p => p.id === specificId) : myPieces;

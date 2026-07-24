@@ -184,11 +184,13 @@ export function getStockfishMove(fen, skillLevel) {
  * Map difficulty to Stockfish Skill Level.
  */
 export function mapEloToSkillLevel(userElo, difficulty) {
+    const elo = Number.isFinite(Number(userElo)) ? Number(userElo) : 1000;
+    const playerBand = Math.max(0, Math.min(5, Math.floor((elo - 800) / 200)));
     // Maximum strength for all levels — Skill 20 is Stockfish full power (~3500 ELO)
     // Even beginners face a super-GM; house edge is maximized
-    if (difficulty === 'easy')   return 18;
-    if (difficulty === 'medium') return 19;
-    return 20;
+    if (difficulty === 'easy') return Math.max(3, Math.min(8, 3 + playerBand));
+    if (difficulty === 'medium') return Math.max(7, Math.min(13, 7 + playerBand));
+    return Math.max(11, Math.min(17, 11 + playerBand));
 }
 
 /**

@@ -187,16 +187,17 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000,
             };
         }
 
+        const eloBoost = userElo >= 1600 ? 2 : userElo >= 1200 ? 1 : 0;
         let depth;
         if (difficulty === 'easy') {
-            depth = 8;
+            depth = 4 + eloBoost;
         } else if (difficulty === 'medium') {
-            depth = 10;
+            depth = 6 + eloBoost;
         } else {
-            depth = 12;
+            depth = 8 + eloBoost;
         }
 
-        const maxTime = 3000;
+        const maxTime = difficulty === 'easy' ? 900 : difficulty === 'medium' ? 1500 : 2400;
         const startTime = Date.now();
 
         let bestMove = allMoves[Math.floor(Math.random() * allMoves.length)];
@@ -224,12 +225,10 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000,
             if (Date.now() - startTime > maxTime) break;
         }
 
-        // Simulate human-like play at easy
-        if (difficulty === 'easy' && Math.random() < 0.3) {
-            const nonJump = allMoves.filter(m => !m.isJump);
-            if (nonJump.length > 0) {
-                bestMove = nonJump[Math.floor(Math.random() * nonJump.length)];
-            }
+        const mistakeChance = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.12 : 0.04;
+        if (Math.random() < mistakeChance && allMoves.length > 1) {
+            const candidates = allMoves.filter(m => m !== bestMove);
+            bestMove = candidates[Math.floor(Math.random() * candidates.length)] || bestMove;
         }
 
         return {

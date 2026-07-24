@@ -72,7 +72,7 @@ import { validateChessMove } from './server/chessLogic.js';
 import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWinner, createInitialState as ticTacToeInitialState, isBoardFull as isTicTacToeBoardFull } from './server/tictactoeLogic.js';
 import { createInitialState as ludoInitialState, validateMove as validateLudoMove, canMove as canLudoMove, checkWinner as checkLudoWinner, isPathBlocked as isLudoPathBlocked } from './server/ludoLogic.js';
 import { createInitialState as diceInitialState, validateRoll as validateDiceRoll, updateScore as updateDiceScore, checkWinner as checkDiceWinner, isRoundComplete as isDiceRoundComplete } from './server/diceLogic.js';
-import { getValidMoveSequences } from './server/checkersLogic.js';
+import { createDrawState as createCheckersDrawState, getValidMoveSequences, getCheckersDrawReason, updateCheckersDrawState } from './server/checkersLogic.js';
 import { validateWithdrawalRequest } from './server/withdrawalLogic.js';
 import { calculateBotMove, calculateBotMoveAsync } from './server/ai/botEngine.js';
 import { initStockfish, shutdownStockfish } from './server/ai/stockfishEngine.js';
@@ -3737,6 +3737,7 @@ function processBotAction(roomId, botId, action) {
 
         if (gameType === 'Checkers' && action.type === 'MOVE') {
             const pieces = room.gameState.pieces || [];
+            const previousPieces = pieces.map(p => ({ ...p }));
             const isPlayer1 = room.players[0] === botId;
             const forwardDir = isPlayer1 ? -1 : 1;
             
@@ -3789,6 +3790,21 @@ function processBotAction(roomId, botId, action) {
             const nextTurn = hasMoreJumps ? botId : room.players.find(id => id !== botId);
             room.turn = nextTurn;
             room.gameState.turn = nextTurn;
+            if (!hasMoreJumps) {
+                room.gameState.drawState = updateCheckersDrawState(
+                    previousPieces,
+                    pieces,
+                    nextTurn,
+                    { fromR: action.fromR, fromC: action.fromC, toR: action.toR, toC: action.toC, isJump: !!validMove.isJump },
+                    room.gameState.drawState
+                );
+                const drawReason = getCheckersDrawReason(room.gameState.drawState);
+                if (drawReason) {
+                    io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                    endGame(roomId, null, drawReason);
+                    return;
+                }
+            }
             emitGameUpdate(roomId, room);
             
             if (hasMoreJumps) {
@@ -4030,7 +4046,8 @@ case 'Ludo':
                         ).filter(Boolean)
                     ).flat()
                 ],
-                turn: p1
+                turn: p1,
+                drawState: createCheckersDrawState()
             };
 case 'Chess':
             return {
@@ -5071,6 +5088,7 @@ io.on('connection', (socket) => {
                 }
 
                 // 3. Apply the move
+                const previousPieces = pieces.map(p => ({ ...p }));
                 let updatedPieces = pieces.map(p => ({ ...p }));
                 
                 if (validMove.isJump) {
@@ -5120,6 +5138,21 @@ io.on('connection', (socket) => {
                 const nextTurn = hasMoreJumps ? userId : opponentId;
                 room.turn = nextTurn;
                 room.gameState.turn = nextTurn;
+                if (!hasMoreJumps) {
+                    room.gameState.drawState = updateCheckersDrawState(
+                        previousPieces,
+                        updatedPieces,
+                        nextTurn,
+                        { fromR, fromC, toR, toC, isJump: !!validMove.isJump },
+                        room.gameState.drawState
+                    );
+                    const drawReason = getCheckersDrawReason(room.gameState.drawState);
+                    if (drawReason) {
+                        io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
+                        endGame(roomId, null, drawReason);
+                        return;
+                    }
+                }
                 emitGameUpdate(roomId, room);
                 // [Step 2.1] Persist Checkers state after every move for crash-restart resilience
                 persistRoomToFirestore(roomId, room);

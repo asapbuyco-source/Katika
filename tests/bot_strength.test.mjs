@@ -39,25 +39,28 @@ async function run() {
 
 // ─── Test: Skill Level Mapping (always max strength) ───
 
-test('All difficulties return max strength (18-20)', async () => {
-    if (mapEloToSkillLevel(500, 'easy') !== 18) throw new Error(`Expected 18 for easy`);
-    if (mapEloToSkillLevel(1000, 'medium') !== 19) throw new Error(`Expected 19 for medium`);
-    if (mapEloToSkillLevel(2000, 'hard') !== 20) throw new Error(`Expected 20 for hard`);
+test('Difficulties map to fair human-friendly strength bands', async () => {
+    if (mapEloToSkillLevel(500, 'easy') !== 3) throw new Error(`Expected 3 for easy beginner`);
+    if (mapEloToSkillLevel(1000, 'medium') !== 8) throw new Error(`Expected 8 for medium 1000 Elo`);
+    if (mapEloToSkillLevel(2000, 'hard') !== 16) throw new Error(`Expected 16 for hard strong player`);
 });
 
-test('Skill level is constant regardless of ELO', async () => {
+test('Skill level scales gently with ELO', async () => {
     for (const diff of ['easy', 'medium', 'hard']) {
         const lvl1 = mapEloToSkillLevel(500, diff);
         const lvl2 = mapEloToSkillLevel(2500, diff);
-        if (lvl1 !== lvl2) throw new Error(`${diff}: ELO should not affect skill (got ${lvl1} vs ${lvl2})`);
+        if (lvl2 < lvl1) throw new Error(`${diff}: higher ELO should not reduce skill (got ${lvl1} vs ${lvl2})`);
     }
 });
 
-test('Easy=18, Medium=19, Hard=20 across all ELOs', async () => {
+test('Skill bands stay inside intended limits', async () => {
     for (const elo of [500, 1000, 1500, 2000, 2500]) {
-        if (mapEloToSkillLevel(elo, 'easy') !== 18) throw new Error(`Easy ELO ${elo}: expected 18`);
-        if (mapEloToSkillLevel(elo, 'medium') !== 19) throw new Error(`Medium ELO ${elo}: expected 19`);
-        if (mapEloToSkillLevel(elo, 'hard') !== 20) throw new Error(`Hard ELO ${elo}: expected 20`);
+        const easy = mapEloToSkillLevel(elo, 'easy');
+        const medium = mapEloToSkillLevel(elo, 'medium');
+        const hard = mapEloToSkillLevel(elo, 'hard');
+        if (easy < 3 || easy > 8) throw new Error(`Easy ELO ${elo}: out of range ${easy}`);
+        if (medium < 7 || medium > 13) throw new Error(`Medium ELO ${elo}: out of range ${medium}`);
+        if (hard < 11 || hard > 17) throw new Error(`Hard ELO ${elo}: out of range ${hard}`);
     }
 });
 
