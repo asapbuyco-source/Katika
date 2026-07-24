@@ -8,12 +8,14 @@
  */
 
 import initEngine from 'stockfish';
+import { Chess } from 'chess.js';
 
 let engine = null;
 let engineReady = false;
 const requestQueue = [];
 let processing = false;
 let currentResolve = null;
+let currentTimeout = null;
 
 /**
  * Initialize the Stockfish engine. Call once at server startup.
@@ -61,12 +63,26 @@ function handleEngineOutput(line) {
         engineReady = true;
         return;
     }
+
+    if (line.startsWith('bestmove ') && !currentResolve && processing) {
+        if (currentTimeout) {
+            clearTimeout(currentTimeout);
+            currentTimeout = null;
+        }
+        processing = false;
+        processQueue();
+        return;
+    }
     
     if (line.startsWith('bestmove ') && currentResolve) {
         const parts = line.split(' ');
         const bestMove = parts[1];
         const resolve = currentResolve;
         currentResolve = null;
+        if (currentTimeout) {
+            clearTimeout(currentTimeout);
+            currentTimeout = null;
+        }
         processing = false;
         
         if (bestMove && bestMove !== '(none)') {
@@ -87,11 +103,25 @@ function processQueue() {
     processing = true;
     const { fen, skillLevel, resolve } = requestQueue.shift();
     currentResolve = resolve;
+
+    currentTimeout = setTimeout(() => {
+        const timedOutResolve = currentResolve;
+        currentResolve = null;
+        currentTimeout = null;
+        try { engine?.sendCommand('stop'); } catch (_) {}
+        if (timedOutResolve) timedOutResolve(null);
+        setTimeout(() => {
+            if (processing && !currentResolve) {
+                processing = false;
+                processQueue();
+            }
+        }, 1000);
+    }, 6000);
     
     engine.sendCommand('ucinewgame');
     engine.sendCommand(`position fen ${fen}`);
     engine.sendCommand(`setoption name Skill Level value ${skillLevel}`);
-    engine.sendCommand('go depth 20 movetime 4000');
+    engine.sendCommand('go depth 20 movetime 3500');
 }
 
 /**
@@ -104,10 +134,14 @@ export function getStockfishMove(fen, skillLevel) {
     if (!engine || !engineReady) {
         throw new Error('Stockfish engine not initialized');
     }
+
+    const chess = new Chess(fen);
     
     const clampedSkill = Math.max(0, Math.min(20, Math.round(skillLevel)));
     
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
+        
+        /*
         const timeout = setTimeout(() => {
             // Stockfish didn't respond — remove our resolve from the queue
             if (currentResolve) {
@@ -117,10 +151,28 @@ export function getStockfishMove(fen, skillLevel) {
             }
             resolve(null);
         }, 5000);
+        */
         
         const wrappedResolve = (result) => {
-            clearTimeout(timeout);
-            resolve(result);
+            if (!result) {
+                resolve(null);
+                return;
+            }
+
+            try {
+                const legalMove = chess.move(result);
+                if (!legalMove) {
+                    resolve(null);
+                    return;
+                }
+                resolve({
+                    from: legalMove.from,
+                    to: legalMove.to,
+                    promotion: legalMove.promotion || undefined
+                });
+            } catch (_) {
+                resolve(null);
+            }
         };
         
         requestQueue.push({ fen, skillLevel: clampedSkill, resolve: wrappedResolve });
@@ -147,5 +199,10 @@ export function shutdownStockfish() {
         try { engine.sendCommand('quit'); } catch (_) {}
         engine = null;
         engineReady = false;
+        if (currentTimeout) clearTimeout(currentTimeout);
+        currentTimeout = null;
+        currentResolve = null;
+        requestQueue.length = 0;
+        processing = false;
     }
 }

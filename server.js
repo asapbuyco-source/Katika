@@ -3556,6 +3556,7 @@ function processBotAction(roomId, botId, action) {
             const dice1 = crypto.randomInt(1, 7);
             const dice2 = crypto.randomInt(1, 7);
             room.gameState.roundRolls = room.gameState.roundRolls || {};
+            if (room.gameState.roundRolls[botId]) return;
             room.gameState.roundRolls[botId] = [dice1, dice2];
             room.gameState.scores = room.gameState.scores || {};
 
@@ -3575,6 +3576,8 @@ function processBotAction(roomId, botId, action) {
                 io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
 
                 setTimeout(() => {
+                    const latestRoom = rooms.get(roomId);
+                    if (!latestRoom || latestRoom.status !== 'active') return;
                     const scores = room.gameState.scores || {};
                     if (scores[p1] >= 3 || scores[p2] >= 3) {
                         const winner = scores[p1] >= 3 ? p1 : p2;
@@ -3601,15 +3604,17 @@ function processBotAction(roomId, botId, action) {
             if (!validatedMove || !validatedMove.isValid) return;
             room.gameState.fen = validatedMove.newFen;
             room.gameState.lastMove = action.move;
-            room.gameState.lastMoveTime = Date.now();
+            const now = Date.now();
+            const lastMoveTime = room.gameState.lastMoveTime || now;
             if (!room.gameState.timers) {
                 room.gameState.timers = {
                     [room.players[0]]: 600,
                     [room.players[1]]: 600
                 };
             }
-            const elapsed = Math.round((Date.now() - (room.gameState.lastMoveTime || Date.now())) / 1000);
+            const elapsed = Math.round((now - lastMoveTime) / 1000);
             room.gameState.timers[botId] = Math.max(0, (room.gameState.timers[botId] || 600) - elapsed);
+            room.gameState.lastMoveTime = now;
             if (room.gameState.pgn) {
                 try {
                     const pgnGame = new Chess();
@@ -3696,6 +3701,7 @@ function processBotAction(roomId, botId, action) {
 
             movedPiece.r = action.toR;
             movedPiece.c = action.toC;
+            room.gameState.lastMove = { fromR: action.fromR, fromC: action.fromC, toR: action.toR, toC: action.toC, isJump: !!validMove.isJump, playerId: botId };
 
             const promotionRow = isPlayer1 ? 0 : 9;
             if (!movedPiece.isKing && action.toR === promotionRow) {
@@ -3716,6 +3722,7 @@ function processBotAction(roomId, botId, action) {
                 if (oppMoves.length === 0) {
                     const opponentPieces = pieces.filter(p => p.owner === oppId);
                     const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
+                    io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                     endGame(roomId, botId, reason);
                     return;
                 }
@@ -4930,6 +4937,9 @@ io.on('connection', (socket) => {
         // --- DICE LOGIC ---
         if (room.gameType === 'Dice' && action.type === 'ROLL') {
             if (room.turn !== userId) return;
+            room.gameState.roundRolls = room.gameState.roundRolls || {};
+            room.gameState.scores = room.gameState.scores || {};
+            if (room.gameState.roundRolls[userId]) return;
 
             const roll1 = crypto.randomInt(1, 7);
             const roll2 = crypto.randomInt(1, 7);
@@ -4942,16 +4952,20 @@ io.on('connection', (socket) => {
             const p2 = room.players[1];
             if (room.gameState.roundRolls[p1] && room.gameState.roundRolls[p2]) {
                 setTimeout(() => {
+                    const latestRoom = rooms.get(roomId);
+                    if (!latestRoom || latestRoom.status !== 'active') return;
                     const total1 = room.gameState.roundRolls[p1][0] + room.gameState.roundRolls[p1][1];
                     const total2 = room.gameState.roundRolls[p2][0] + room.gameState.roundRolls[p2][1];
 
-                    if (total1 > total2) room.gameState.scores[p1]++;
-                    else if (total2 > total1) room.gameState.scores[p2]++;
+                    if (total1 > total2) room.gameState.scores[p1] = (room.gameState.scores[p1] || 0) + 1;
+                    else if (total2 > total1) room.gameState.scores[p2] = (room.gameState.scores[p2] || 0) + 1;
 
                     room.gameState.roundState = 'scored';
                     emitGameUpdate(roomId, room);
 
                     setTimeout(() => {
+                        const latestRoom = rooms.get(roomId);
+                        if (!latestRoom || latestRoom.status !== 'active') return;
                         if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
                             const winner = room.gameState.scores[p1] >= 3 ? p1 : p2;
                             endGame(roomId, winner, 'Score Limit Reached');
@@ -5033,6 +5047,8 @@ io.on('connection', (socket) => {
                     if (oppMoves.length === 0) {
                         const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
                         room.gameState.pieces = updatedPieces;
+                        room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
+                        io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                         const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
                         endGame(roomId, userId, reason);
                         return;
@@ -5040,6 +5056,7 @@ io.on('connection', (socket) => {
                 }
 
                 room.gameState.pieces = updatedPieces;
+                room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
                 room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
                 // Write turn to BOTH room.turn (top-level) AND gameState.turn so clients
                 // reading either location receive the correct value.
@@ -5091,11 +5108,17 @@ io.on('connection', (socket) => {
                         if (clientGame.isCheckmate()) {
                             // The player whose turn it is AFTER the move is the one in checkmate (loser).
                             // The winner is the one who just moved (= userId).
+                            room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
+                            if (action.newState.turn && room.players.includes(action.newState.turn)) room.turn = action.newState.turn;
+                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                             endGame(roomId, userId, 'Checkmate');
                             return;
                         }
                         if (clientGame.isGameOver()) {
                             // Draw / stalemate: no winner. Staked games are refunded in endGame().
+                            room.gameState = { ...room.gameState, ...action.newState, lastMoveTime: Date.now() };
+                            if (action.newState.turn && room.players.includes(action.newState.turn)) room.turn = action.newState.turn;
+                            io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                             endGame(roomId, null, 'Draw');
                             return;
                         }

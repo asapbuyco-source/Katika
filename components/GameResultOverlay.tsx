@@ -19,6 +19,7 @@ interface GameResultOverlayProps {
     userBalance?: number;
     isTournament?: boolean; // New Prop
     tournamentPot?: number; // New Prop for Pot Display
+    onReview?: () => void;
 }
 
 export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
@@ -31,7 +32,8 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
     stake = 0,
     userBalance = 0,
     isTournament = false,
-    tournamentPot = 0
+    tournamentPot = 0,
+    onReview
 }) => {
     const [displayAmount, setDisplayAmount] = useState(0);
 
@@ -201,6 +203,15 @@ export const GameResultOverlay: React.FC<GameResultOverlayProps> = ({
 
                         {/* Actions */}
                         <div className="w-full space-y-3">
+                            {onReview && (
+                                <button
+                                    onClick={onReview}
+                                    className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 rounded-xl font-bold flex items-center justify-center gap-2 transition-all active:scale-95"
+                                >
+                                    Review Final Board
+                                </button>
+                            )}
+
                             {/* REMATCH BUTTON (Hidden if Tournament) */}
                             {onRematch && !isTournament && (
                                 <div className="w-full">

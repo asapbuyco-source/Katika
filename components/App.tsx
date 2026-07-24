@@ -437,6 +437,11 @@ const AppContent = () => {
     // Does NOT block navigation — it's a non-intrusive top badge.
     const [showConnectingBadge, setShowConnectingBadge] = React.useState(false);
     const badgeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [reviewingFinalBoard, setReviewingFinalBoard] = React.useState(false);
+
+    useEffect(() => {
+        setReviewingFinalBoard(false);
+    }, [gameResult]);
     useEffect(() => {
         if (!isConnected && !hasConnectedOnce && user && !bypassConnection) {
             badgeTimerRef.current = setTimeout(() => setShowConnectingBadge(true), 5000);
@@ -955,7 +960,15 @@ const AppContent = () => {
                 {user && !isConnected && hasConnectedOnce && currentView !== 'game' && (
                     <WeakNetworkBanner onReconnect={() => socket?.connect()} />
                 )}
-                {gameResult && (
+                {gameResult && reviewingFinalBoard && (
+                    <button
+                        onClick={() => setReviewingFinalBoard(false)}
+                        className="fixed bottom-5 left-1/2 -translate-x-1/2 z-[120] px-5 py-3 rounded-xl bg-gold-500 text-royal-950 font-bold shadow-lg shadow-gold-500/20 border border-gold-300"
+                    >
+                        Show Result
+                    </button>
+                )}
+                {gameResult && !reviewingFinalBoard && (
                     <GameResultOverlay
                         result={gameResult.result}
                         amount={gameResult.amount}
@@ -967,6 +980,7 @@ const AppContent = () => {
                         userBalance={user?.balance}
                         isTournament={!!activeGameTable?.tournamentMatchId}
                         tournamentPot={gameResult.tournamentPot}
+                        onReview={['Chess', 'Checkers'].includes(activeGameTable?.gameType || '') ? () => setReviewingFinalBoard(true) : undefined}
                     />
                 )}
                 {incomingChallenge && (

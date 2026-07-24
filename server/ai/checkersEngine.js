@@ -16,6 +16,13 @@ function clonePieces(pieces) {
 function getPlayerForward(playerId, pieces) {
     const myPieces = pieces.filter(p => p.owner === playerId && !p.captured && !p.removed);
     if (myPieces.length === 0) return 0;
+
+    // Server-created pieces keep their starting side in the id. Use that stable
+    // marker instead of current row position; row averages can flip mid-game.
+    const sidePiece = myPieces.find(p => typeof p.id === 'string' && /^(p1|p2)-/.test(p.id));
+    if (sidePiece?.id?.startsWith('p1-')) return -1;
+    if (sidePiece?.id?.startsWith('p2-')) return 1;
+
     const avgRow = myPieces.reduce((s, p) => s + p.r, 0) / myPieces.length;
     return avgRow < 5 ? 1 : -1;
 }

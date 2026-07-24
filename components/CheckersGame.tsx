@@ -282,6 +282,28 @@ export const CheckersGame: React.FC<CheckersGameProps> = ({ table, user, onGameE
                 setMustJumpFrom(socketGame.gameState.mustJumpFrom);
             }
 
+            const serverLastMove = socketGame.gameState?.lastMove;
+            if (serverLastMove) {
+                const from = `${serverLastMove.fromR},${serverLastMove.fromC}`;
+                const to = `${serverLastMove.toR},${serverLastMove.toC}`;
+                setLastMove({ from, to });
+                setMoveHistory(prev => {
+                    if (prev.some(move => move.from === from && move.to === to)) return prev;
+                    const fromNotation = toNotation(serverLastMove.fromR, serverLastMove.fromC);
+                    const toNotationStr = toNotation(serverLastMove.toR, serverLastMove.toC);
+                    const notation = serverLastMove.isJump ? `${fromNotation}x${toNotationStr}` : `${fromNotation}-${toNotationStr}`;
+                    return [
+                        ...prev,
+                        {
+                            from,
+                            to,
+                            notation,
+                            player: serverLastMove.playerId === user.id ? 'me' : 'opponent'
+                        }
+                    ];
+                });
+            }
+
             // FIX: Only trigger game-end when status is definitively 'completed'.
             // Previously used `socketGame.winner !== undefined` which is true for
             // `null` — and every game_update carries winner:null for active games

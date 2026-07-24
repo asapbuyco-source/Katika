@@ -69,12 +69,15 @@ function getTicTacToeMove(gameState, difficulty, botId) {
 }
 
 async function getChessMoveAsync(gameState, difficulty, botId, userElo) {
+    const fen = gameState?.fen;
     try {
-        const fen = gameState.fen;
         if (!fen) return null;
         const skillLevel = mapEloToSkillLevel(userElo, difficulty);
         const move = await getStockfishMove(fen, skillLevel);
-        if (!move) return null;
+        if (!move) {
+            const fallback = getStockfishLevelMove(fen, difficulty, userElo);
+            return fallback ? { type: 'MOVE', move: fallback } : null;
+        }
         return {
             type: 'MOVE',
             move: {
@@ -85,10 +88,9 @@ async function getChessMoveAsync(gameState, difficulty, botId, userElo) {
         };
     } catch (e) {
         console.error('[BotEngine/Chess] Stockfish error, falling back to minimax:', e.message);
-        // Fall back to synchronous minimax
-        return getStockfishLevelMove(fen, difficulty, userElo)
-            ? { type: 'MOVE', move: getStockfishLevelMove(fen, difficulty, userElo) }
-            : null;
+        if (!fen) return null;
+        const fallback = getStockfishLevelMove(fen, difficulty, userElo);
+        return fallback ? { type: 'MOVE', move: fallback } : null;
     }
 }
 
@@ -149,5 +151,4 @@ function getCheckersMove(gameState, difficulty, botId, userElo) {
         return null;
     }
 }
-
 
