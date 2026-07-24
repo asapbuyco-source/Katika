@@ -1,6 +1,7 @@
 import express from 'express';
 import { Chess } from 'chess.js';
-import { createServer } from 'http';
+import { createServer, request as httpRequest } from 'http';
+import { request as httpsRequest } from 'https';
 import { readFileSync } from 'fs';
 import { Server } from 'socket.io';
 import cors from 'cors';
@@ -10,6 +11,62 @@ import helmet from 'helmet';
 import admin from 'firebase-admin';
 import crypto from 'crypto';
 import DOMPurify from 'isomorphic-dompurify';
+
+const serverFetch = async (url, options = {}) => {
+    if (typeof globalThis.fetch === 'function') {
+        return globalThis.fetch(url, options);
+    }
+
+    return new Promise((resolve, reject) => {
+        const target = new URL(url);
+        const transport = target.protocol === 'https:' ? httpsRequest : httpRequest;
+        const req = transport({
+            protocol: target.protocol,
+            hostname: target.hostname,
+            port: target.port || undefined,
+            path: `${target.pathname}${target.search}`,
+            method: options.method || 'GET',
+            headers: options.headers || {}
+        }, (res) => {
+            const chunks = [];
+            res.on('data', chunk => chunks.push(chunk));
+            res.on('end', () => {
+                const body = Buffer.concat(chunks).toString('utf8');
+                resolve({
+                    ok: res.statusCode >= 200 && res.statusCode < 300,
+                    status: res.statusCode,
+                    headers: {
+                        get: (name) => res.headers[String(name).toLowerCase()] || null
+                    },
+                    text: async () => body,
+                    json: async () => body ? JSON.parse(body) : {}
+                });
+            });
+        });
+
+        req.on('error', reject);
+        req.setTimeout(options.timeoutMs || 15000, () => {
+            const err = new Error('Request timed out');
+            err.name = 'AbortError';
+            req.destroy(err);
+        });
+        if (options.signal) {
+            if (options.signal.aborted) {
+                const err = new Error('Request aborted');
+                err.name = 'AbortError';
+                req.destroy(err);
+            } else {
+                options.signal.addEventListener('abort', () => {
+                    const err = new Error('Request aborted');
+                    err.name = 'AbortError';
+                    req.destroy(err);
+                }, { once: true });
+            }
+        }
+        if (options.body) req.write(options.body);
+        req.end();
+    });
+};
 
 import { validateChessMove } from './server/chessLogic.js';
 import { validateMove as validateTicTacToeMove, checkWinner as checkTicTacToeWinner, createInitialState as ticTacToeInitialState, isBoardFull as isTicTacToeBoardFull } from './server/tictactoeLogic.js';
@@ -123,7 +180,7 @@ const sendTelegramAdminAlert = async (message) => {
         return false;
     }
     try {
-        const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
+        const response = await serverFetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -754,7 +811,7 @@ app.get('/health', (_req, res) => {
     const deps = { firestore: 'ok', fapshi: 'ok' };
     if (!db) deps.firestore = 'unavailable';
     db?.collection('_health_check').doc('ping').get().catch(() => { deps.firestore = 'degraded'; });
-    fetch(`${FAPSHI_BASE_URL}/health-check`, { signal: AbortSignal.timeout(3000) })
+    serverFetch(`${FAPSHI_BASE_URL}/health-check`, { timeoutMs: 3000 })
         .catch(() => { deps.fapshi = 'unreachable'; });
     res.json({
         status: misconfiguredSocketAuth ? 'degraded' : 'ok',
@@ -816,7 +873,7 @@ app.post('/api/pay/initiate', verifyAuth, blockGuests, async (req, res) => {
         const timeout = setTimeout(() => controller.abort(), 15000);
         let response;
         try {
-            response = await fetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
+            response = await serverFetch(`${FAPSHI_BASE_URL}/initiate-pay`, {
                 method: 'POST',
                 headers: {
                     'apiuser': FAPSHI_USER_TOKEN,
@@ -894,7 +951,7 @@ app.post('/api/pay/webhook', async (req, res) => {
         const verifyTimeout = setTimeout(() => verifyController.abort(), 15000);
         let verifyRes;
         try {
-            verifyRes = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+            verifyRes = await serverFetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
                 headers: { 'apiuser': FAPSHI_USER_TOKEN, 'apikey': FAPSHI_API_KEY },
                 signal: verifyController.signal
             });
@@ -1149,7 +1206,7 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
         const payoutTimeout = setTimeout(() => payoutController.abort(), 15000);
         let fapshiRes;
         try {
-            fapshiRes = await fetch(`${FAPSHI_BASE_URL}/payout`, {
+            fapshiRes = await serverFetch(`${FAPSHI_BASE_URL}/payout`, {
                 method: 'POST',
                 headers: { 'apiuser': FAPSHI_PAYOUT_USER_TOKEN, 'apikey': FAPSHI_PAYOUT_API_KEY, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ amount, phone: cleanPhone, userId, message: `Katika withdrawal for ${cleanMomoName}` }),
@@ -2239,7 +2296,7 @@ app.get('/api/pay/status/:transId', verifyAuth, async (req, res) => {
         const statusTimeout = setTimeout(() => statusController.abort(), 15000);
         let response;
         try {
-            response = await fetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
+            response = await serverFetch(`${FAPSHI_BASE_URL}/payment-status/${transId}`, {
                 headers: {
                     'apiuser': FAPSHI_USER_TOKEN,
                     'apikey': FAPSHI_API_KEY
