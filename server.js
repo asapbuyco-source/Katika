@@ -1137,11 +1137,17 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
 
         const { amount, cleanPhone, cleanMomoName, userId } = validation;
 
-        // Block withdrawals for accounts flagged for suspicious activity
+        // Block withdrawals for accounts flagged for suspicious activity OR anomalous win rate
         const userRef = db.collection('users').doc(userId);
         const userSnap = await userRef.get();
         if (userSnap.exists && userSnap.data().suspiciousActivity) {
             return res.status(403).json({ error: 'Account under review. Withdrawals are temporarily disabled. Contact support.' });
+        }
+        // Also check flagged_users collection
+        const flaggedSnap = await db.collection('flagged_users').doc(userId).get();
+        if (flaggedSnap.exists) {
+            const reason = flaggedSnap.data().reason || 'suspicious activity';
+            return res.status(403).json({ error: `Account flagged for ${reason}. Withdrawals are temporarily disabled. Contact support.` });
         }
 
         const pendingTxRef = userRef.collection('transactions').doc();
@@ -2555,7 +2561,22 @@ const settleGame = async (roomId, winnerId) => {
                         tx.update(hostRef, {
                             balance: (hostSnap.data().balance || 0) + winnings,
                         });
-                        if (winnings > 0) {
+                // Checkers engine detection: suspicious if consistently makes jumps
+                // (high-skill) or never misses a capture opportunity
+                if (isCheckers && room.gameState?._evalSnapshots?.length >= 8) {
+                    const snaps = room.gameState._evalSnapshots;
+                    const playerSnaps = snaps.filter(s => s.player === winnerId);
+                    if (playerSnaps.length >= 6) {
+                        const jumpRate = playerSnaps.filter(s => s.wasJump).length / playerSnaps.length;
+                        const avgCaptures = playerSnaps.reduce((s, snap) => s + (snap.piecesCaptured || 0), 0) / playerSnaps.length;
+                        // Engine users: high jump rate + high capture rate
+                        if (jumpRate > 0.6 && avgCaptures > 0.8) {
+                            tx.update(winnerRef, { suspiciousActivity: true, susReason: 'checkers_engine_quality' });
+                            console.warn(`[AntiCheat] ${winnerId}: suspicious checkers play (jumpRate=${(jumpRate*100).toFixed(0)}%, avgCaptures=${avgCaptures.toFixed(1)})`);
+                        }
+                    }
+                }
+                if (winnings > 0) {
                             tx.set(hostRef.collection('transactions').doc(), {
                                 type: 'bot_winnings', amount: winnings, status: 'completed',
                                 date: new Date().toISOString(), timestamp: admin.firestore.FieldValue.serverTimestamp(),
@@ -5227,8 +5248,21 @@ io.on('connection', (socket) => {
                     
                     if (oppMoves.length === 0) {
                         const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
-                        room.gameState.pieces = updatedPieces;
-                        room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
+                room.gameState.pieces = updatedPieces;
+                room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
+
+                // Checkers move-quality tracking (anti-cheat)
+                room.gameState._evalSnapshots = room.gameState._evalSnapshots || [];
+                const beforeCount = previousPieces.filter(p => p.owner !== userId && !p.captured && !p.removed).length;
+                const afterCount = updatedPieces.filter(p => p.owner !== userId && !p.captured && !p.removed).length;
+                const piecesCaptured = beforeCount - afterCount; // positive = captured opponent pieces
+                room.gameState._evalSnapshots.push({
+                    player: userId,
+                    piecesCaptured,
+                    wasJump: !!validMove.isJump,
+                    timeSpentSec: Math.round((Date.now() - (room.gameState.lastMoveTime || Date.now())) / 1000)
+                });
+                if (room.gameState._evalSnapshots.length > 40) room.gameState._evalSnapshots.shift();
                         io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
                         const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
                         endGame(roomId, userId, reason);
@@ -5273,6 +5307,7 @@ io.on('connection', (socket) => {
             // =====================================================================
 
             if (action.newState) {
+                let chessMoveElapsedSec = null;
                 // --- Bug C fix: Server-side chess move validation ---
                 // Prevents clients from sending forged PGN/FEN to cheat.
                 if (room.gameType === 'Chess' && action.newState.pgn !== undefined) {
@@ -5329,6 +5364,7 @@ io.on('connection', (socket) => {
                     const now = Date.now();
                     const lastMove = room.gameState.lastMoveTime || now;
                     const elapsedSec = Math.round((now - lastMove) / 1000);
+                    chessMoveElapsedSec = elapsedSec;
 
                     if (!room.gameState.timers) {
                         room.gameState.timers = {
@@ -5361,13 +5397,16 @@ io.on('connection', (socket) => {
                         if (beforeFen && afterFen) {
                             const beforeMat = getMaterialCount(beforeFen);
                             const afterMat = getMaterialCount(afterFen);
-                            // Positive = gained material, Negative = lost material
-                            const materialDelta = (afterMat - beforeMat) / 100; // normalize to pawns
+                            const rawDelta = (afterMat - beforeMat) / 100; // white perspective, normalized to pawns
+                            const moverColor = beforeFen.split(' ')[1] === 'b' ? 'black' : 'white';
+                            const materialDelta = moverColor === 'white' ? rawDelta : -rawDelta;
                             room.gameState._evalSnapshots.push({
                                 player: userId,
+                                color: moverColor,
                                 before: beforeMat,
                                 after: afterMat,
-                                delta: materialDelta
+                                delta: materialDelta,
+                                timeSpentSec: chessMoveElapsedSec
                             });
                             if (room.gameState._evalSnapshots.length > 40) room.gameState._evalSnapshots.shift();
                         }
