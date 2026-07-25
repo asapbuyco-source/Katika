@@ -101,11 +101,20 @@ const HOST_LAST_NAMES = [
 function generateRandomHostProfile() {
     const firstName = HOST_FIRST_NAMES[Math.floor(Math.random() * HOST_FIRST_NAMES.length)];
     const lastName = HOST_LAST_NAMES[Math.floor(Math.random() * HOST_LAST_NAMES.length)];
-    const seed = Math.random().toString(36).substring(2, 10);
+    const name = `${firstName} ${lastName.charAt(0)}.`;
+    const initials = (firstName.charAt(0) + lastName.charAt(0)).toUpperCase();
+    const hue = (firstName.length * 37 + lastName.length * 53) % 360;
+    const bg = `hsl(${hue}, 55%, 45%)`;
+    const fg = `hsl(${hue}, 70%, 90%)`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100">
+        <rect width="100" height="100" fill="${bg}"/>
+        <text x="50" y="62" text-anchor="middle" font-family="Arial,sans-serif" font-size="38" font-weight="bold" fill="${fg}">${initials}</text>
+    </svg>`;
+    const avatar = `data:image/svg+xml,${encodeURIComponent(svg)}`;
     return {
         id: 'katika_host_account',
-        name: `${firstName} ${lastName.charAt(0)}.`,
-        avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${seed}`,
+        name,
+        avatar,
         elo: 1000,
         rankTier: 'Gold',
         isBot: true
@@ -114,6 +123,24 @@ function generateRandomHostProfile() {
 
 // NOTE: sequence is now per-room (room.sequence) to prevent false gap-detection
 // resyncs when multiple games share the same server-wide counter. (Audit fix)
+
+// --- Anti-cheat: material evaluation helper ---
+// Returns total material value (pawns=100, knights/bishops=300, rooks=500, queen=900)
+// from a FEN string. Positive = white advantage, negative = black advantage.
+const PIECE_VALUES_AC = { p: 100, n: 300, b: 300, r: 500, q: 900, k: 0 };
+function getMaterialCount(fen) {
+    let count = 0;
+    const boardPart = fen.split(' ')[0];
+    for (const ch of boardPart) {
+        if (ch === '/') continue;
+        if (ch >= '1' && ch <= '8') continue;
+        const isWhite = ch === ch.toUpperCase();
+        const piece = ch.toLowerCase();
+        const val = PIECE_VALUES_AC[piece] || 0;
+        count += isWhite ? val : -val;
+    }
+    return count;
+}
 
 const sanitizeRoomForClient = (room, roomId) => {
     // AUDIT FIX: Increment sequence explicitly BEFORE projection so this function
@@ -513,7 +540,7 @@ io.use(async (socket, next) => {
     }
 
     // INTERNAL BOT BYPASS
-    if (token === (process.env.INTERNAL_BOT_SECRET || 'KATIKA_INTERNAL_BOT_SECURE_BYPASS_992')) {
+    if (process.env.INTERNAL_BOT_SECRET && token === process.env.INTERNAL_BOT_SECRET) {
         socket.user = { uid: 'katika_host_account', isBot: true };
         console.log(`[Auth] Local bot connected as Katika Host.`);
         return next();
@@ -1109,7 +1136,14 @@ app.post('/api/pay/disburse', verifyAuth, blockGuests, async (req, res) => {
             return res.status(503).json({ error: 'Database unavailable' });
 
         const { amount, cleanPhone, cleanMomoName, userId } = validation;
+
+        // Block withdrawals for accounts flagged for suspicious activity
         const userRef = db.collection('users').doc(userId);
+        const userSnap = await userRef.get();
+        if (userSnap.exists && userSnap.data().suspiciousActivity) {
+            return res.status(403).json({ error: 'Account under review. Withdrawals are temporarily disabled. Contact support.' });
+        }
+
         const pendingTxRef = userRef.collection('transactions').doc();
         const withdrawalRequestRef = db.collection('withdrawal_requests').doc(pendingTxRef.id);
         const isManualPayout = PAYOUT_MODE !== 'automatic';
@@ -2393,14 +2427,16 @@ const settleGame = async (roomId, winnerId) => {
 
                     // Anti-streak: consecutive wins multiply ELO gain, losses barely drop it
                     const streak = d.consecutiveBotWins || 0;
+                    const lossStreak = d.consecutiveLosses || 0;
                     let K;
                     if (humanWon) {
-                        // Win streak multiplier — 3rd win nearly impossible
-                        if (streak >= 2) K = 256;        // 3rd+ consecutive win → massive ELO jump
-                        else if (streak === 1) K = 128;  // 2nd consecutive win → big jump
-                        else K = 48;                      // 1st win → solid gain
+                        if (streak >= 2) K = 256;
+                        else if (streak === 1) K = 128;
+                        else K = 48;
                     } else {
-                        K = 10; // Loss → tiny ELO drop, bot stays strong
+                        if (lossStreak >= 3) K = 64;
+                        else if (lossStreak >= 1) K = 40;
+                        else K = 24;
                     }
 
                     const botElo = 1000;
@@ -2411,7 +2447,8 @@ const settleGame = async (roomId, winnerId) => {
                     const update = {
                         gamesPlayed: (d.gamesPlayed || 0) + 1,
                         mostPlayedGame: d.mostPlayedGame || gameType,
-                        consecutiveBotWins: humanWon ? streak + 1 : 0
+                        consecutiveBotWins: humanWon ? streak + 1 : 0,
+                        consecutiveLosses: humanWon ? 0 : lossStreak + 1
                     };
                     if (humanWon) update.winCount = (d.winCount || 0) + 1;
                     if (isChess) update.chessElo = humanElo + delta;
@@ -2458,13 +2495,16 @@ const settleGame = async (roomId, winnerId) => {
 
                 // Anti-streak: consecutive wins massively boost ELO, losses barely drop it
                 const streak = humanData.consecutiveBotWins || 0;
+                const lossStreak = humanData.consecutiveLosses || 0;
                 let K;
                 if (humanWon) {
                     if (streak >= 2) K = 256;
                     else if (streak === 1) K = 128;
                     else K = 48;
                 } else {
-                    K = 10;
+                    if (lossStreak >= 3) K = 64;
+                    else if (lossStreak >= 1) K = 40;
+                    else K = 24;
                 }
 
                 const humanElo = isChess ? (humanData.chessElo || 1000)
@@ -2477,7 +2517,8 @@ const settleGame = async (roomId, winnerId) => {
                 const humanUpdate = {
                     gamesPlayed: (humanData.gamesPlayed || 0) + 1,
                     mostPlayedGame: humanData.mostPlayedGame || gameType,
-                    consecutiveBotWins: humanWon ? streak + 1 : 0
+                    consecutiveBotWins: humanWon ? streak + 1 : 0,
+                    consecutiveLosses: humanWon ? 0 : lossStreak + 1
                 };
 
                 if (humanWon) {
@@ -2556,10 +2597,31 @@ const settleGame = async (roomId, winnerId) => {
             ]);
 
             // ELO update — per-game ratings for Chess and Checkers
-            const K = 32;
+            // Dynamic K-factor: blowout games get bigger ELO swings
+            let K = 32;
             const gameType = room.gameType;
             const isChess = gameType === 'Chess';
             const isCheckers = gameType === 'Checkers';
+
+            // Chess: count moves from PGN. Very short game = blowout, amplify K.
+            if (isChess && room.gameState?.pgn) {
+                try {
+                    const moveCount = (room.gameState.pgn.match(/\d+\./g) || []).length;
+                    if (moveCount <= 10) K = 96;       // checkmate in < 10 moves → massive swing
+                    else if (moveCount <= 20) K = 64;  // quick win → big swing
+                    else if (moveCount <= 30) K = 48;  // moderate game → noticeable swing
+                } catch (_) {}
+            }
+            // Checkers: count opponent pieces remaining. Near-wipeout = bigger swing.
+            if (isCheckers && room.gameState?.pieces) {
+                const loserId = room.players.find(id => id !== winnerId);
+                const loserPiecesLeft = (room.gameState.pieces || []).filter(
+                    p => p.owner === loserId && !p.captured && !p.removed
+                ).length;
+                if (loserPiecesLeft <= 2) K = 96;       // nearly wiped — massive swing
+                else if (loserPiecesLeft <= 5) K = 64;  // dominated — big swing
+                else if (loserPiecesLeft <= 8) K = 48;  // clear win — noticeable
+            }
 
             const wData = winnerDoc.exists ? winnerDoc.data() : null;
             const lData = loserDoc.exists ? loserDoc.data() : null;
@@ -2598,6 +2660,27 @@ const settleGame = async (roomId, winnerId) => {
             if (winnerDoc.exists) {
                 const wData = winnerDoc.data();
                 tx.update(winnerRef, winnerUpdate);
+
+                // Engine detection: check move quality via material analysis
+                if (isChess && room.gameState?._evalSnapshots?.length >= 12) {
+                    const snaps = room.gameState._evalSnapshots;
+                    const playerSnaps = snaps.filter(s => s.player === winnerId);
+                    if (playerSnaps.length >= 8) {
+                        let materialBlunders = 0;
+                        let totalMoves = playerSnaps.length;
+                        for (const s of playerSnaps) {
+                            // A "blunder" = lost more than 1 pawn worth of material in a move
+                            if (s.delta < -1.0) materialBlunders++;
+                        }
+                        const blunderRate = materialBlunders / totalMoves;
+                        // Humans blunder ~15-25% of moves. Engine users blunder < 5%.
+                        // Perfect play over many moves is impossible for humans.
+                        if (blunderRate < 0.05 && totalMoves >= 10) {
+                            tx.update(winnerRef, { suspiciousActivity: true, susReason: 'engine_move_quality' });
+                            console.warn(`[AntiCheat] ${winnerId}: suspicious material play (${materialBlunders}/${totalMoves} blunders = ${(blunderRate*100).toFixed(1)}%)`);
+                        }
+                    }
+                }
                 if (winnings > 0) {
                     tx.set(winnerRef.collection('transactions').doc(), {
                         type: 'winnings', amount: winnings, status: 'completed',
@@ -3665,12 +3748,12 @@ function processBotAction(roomId, botId, action) {
             const lastMoveTime = room.gameState.lastMoveTime || now;
             if (!room.gameState.timers) {
                 room.gameState.timers = {
-                    [room.players[0]]: 600,
-                    [room.players[1]]: 600
+                    [room.players[0]]: 900,
+                    [room.players[1]]: 900
                 };
             }
             const elapsed = Math.round((now - lastMoveTime) / 1000);
-            room.gameState.timers[botId] = Math.max(0, (room.gameState.timers[botId] || 600) - elapsed);
+            room.gameState.timers[botId] = Math.max(0, (room.gameState.timers[botId] || 900) - elapsed);
             room.gameState.lastMoveTime = now;
             if (room.gameState.pgn) {
                 try {
@@ -4000,7 +4083,7 @@ const createInitialGameState = (gameType, p1, p2) => {
     const common = {
         startTime: Date.now(),
         lastMoveTime: Date.now(),
-        timers: { [p1]: 600, [p2]: 600 }, // 10 mins default
+        timers: { [p1]: 900, [p2]: 900 }, // 15 mins default
     };
 
     switch (gameType) {
@@ -4033,7 +4116,7 @@ case 'Ludo':
         case 'Checkers':
             return {
                 ...common,
-                timers: { [p1]: 120, [p2]: 120 },
+                timers: { [p1]: 600, [p2]: 600 },
                 pieces: [
                     ...Array.from({ length: 4 }, (_, r) =>
                         Array.from({ length: 10 }, (_, c) =>
@@ -4052,7 +4135,7 @@ case 'Ludo':
 case 'Chess':
             return {
                 ...common,
-                timers: { [p1]: 120, [p2]: 120 },
+                timers: { [p1]: 900, [p2]: 900 },
                 fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
                 pgn: '',
                 turn: p1
@@ -4182,7 +4265,8 @@ io.on('connection', (socket) => {
             rematchStreak: 0,
             matchSequence: 0
         };
-        room.gameState.difficulty = difficulty || 'medium';
+        const userElo = userData.elo || 1000;
+        room.gameState.difficulty = difficulty || (userElo < 1000 ? 'easy' : userElo < 1400 ? 'medium' : 'hard');
         rooms.set(roomId, room);
         persistRoomToFirestore(roomId, room);
         socket.join(roomId);
@@ -4513,13 +4597,33 @@ io.on('connection', (socket) => {
         if (existingIdx > -1) queue.splice(existingIdx, 1);
 
         if (queue.length > 0) {
-            // MATCH FOUND — prefer same latency bucket; fall back to any after 10s wait
+            // MATCH FOUND — prefer same latency bucket + similar ELO; fall back to any after 10s wait
             const rttMs = Date.now() - (socket.handshake.issued || Date.now());
             const myBucket = rttMs < 120 ? 'fast' : rttMs < 350 ? 'medium' : 'slow';
+            const myElo = userProfile?.elo || userProfile?.chessElo || userProfile?.checkersElo || 1000;
             const now = Date.now();
-            const sameBucketIdx = queue.findIndex(e => e.latencyBucket === myBucket);
-            const anyStaleIdx = queue.findIndex(e => now - (e.queuedAt || 0) >= 10000);
-            const chosenIdx = sameBucketIdx !== -1 ? sameBucketIdx : (anyStaleIdx !== -1 ? anyStaleIdx : 0);
+
+            // Priority order:
+            // 1. Same bucket + similar ELO (±200)
+            // 2. Same bucket + any ELO after 5s wait
+            // 3. Any bucket + similar ELO (±400)
+            // 4. Any after 10s wait
+            const sameBucketCloseElo = queue.findIndex(e =>
+                e.latencyBucket === myBucket && Math.abs((e.userProfile?.elo || 1000) - myElo) <= 200
+            );
+            const sameBucketAny = queue.findIndex(e =>
+                e.latencyBucket === myBucket && now - (e.queuedAt || 0) >= 5000
+            );
+            const anyCloseElo = queue.findIndex(e =>
+                Math.abs((e.userProfile?.elo || 1000) - myElo) <= 400
+            );
+            const anyStaleIdx2 = queue.findIndex(e => now - (e.queuedAt || 0) >= 10000);
+
+            const chosenIdx = sameBucketCloseElo !== -1 ? sameBucketCloseElo
+                : sameBucketAny !== -1 ? sameBucketAny
+                : anyCloseElo !== -1 ? anyCloseElo
+                : anyStaleIdx2 !== -1 ? anyStaleIdx2
+                : 0;
             const opponent = queue.splice(chosenIdx, 1)[0];
             const opponentId = opponent.userProfile.id;
             const roomId = privateRoomId || generateRoomId();
@@ -4639,7 +4743,9 @@ io.on('connection', (socket) => {
                                     rematchStreak: 0,
                                     matchSequence: 0
                                 };
-                                room.gameState.difficulty = 'hard';
+                                room.gameState.difficulty = (me.userProfile.elo || 1000) < 1000 ? 'easy'
+                                    : (me.userProfile.elo || 1000) < 1400 ? 'medium'
+                                    : 'hard';
 
                                 if (stake > 0) {
                                     await db.runTransaction(async (tx) => {
@@ -4801,7 +4907,7 @@ io.on('connection', (socket) => {
             // --- Chess: use server-authoritative per-player timers ---
             if (room.gameType === 'Chess') {
                 const opponentId = room.players.find(id => id !== userId);
-                const opponentTime = room.gameState?.timers?.[opponentId] ?? 600;
+                const opponentTime = room.gameState?.timers?.[opponentId] ?? 900;
 
                 // Extra server-side check: also deduct any time that's elapsed since
                 // the last move (opponent is mid-turn but hasn't submitted yet).
@@ -5232,7 +5338,7 @@ io.on('connection', (socket) => {
                     }
 
                     // Deduct elapsed time from the player who just moved (they held the clock)
-                    const prevTime = room.gameState.timers[userId] ?? 600;
+                    const prevTime = room.gameState.timers[userId] ?? 900;
                     const newTime = Math.max(0, prevTime - elapsedSec);
                     room.gameState.timers[userId] = newTime;
                     room.gameState.lastMoveTime = now;
@@ -5245,6 +5351,29 @@ io.on('connection', (socket) => {
                         return;
                     }
                 }
+                // --- Cheat detection: move quality tracking ---
+                if (room.gameType === 'Chess') {
+                    // Track material advantage before and after each move
+                    room.gameState._evalSnapshots = room.gameState._evalSnapshots || [];
+                    try {
+                        const beforeFen = room.gameState.fen;
+                        const afterFen = action.newState?.fen;
+                        if (beforeFen && afterFen) {
+                            const beforeMat = getMaterialCount(beforeFen);
+                            const afterMat = getMaterialCount(afterFen);
+                            // Positive = gained material, Negative = lost material
+                            const materialDelta = (afterMat - beforeMat) / 100; // normalize to pawns
+                            room.gameState._evalSnapshots.push({
+                                player: userId,
+                                before: beforeMat,
+                                after: afterMat,
+                                delta: materialDelta
+                            });
+                            if (room.gameState._evalSnapshots.length > 40) room.gameState._evalSnapshots.shift();
+                        }
+                    } catch (_) {}
+                }
+
                 // --- End chess validation ---
 
                 // --- Bug D fix: Pool Server-side Move Validation (Anti-Cheat) ---

@@ -59,10 +59,17 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
                     </section>
 
                     <section>
-                        <h3 className="text-white font-bold text-lg mb-2">4. Your Rights</h3>
-                        <p className="leading-relaxed">
-                            You have the right to request the deletion of your account and associated data at any time via the Profile settings or by contacting support.
+                        <h3 className="text-white font-bold text-lg mb-2">5. Anti-Cheat & Fair Play Monitoring</h3>
+                        <p className="leading-relaxed mb-2">
+                            To protect all players and maintain a fair gaming environment, we automatically monitor gameplay for signs of unauthorized assistance:
                         </p>
+                        <ul className="list-disc pl-5 space-y-1">
+                            <li><strong>Move Quality Analysis:</strong> We analyze chess and checkers moves for patterns consistent with computer engine use, including move accuracy rates and material blunder frequency.</li>
+                            <li><strong>Behavioral Patterns:</strong> We track win rates, game completion patterns, and statistical anomalies that may indicate automated play.</li>
+                            <li><strong>Consequences:</strong> Accounts flagged for suspicious activity will have withdrawals temporarily disabled pending manual review. Confirmed violations may result in permanent account suspension and forfeiture of winnings obtained through cheating.</li>
+                            <li><strong>Data Used:</strong> Game moves, timing data, and match outcomes are processed for anti-cheat purposes. This data is not shared with third parties.</li>
+                        </ul>
+                        <p className="leading-relaxed mt-2">By using our platform, you consent to this fair play monitoring. You may appeal any automated flag by contacting support.</p>
                     </section>
 
                     <div className="pt-8 mt-8 border-t border-white/10 text-center text-xs text-slate-500">

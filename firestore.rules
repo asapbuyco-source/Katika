@@ -51,12 +51,9 @@ service cloud.firestore {
     match /games/{gameId} {
       allow read: if isAuth();
       allow create: if false;
-      // [Phase 1.2] Restrict client updates to only gameState and turn fields.
-      // Players can update their own game's state during active play.
-      // status and winner changes go through the authoritative server socket path,
-      // not client Firestore writes.
-      allow update: if isAuth() && request.auth.uid in resource.data.players
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['gameState', 'turn', 'updatedAt']);
+      // Live game state is server-authoritative through Socket.IO/Admin SDK.
+      // Clients must not mutate persisted state directly.
+      allow update: if false;
       allow delete: if false;
     }
 

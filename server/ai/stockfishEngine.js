@@ -93,7 +93,7 @@ function handleEngineOutput(line) {
         } else {
             resolve(null);
         }
-        
+
         processQueue();
     }
 }

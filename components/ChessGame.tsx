@@ -328,8 +328,8 @@ export const ChessGame: React.FC<ChessGameProps> = ({ table, user, onGameEnd, so
 
     // BUG 3 FIX: Read time control from table (tournament can specify custom limits)
     // Fallback: 10 min base, +3s increment (standard rapid)
-    const baseTime: number = (table as any).timeControl?.base ?? 600;
-    const TIMER_INCREMENT: number = (table as any).timeControl?.increment ?? 3;
+    const baseTime: number = (table as any).timeControl?.base ?? 900;
+    const TIMER_INCREMENT: number = (table as any).timeControl?.increment ?? 5;
 
     // Initialise timer from table's time control (handles tournament custom time limits)
     const [timeRemaining, setTimeRemaining] = useState({ w: baseTime, b: baseTime });

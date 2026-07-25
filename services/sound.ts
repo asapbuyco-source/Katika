@@ -114,7 +114,11 @@ export const playSFX = (type: SFXType) => {
                 playTone(800, 'sine', 0.1, 0.05);
                 break;
             case 'move':
-                playAudioFile('Move.mp3', () => playTone(200, 'triangle', 0.1, 0.1));
+                playAudioFile('Move.mp3', () => {
+                    playTone(80, 'triangle', 0.08, 0.05);  // deep thud — wooden piece base
+                    playTone(600, 'sine', 0.04, 0.02, 0.01); // bright tap — piece contact
+                    playTone(1200, 'sine', 0.02, 0.01, 0.03); // crisp click — finality
+                });
                 break;
             case 'capture':
                 playAudioFile('Capture.mp3', () => {
