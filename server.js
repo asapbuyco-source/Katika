@@ -4287,7 +4287,7 @@ io.on('connection', (socket) => {
             matchSequence: 0
         };
         const userElo = userData.elo || 1000;
-        room.gameState.difficulty = difficulty || (userElo < 1000 ? 'easy' : userElo < 1400 ? 'medium' : 'hard');
+        room.gameState.difficulty = difficulty || (userElo < 1200 ? 'easy' : userElo < 1600 ? 'medium' : 'hard');
         rooms.set(roomId, room);
         persistRoomToFirestore(roomId, room);
         socket.join(roomId);
@@ -4764,8 +4764,9 @@ io.on('connection', (socket) => {
                                     rematchStreak: 0,
                                     matchSequence: 0
                                 };
-                                room.gameState.difficulty = (me.userProfile.elo || 1000) < 1000 ? 'easy'
-                                    : (me.userProfile.elo || 1000) < 1400 ? 'medium'
+                                // Stake-based difficulty: higher stakes = harder bot, not exploitable by ELO tanking
+                                room.gameState.difficulty = stake <= 100 ? 'easy'
+                                    : stake <= 500 ? 'medium'
                                     : 'hard';
 
                                 if (stake > 0) {
