@@ -718,10 +718,21 @@ export const Lobby: React.FC<LobbyProps> = ({ user, setView, onQuickMatch, initi
                             </button>
                         </div>
 
+                        {/* Placement Notice */}
+                        {(user?.gamesPlayed || 0) === 0 && (
+                            <div className="bg-indigo-500/20 border border-indigo-500/50 p-4 rounded-xl text-indigo-300 text-sm flex items-start gap-3 mb-6">
+                                <Bot size={24} className="flex-shrink-0" />
+                                <div>
+                                    <p className="font-bold">Welcome to {activeGameData.name}!</p>
+                                    <p>Your first match is a free placement match against the Katika Trainer bot. This allows you to learn the game risk-free before playing for real money stakes.</p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Tiers Grid */}
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                            {GAME_TIERS.map((tier, idx) => {
-                                const isPopular = tier.stake === 500;
+                            {((user?.gamesPlayed || 0) === 0 ? [{ id: 'tier-placement', name: 'Placement Match', stake: 0, potentialWin: 0, playersOnline: 1, speed: 'Instant', minElo: 0 }] : GAME_TIERS).map((tier: any, idx: number) => {
+                                const isPopular = tier.stake === 500 && (user?.gamesPlayed || 0) > 0;
                                 return (
                                     <motion.div
                                         key={tier.id}
