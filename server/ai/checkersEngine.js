@@ -54,10 +54,11 @@ function applyMove(pieces, move) {
             
             const captured = newPieces.find(p => p.id === step.jumpId);
             if (captured) captured.captured = true;
-            
-            if (step.r === promotionRow && !piece.isKing) {
-                piece.isKing = true;
-            }
+        }
+        
+        // Promote ONLY if the turn ends on the promotion row
+        if (piece.r === promotionRow && !piece.isKing) {
+            piece.isKing = true;
         }
     } else {
         // Single move or single jump without fullSequence
@@ -124,6 +125,7 @@ function minimax(pieces, depth, alpha, beta, isMaximizing, playerId, opponentId,
 
     const currentPlayer = isMaximizing ? playerId : opponentId;
     const moves = getAllMoves(pieces, currentPlayer);
+    moves.sort((a, b) => (b.isJump ? 1 : 0) - (a.isJump ? 1 : 0)); // Move ordering
 
     if (moves.length === 0) {
         return isMaximizing ? -9999 : 9999;
@@ -173,6 +175,7 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000,
 
         const allMoves = getAllMoves(currentPieces, botId, mustJumpFrom);
         if (allMoves.length === 0) return null;
+        allMoves.sort((a, b) => (b.isJump ? 1 : 0) - (a.isJump ? 1 : 0)); // Move ordering
 
         // If there's only one forced move, take it instantly without search
         if (allMoves.length === 1 && allMoves[0].isJump) {
@@ -194,7 +197,7 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000,
         } else if (difficulty === 'medium') {
             depth = 6 + eloBoost;
         } else {
-            depth = 8 + eloBoost;
+            depth = 10 + eloBoost; // Increased depth for hard mode
         }
 
         const maxTime = difficulty === 'easy' ? 900 : difficulty === 'medium' ? 1500 : 2400;
@@ -225,7 +228,7 @@ export function getCheckersEngineMove(pieces, botId, difficulty, userElo = 1000,
             if (Date.now() - startTime > maxTime) break;
         }
 
-        const mistakeChance = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.12 : 0.04;
+        const mistakeChance = difficulty === 'easy' ? 0.35 : difficulty === 'medium' ? 0.12 : 0;
         if (Math.random() < mistakeChance && allMoves.length > 1) {
             const candidates = allMoves.filter(m => m !== bestMove);
             bestMove = candidates[Math.floor(Math.random() * candidates.length)] || bestMove;

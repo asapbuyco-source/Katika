@@ -301,6 +301,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthenticated, onNavig
                                         </div>
                                     </motion.div>
                                 )}
+
+                                {isRegistering && (
+                                    <label className="flex items-start gap-3 rounded-xl border border-white/10 bg-white/5 p-3 text-left text-xs text-slate-300">
+                                        <input
+                                            type="checkbox"
+                                            checked={eligibilityConfirmed}
+                                            onChange={(e) => setEligibilityConfirmed(e.target.checked)}
+                                            className="mt-0.5 h-4 w-4 accent-gold-500"
+                                        />
+                                        <span>{t('confirm_18_plus')}</span>
+                                    </label>
+                                )}
                             </div>
 
                             <div className="flex gap-3">

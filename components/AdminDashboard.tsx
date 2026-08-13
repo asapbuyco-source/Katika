@@ -554,9 +554,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ user }) => {
                                                 </div>
                                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
                                                     <div>
-                                                        <div className="text-xs text-slate-500 uppercase font-bold">User</div>
+                                                        <div className="text-xs text-slate-500 uppercase font-bold">User & Game Stats</div>
                                                         <div className="text-white font-bold truncate">{withdrawal.userSnapshot?.name || 'Unknown user'}</div>
-                                                        <div className="text-xs text-slate-500 font-mono truncate">{withdrawal.userId}</div>
+                                                        <div className="text-xs text-slate-500 font-mono truncate mb-1">{withdrawal.userId}</div>
+                                                        <div className="flex flex-wrap gap-1 mt-1">
+                                                            <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] text-slate-300 border border-white/10">Games: {withdrawal.userSnapshot?.gamesPlayed || 0}</span>
+                                                            <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] text-slate-300 border border-white/10">Checkers: {withdrawal.userSnapshot?.checkersElo || withdrawal.userSnapshot?.elo || 1000}</span>
+                                                            <span className="px-1.5 py-0.5 bg-white/10 rounded text-[10px] text-slate-300 border border-white/10">Chess: {withdrawal.userSnapshot?.chessElo || withdrawal.userSnapshot?.elo || 1000}</span>
+                                                        </div>
                                                     </div>
                                                     <div>
                                                         <div className="text-xs text-slate-500 uppercase font-bold">Mobile Money</div>

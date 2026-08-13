@@ -3769,8 +3769,8 @@ function processBotAction(roomId, botId, action) {
             const lastMoveTime = room.gameState.lastMoveTime || now;
             if (!room.gameState.timers) {
                 room.gameState.timers = {
-                    [room.players[0]]: 900,
-                    [room.players[1]]: 900
+                    [room.players[0]]: 600,
+                    [room.players[1]]: 600
                 };
             }
             const elapsed = Math.round((now - lastMoveTime) / 1000);
@@ -3865,15 +3865,15 @@ function processBotAction(roomId, botId, action) {
             movedPiece.c = action.toC;
             room.gameState.lastMove = { fromR: action.fromR, fromC: action.fromC, toR: action.toR, toC: action.toC, isJump: !!validMove.isJump, playerId: botId };
 
-            const promotionRow = isPlayer1 ? 0 : 9;
-            if (!movedPiece.isKing && action.toR === promotionRow) {
-                movedPiece.isKing = true;
-            }
-
             let hasMoreJumps = false;
             if (validMove.isJump) {
                 const { hasJump: canContinue } = getValidMoveSequences(botId, pieces, forwardDir, movedPiece.id);
                 hasMoreJumps = canContinue;
+            }
+
+            const promotionRow = isPlayer1 ? 0 : 9;
+            if (!movedPiece.isKing && action.toR === promotionRow && !hasMoreJumps) {
+                movedPiece.isKing = true;
             }
 
             if (!hasMoreJumps) {
@@ -3888,6 +3888,24 @@ function processBotAction(roomId, botId, action) {
                     endGame(roomId, botId, reason);
                     return;
                 }
+            }
+            // Server-authoritative Checkers timer
+            const now = Date.now();
+            const lastMoveTime = room.gameState.lastMoveTime || now;
+            const elapsedSec = Math.round((now - lastMoveTime) / 1000);
+            
+            if (!room.gameState.timers) {
+                room.gameState.timers = { [room.players[0]]: 600, [room.players[1]]: 600 };
+            }
+            const prevTime = room.gameState.timers[botId] ?? 600;
+            const newTime = Math.max(0, prevTime - elapsedSec);
+            room.gameState.timers[botId] = newTime;
+            room.gameState.lastMoveTime = now;
+
+            if (newTime <= 0) {
+                const oppId = room.players.find(id => id !== botId);
+                endGame(roomId, oppId, 'Timeout');
+                return;
             }
 
             room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
@@ -4498,9 +4516,15 @@ io.on('connection', (socket) => {
         }
 
         // --- KATIKA TRAINER (PLACEMENT MATCH) INTERCEPT ---
+        let consecutiveBotWins = 0;
+        let consecutiveLosses = 0;
         if (!privateRoomId && db) {
             try {
                 const uDoc = await db.collection('users').doc(userId).get();
+                if (uDoc.exists) {
+                    consecutiveBotWins = uDoc.data().consecutiveBotWins || 0;
+                    consecutiveLosses = uDoc.data().consecutiveLosses || 0;
+                }
                 const gamesPlayed = uDoc.exists ? (uDoc.data().gamesPlayed || 0) : 0;
                 if (gamesPlayed === 0) {
                     // Force 0 stake placement match
@@ -4764,10 +4788,33 @@ io.on('connection', (socket) => {
                                     rematchStreak: 0,
                                     matchSequence: 0
                                 };
-                                // Stake-based difficulty: higher stakes = harder bot, not exploitable by ELO tanking
-                                room.gameState.difficulty = stake <= 100 ? 'easy'
-                                    : stake <= 500 ? 'medium'
-                                    : 'hard';
+                                // Dynamic Difficulty Adjustment (DDA)
+                                // Base difficulty is set by stake amount.
+                                // Win streaks push difficulty UP; loss streaks push it DOWN.
+                                // This keeps games engaging and extends player session length.
+                                //
+                                // Streak tiers:
+                                //  3+ wins  → always Hard
+                                //  2  wins  → bump up one tier (Easy→Medium, Medium→Hard)
+                                //  0-1 wins → stake-based base difficulty
+                                //  2+ losses → drop one tier (Hard→Medium, Medium→Easy)
+                                //  3+ losses → always Easy
+                                let diff = stake <= 100 ? 'easy' : stake <= 500 ? 'medium' : 'hard';
+
+                                if (consecutiveBotWins >= 3) {
+                                    diff = 'hard';
+                                } else if (consecutiveBotWins === 2) {
+                                    if (diff === 'easy') diff = 'medium';
+                                    else if (diff === 'medium') diff = 'hard';
+                                } else if (consecutiveLosses >= 3) {
+                                    diff = 'easy';
+                                } else if (consecutiveLosses === 2) {
+                                    if (diff === 'hard') diff = 'medium';
+                                    else if (diff === 'medium') diff = 'easy';
+                                }
+
+                                room.gameState.difficulty = diff;
+                                console.log(`[DDA] ${userId} | wins=${consecutiveBotWins} losses=${consecutiveLosses} stake=${stake} → difficulty=${diff}`);
 
                                 if (stake > 0) {
                                     await db.runTransaction(async (tx) => {
@@ -5156,29 +5203,29 @@ io.on('connection', (socket) => {
                 setTimeout(() => {
                     const latestRoom = rooms.get(roomId);
                     if (!latestRoom || latestRoom.status !== 'active') return;
-                    const total1 = room.gameState.roundRolls[p1][0] + room.gameState.roundRolls[p1][1];
-                    const total2 = room.gameState.roundRolls[p2][0] + room.gameState.roundRolls[p2][1];
+                    const total1 = latestRoom.gameState.roundRolls[p1][0] + latestRoom.gameState.roundRolls[p1][1];
+                    const total2 = latestRoom.gameState.roundRolls[p2][0] + latestRoom.gameState.roundRolls[p2][1];
 
-                    if (total1 > total2) room.gameState.scores[p1] = (room.gameState.scores[p1] || 0) + 1;
-                    else if (total2 > total1) room.gameState.scores[p2] = (room.gameState.scores[p2] || 0) + 1;
+                    if (total1 > total2) latestRoom.gameState.scores[p1] = (latestRoom.gameState.scores[p1] || 0) + 1;
+                    else if (total2 > total1) latestRoom.gameState.scores[p2] = (latestRoom.gameState.scores[p2] || 0) + 1;
 
-                    room.gameState.roundState = 'scored';
-                    emitGameUpdate(roomId, room);
+                    latestRoom.gameState.roundState = 'scored';
+                    emitGameUpdate(roomId, latestRoom);
 
                     setTimeout(() => {
-                        const latestRoom = rooms.get(roomId);
-                        if (!latestRoom || latestRoom.status !== 'active') return;
-                        if (room.gameState.scores[p1] >= 3 || room.gameState.scores[p2] >= 3) {
-                            const winner = room.gameState.scores[p1] >= 3 ? p1 : p2;
+                        const lr = rooms.get(roomId);
+                        if (!lr || lr.status !== 'active') return;
+                        if (lr.gameState.scores[p1] >= 3 || lr.gameState.scores[p2] >= 3) {
+                            const winner = lr.gameState.scores[p1] >= 3 ? p1 : p2;
                             endGame(roomId, winner, 'Score Limit Reached');
-                        } else if ((room.gameState.currentRound || 1) >= 20) {
+                        } else if ((lr.gameState.currentRound || 1) >= 20) {
                             endGame(roomId, null, 'Draw');
                         } else {
-                            room.gameState.currentRound++;
-                            room.gameState.roundRolls = {};
-                            room.gameState.roundState = 'waiting';
-                            room.turn = room.gameState.currentRound % 2 === 0 ? p2 : p1;
-                            emitGameUpdate(roomId, room);
+                            lr.gameState.currentRound = (lr.gameState.currentRound || 1) + 1;
+                            lr.gameState.roundRolls = {};
+                            lr.gameState.roundState = 'waiting';
+                            lr.turn = lr.gameState.currentRound % 2 === 0 ? p2 : p1;
+                            emitGameUpdate(roomId, lr);
                         }
                     }, 1500);
 
@@ -5228,11 +5275,6 @@ io.on('connection', (socket) => {
                 movedPiece.r = toR;
                 movedPiece.c = toC;
 
-                const promotionRow = isPlayer1 ? 0 : 9;
-                if (!movedPiece.isKing && toR === promotionRow) {
-                    movedPiece.isKing = true;
-                }
-
                 // 4. Check for continuation jumps or game over
                 const opponentId = room.players.find(id => id !== userId);
                 
@@ -5242,6 +5284,11 @@ io.on('connection', (socket) => {
                     hasMoreJumps = canContinue;
                 }
 
+                const promotionRow = isPlayer1 ? 0 : 9;
+                if (!movedPiece.isKing && toR === promotionRow && !hasMoreJumps) {
+                    movedPiece.isKing = true;
+                }
+
                 if (!hasMoreJumps) {
                     // Check if opponent has any legal moves left
                     const oppForwardDir = isPlayer1 ? 1 : -1;
@@ -5249,8 +5296,32 @@ io.on('connection', (socket) => {
                     
                     if (oppMoves.length === 0) {
                         const opponentPieces = updatedPieces.filter(p => p.owner === opponentId);
+                        const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
+                        endGame(roomId, userId, reason);
+                        return;
+                    }
+                }
+
                 room.gameState.pieces = updatedPieces;
                 room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
+                
+                // Server-authoritative Checkers timer
+                const now = Date.now();
+                const lastMoveTime = room.gameState.lastMoveTime || now;
+                const elapsedSec = Math.round((now - lastMoveTime) / 1000);
+                
+                if (!room.gameState.timers) {
+                    room.gameState.timers = { [room.players[0]]: 600, [room.players[1]]: 600 };
+                }
+                const prevTime = room.gameState.timers[userId] ?? 600;
+                const newTime = Math.max(0, prevTime - elapsedSec);
+                room.gameState.timers[userId] = newTime;
+                room.gameState.lastMoveTime = now;
+
+                if (newTime <= 0) {
+                    endGame(roomId, opponentId, 'Timeout');
+                    return;
+                }
 
                 // Checkers move-quality tracking (anti-cheat)
                 room.gameState._evalSnapshots = room.gameState._evalSnapshots || [];
@@ -5261,18 +5332,10 @@ io.on('connection', (socket) => {
                     player: userId,
                     piecesCaptured,
                     wasJump: !!validMove.isJump,
-                    timeSpentSec: Math.round((Date.now() - (room.gameState.lastMoveTime || Date.now())) / 1000)
+                    timeSpentSec: elapsedSec
                 });
                 if (room.gameState._evalSnapshots.length > 40) room.gameState._evalSnapshots.shift();
-                        io.to(roomId).emit('game_update', sanitizeRoomForClient(room, roomId));
-                        const reason = opponentPieces.length === 0 ? 'All pieces captured' : 'No legal moves (stalemate)';
-                        endGame(roomId, userId, reason);
-                        return;
-                    }
-                }
 
-                room.gameState.pieces = updatedPieces;
-                room.gameState.lastMove = { fromR, fromC, toR, toC, isJump: !!validMove.isJump, playerId: userId };
                 room.gameState.mustJumpFrom = hasMoreJumps ? movedPiece.id : null;
                 // Write turn to BOTH room.turn (top-level) AND gameState.turn so clients
                 // reading either location receive the correct value.
