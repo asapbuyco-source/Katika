@@ -4753,6 +4753,12 @@ io.on('connection', (socket) => {
                         try {
                             // Check if AI Host is globally enabled (admin toggle)
                             if (!(await isAIHostEnabled())) return;
+                            
+                            // SAFETY: Disabling AI Host for real money Checkers because there is no perfect server-side library like Stockfish
+                            if (gameType === 'Checkers' && stake > 0) {
+                                console.log(`[Matchmaking] AI Host disabled for real money Checkers (stake=${stake}). Waiting for human.`);
+                                return;
+                            }
 
                             const hostRef = db.collection('users').doc('katika_host_account');
                             const hostSnap = await hostRef.get();
